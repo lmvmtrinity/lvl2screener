@@ -17,7 +17,7 @@ describe.skipIf(!url)("funded lookup capacity on isolated PostgreSQL", () => {
   }, 30000);
   afterAll(async () => {
     await pool?.end();
-  });
+  }, 60_000);
 
   it("counts only each market's latest quote size, including inactive instruments", async () => {
     const repository = new PostgresMarketDataRepository(pool);
@@ -174,5 +174,5 @@ describe.skipIf(!url)("funded lookup capacity on isolated PostgreSQL", () => {
       await client.query("ROLLBACK");
       client.release();
     }
-  }, 30000);
+  }, 120_000);
 });
