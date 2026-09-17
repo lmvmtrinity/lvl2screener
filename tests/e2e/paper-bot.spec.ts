@@ -536,10 +536,11 @@ test.describe("paper bot: at-a-glance status indicator", () => {
 
     const indicator = page.locator(".nav-bot-status");
     await expect(indicator).toBeVisible();
-    // The old run now closes from its first persisted actionable bid. Any
-    // remaining repair backlog must still read as attention, never healthy.
-    await expect(indicator).toContainText("BOT · CATCHING UP");
-    await expect(indicator.locator(".bot-dot.attention")).toHaveCount(1);
+    // Startup reconciliation repaired the durable fixture, but this closed
+    // mock session never receives a live quote cycle. The status must stay at
+    // STARTING rather than claiming the bot is live.
+    await expect(indicator).toContainText("BOT · STARTING");
+    await expect(indicator.locator(".bot-dot.idle")).toHaveCount(1);
 
     // The nav is chrome, not a view: it has to stay put when the operator
     // moves elsewhere, which is what makes it at-a-glance.
@@ -547,7 +548,7 @@ test.describe("paper bot: at-a-glance status indicator", () => {
     await expect(
       page.getByRole("heading", { name: "Daily candidate list" }),
     ).toBeVisible();
-    await expect(indicator).toContainText("BOT · CATCHING UP");
+    await expect(indicator).toContainText("BOT · STARTING");
   });
 
   test("carries the run's cohort identity and counts in its tooltip", async ({
@@ -575,6 +576,10 @@ test.describe("paper bot: BOT dashboard", () => {
     await expect(
       page.getByRole("heading", { name: "BOT evidence", exact: true }),
     ).toBeVisible();
+    await page.getByRole("button", { name: "Results", exact: true }).click();
+    await expect(
+      page.getByRole("heading", { name: "Independent evidence results" }),
+    ).toBeVisible();
   }
 
   test("renders accumulated forward evidence without errors", async ({
@@ -582,7 +587,6 @@ test.describe("paper bot: BOT dashboard", () => {
   }) => {
     await openBot(page);
     await expect(page.locator(".error-banner")).toHaveCount(0);
-    await expect(page.getByText("Forward paper evidence")).toBeVisible();
     await expect(
       page.getByRole("heading", { name: /Canonical performance/ }),
     ).toBeVisible();

@@ -150,6 +150,7 @@ test.describe("pre-commissioning operator workflow", () => {
     ).toBeVisible();
     await page.keyboard.press("Escape");
     await expect(page.getByLabel("Scanner filters")).toBeVisible();
+    await page.getByLabel("Scanner filters").click();
     await page.getByLabel("DATA READINESS").selectOption("WARMING");
     await expect(
       page
