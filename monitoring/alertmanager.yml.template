@@ -1,0 +1,15 @@
+global:
+  resolve_timeout: 5m
+
+route:
+  receiver: paper-bot-webhook
+  group_by: [alertname, job, instance, market_id]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+
+receivers:
+  - name: paper-bot-webhook
+    webhook_configs:
+      - url: '__ALERTMANAGER_WEBHOOK_URL__'
+        send_resolved: true

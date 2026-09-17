@@ -1,0 +1,26 @@
+/* Shared empty/loading states and the symbol-detail chart. The chart keeps local
+   CSS because its SVG geometry and scroll container are not utility-friendly. */
+
+.empty,
+.chart-empty,
+.loading {
+  padding: 60px 24px;
+  text-align: center;
+  color: var(--ink-700);
+}
+
+.chart-wrap {
+  padding: 12px;
+  overflow-x: auto;
+}
+
+.chart-wrap svg {
+  display: block;
+  min-width: 700px;
+  width: 100%;
+  height: auto;
+}
+
+.chart-wrap text {
+  font: 11px var(--mono);
+}

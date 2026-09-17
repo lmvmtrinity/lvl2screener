@@ -1,0 +1,11 @@
+# Explicit single-user workstation access. Never bind these dashboards publicly.
+# Use with docker-compose.yml and docker-compose.monitoring.yml.
+services:
+  prometheus:
+    ports:
+      - "127.0.0.1:9090:9090"
+  alertmanager:
+    ports:
+      - "127.0.0.1:9093:9093"
+    volumes:
+      - ./monitoring/alertmanager.local.yml:/etc/alertmanager/alertmanager.yml:ro

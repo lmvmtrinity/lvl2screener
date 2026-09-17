@@ -1,0 +1,99 @@
+# Versioned Trivy policy for the `container-scan` CI job (.github/workflows/ci.yml).
+#
+# The gate is enforced: a new HIGH/CRITICAL image vulnerability fails the build. Anything listed
+# here has been explicitly reviewed and accepted, and every entry carries an `expired_at` so the
+# acceptance lapses on its own and the CVE fails the build again unless it is re-reviewed. Prefer
+# fixing over ignoring -- most findings are stale base images, and bumping the pinned base tag or
+# adding the package upgrade to the runtime stage is the real fix.
+#
+# This file is wired only into the scanner image scan. The api and web images are expected to scan
+# completely clean, so nothing here can silently mask a finding in them.
+#
+# ---------------------------------------------------------------------------------------------
+# Reviewed 2026-08-31.
+#
+# All entries below are Debian `trixie` packages inherited from the `python:3.13-slim` base image
+# that have NO fixed version available from Debian security -- they cannot be resolved by the
+# `apt-get upgrade` already in services/scanner/Dockerfile, nor by moving to a newer base tag.
+#
+# Reachability: the scanner container's entrypoint is `uvicorn app.main:app`. It runs as a
+# non-root user, on an internal Compose network with no host port published (see the
+# verify:compose trust-boundary check), and its only input is authenticated JSON from the api
+# service. None of perl, gzip, ncurses, libacl or sqlite3 is invoked by the application or
+# reachable from that request path -- they are transitively present because they are `Essential`
+# or are linked by the CPython standard library.
+#
+# Re-review when these expire: check whether Debian has published fixes, and drop the entries
+# that have been fixed rather than extending the date wholesale.
+# ---------------------------------------------------------------------------------------------
+
+vulnerabilities:
+  # perl-base -- Essential:yes in Debian; cannot be removed without breaking dpkg. Perl is never
+  # executed by the scanner service.
+  - id: CVE-2026-13221
+    statement: "perl-base, no Debian fix available; perl is never executed in this image."
+    expired_at: 2026-11-30
+  - id: CVE-2026-42496
+    statement: "perl-base, no Debian fix available; perl is never executed in this image."
+    expired_at: 2026-11-30
+  - id: CVE-2026-8376
+    statement: "perl-base, no Debian fix available; perl is never executed in this image."
+    expired_at: 2026-11-30
+  - id: CVE-2026-42497
+    statement: "perl-base, no Debian fix available; perl is never executed in this image."
+    expired_at: 2026-11-30
+  - id: CVE-2026-48962
+    statement: "perl-base, no Debian fix available; perl is never executed in this image."
+    expired_at: 2026-11-30
+  - id: CVE-2026-57432
+    statement: "perl-base, no Debian fix available; perl is never executed in this image."
+    expired_at: 2026-11-30
+  - id: CVE-2026-57433
+    statement: "perl-base, no Debian fix available; perl is never executed in this image."
+    expired_at: 2026-11-30
+  - id: CVE-2026-9538
+    statement: "perl-base, no Debian fix available; perl is never executed in this image."
+    expired_at: 2026-11-30
+  # ncurses (libncursesw6 / libtinfo6 / ncurses-base / ncurses-bin) -- pulled in as a base
+  # dependency; the service has no TTY and never renders a terminal UI.
+  - id: CVE-2025-69720
+    statement: "ncurses, no Debian fix available; the service has no TTY and does not use ncurses."
+    expired_at: 2026-11-30
+  # libsqlite3-0 -- linked by CPython's stdlib `sqlite3` module. The scanner persists nothing; all
+  # state lives in Postgres, and `sqlite3` is never imported.
+  - id: CVE-2026-11822
+    statement: "libsqlite3-0, no Debian fix available; the scanner never imports sqlite3."
+    expired_at: 2026-11-30
+  - id: CVE-2026-11824
+    statement: "libsqlite3-0, no Debian fix available; the scanner never imports sqlite3."
+    expired_at: 2026-11-30
+
+  # gzip / libacl1 -- base utilities, not invoked by the service.
+  - id: CVE-2026-41992
+    statement: "gzip, no Debian fix available; gzip is never invoked by the service."
+    expired_at: 2026-11-30
+  - id: CVE-2026-54369
+    statement: "libacl1, no Debian fix available; the service does not manipulate POSIX ACLs."
+    expired_at: 2026-11-30
+
+  # libsystemd0 / libudev1 -- base libraries inherited from Debian; systemd-homed is not
+  # present/running and systemd is never invoked by the scanner service.
+  - id: CVE-2026-16742
+    statement: "libsystemd0/libudev1, no Debian fix available; systemd is never invoked by the service."
+    expired_at: 2026-11-30
+
+  # util-linux (util-linux / mount / login / libuuid1 / fdisk / bsdutils) -- base utilities inherited
+  # from Debian; the service runs unprivileged (tsxscanner), does not mount filesystems, and never
+  # invokes nsenter, mount helpers, or login utilities.
+  - id: CVE-2026-76642
+    statement: "util-linux, no Debian fix available; the service never executes mount helpers or runs privileged hooks."
+    expired_at: 2026-11-30
+  - id: CVE-2026-78408
+    statement: "util-linux, no Debian fix available; the service does not invoke nsenter or join cgroups."
+    expired_at: 2026-11-30
+  - id: CVE-2026-78409
+    statement: "util-linux, no Debian fix available; the service does not perform mounts."
+    expired_at: 2026-11-30
+  - id: CVE-2026-78410
+    statement: "util-linux, no Debian fix available; the service does not perform bind mounts."
+    expired_at: 2026-11-30

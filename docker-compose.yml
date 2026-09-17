@@ -1,0 +1,342 @@
+name: tsx-scanner
+
+# W5: default (Phase A) deployment posture is localhost/private. Only the web/nginx front door is
+# published on the host, and only on 127.0.0.1 -- Postgres, the scanner, and the API stay on the
+# internal Compose network with no host port at all. The browser reaches API/health/metrics/WS
+# traffic through nginx (apps/web/nginx.conf); nothing talks to the scanner except the api/worker
+# containers, and even they must present SCANNER_SERVICE_TOKEN. See docs/operations-runbook.md
+# "Deployment trust boundary" for the full rationale, the debug-ports override for local psql/
+# scanner access, and the optional "remote" profile (docker-compose.yml `web-remote` service +
+# apps/web/nginx.remote.conf) that adds TLS, operator login, CSRF, rate limits, and audit logging
+# on top of this same stack for an intentionally internet-reachable deployment.
+
+services:
+  postgres:
+    image: timescale/timescaledb:2.29.2-pg17
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-tsx_scanner}
+      POSTGRES_USER: ${POSTGRES_USER:-tsx_scanner}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-local_development_only}
+    # W5: no host port. Reach it with `docker compose exec postgres psql ...`, or layer
+    # docker-compose.debug-ports.yml (host-only, never used by the default or remote profile) for
+    # a directly reachable localhost port during local development.
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      # The bootstrap server listens only on its Unix socket. TCP readiness
+      # waits for initialization to finish and the final server to start.
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -h 127.0.0.1 -U $${POSTGRES_USER} -d $${POSTGRES_DB}",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    restart: unless-stopped
+
+  scanner:
+    build:
+      context: .
+      dockerfile: services/scanner/Dockerfile
+    environment:
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      SCANNER_SERVICE_TOKEN: ${SCANNER_SERVICE_TOKEN:-local-development-only-scanner-token}
+    # W5: no host port -- only api/worker on the internal network reach this, and only with a
+    # matching SCANNER_SERVICE_TOKEN (services/scanner/app/main.py rejects any other
+    # /internal/v1/* caller with 401).
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/ready', timeout=2)",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    environment:
+      API_HOST: 0.0.0.0
+      API_PORT: 3000
+      DATABASE_URL: postgresql://${POSTGRES_USER:-tsx_scanner}:${POSTGRES_PASSWORD:-local_development_only}@postgres:5432/${POSTGRES_DB:-tsx_scanner}
+      SCANNER_URL: http://scanner:8000
+      SCANNER_SERVICE_TOKEN: ${SCANNER_SERVICE_TOKEN:-local-development-only-scanner-token}
+      WEB_ORIGIN: ${WEB_ORIGIN:-http://localhost:${WEB_PORT:-5173}}
+      MARKET_DATA_MODE: ${MARKET_DATA_MODE:-mock}
+      EODHD_API_TOKEN: ${EODHD_API_TOKEN:-}
+      MASSIVE_API_KEY: ${MASSIVE_API_KEY:-}
+      QUESTRADE_REFRESH_TOKEN: ${QUESTRADE_REFRESH_TOKEN:-}
+      MARKET_DATA_POLL_MS: ${MARKET_DATA_POLL_MS:-2000}
+      DISCOVERY_POLL_MS: ${DISCOVERY_POLL_MS:-15000}
+      DISCOVERY_LEASE_MS: ${DISCOVERY_LEASE_MS:-600000}
+      DISCOVERY_WORKERS: ${DISCOVERY_WORKERS:-4}
+      DISCOVERY_COMPACTION_ENABLED: ${DISCOVERY_COMPACTION_ENABLED:-true}
+      DISCOVERY_COMPACTION_INTERVAL_MS: ${DISCOVERY_COMPACTION_INTERVAL_MS:-86400000}
+      DISCOVERY_INPUT_RETENTION_DAYS: ${DISCOVERY_INPUT_RETENTION_DAYS:-30}
+      DISCOVERY_SUMMARY_RETENTION_DAYS: ${DISCOVERY_SUMMARY_RETENTION_DAYS:-365}
+      DISCOVERY_FAST_FUNNEL_ENABLED: ${DISCOVERY_FAST_FUNNEL_ENABLED:-false}
+      QUOTE_BATCH_SIZE: ${QUOTE_BATCH_SIZE:-50}
+      UNIVERSE_MINIMUM_SIZE: ${UNIVERSE_MINIMUM_SIZE:-1}
+      UNIVERSE_MIN_PRICE: ${UNIVERSE_MIN_PRICE:-5}
+      UNIVERSE_MAX_PRICE: ${UNIVERSE_MAX_PRICE:-150}
+      UNIVERSE_MIN_MARKET_CAP: ${UNIVERSE_MIN_MARKET_CAP:-500000000}
+      UNIVERSE_MIN_AVERAGE_VOLUME: ${UNIVERSE_MIN_AVERAGE_VOLUME:-500000}
+      UNIVERSE_MIN_DOLLAR_VOLUME: ${UNIVERSE_MIN_DOLLAR_VOLUME:-20000000}
+      UNIVERSE_MIN_ATR_PCT: ${UNIVERSE_MIN_ATR_PCT:-1.5}
+      TSX_UNIVERSE_SYMBOLS: ${TSX_UNIVERSE_SYMBOLS:-}
+      ENABLED_MARKETS: ${ENABLED_MARKETS:-CA_TSX,US_EQUITIES}
+      US_MARKET_DATA_ENABLED: ${US_MARKET_DATA_ENABLED:-true}
+      US_PAPER_TRADING_ENABLED: ${US_PAPER_TRADING_ENABLED:-true}
+      US_UNIVERSE_SYMBOLS: ${US_UNIVERSE_SYMBOLS:-}
+      MARKET_BENCHMARK_SYMBOL: ${MARKET_BENCHMARK_SYMBOL:-XIU.TO}
+      SECTOR_BENCHMARK_SYMBOLS: '${SECTOR_BENCHMARK_SYMBOLS:-{"Basic Materials":"XMA.TO","Financial Services":"XFN.TO","Energy":"XEG.TO","Industrial":"XGI.TO","Technology":"XIT.TO","Utilities":"XUT.TO","Consumer Cyclical":"XCD.TO"}}'
+      US_MARKET_BENCHMARK_SYMBOL: ${US_MARKET_BENCHMARK_SYMBOL:-SPY}
+      US_SECTOR_BENCHMARK_SYMBOLS: '${US_SECTOR_BENCHMARK_SYMBOLS:-{"Technology":"XLK","Financial Services":"XLF","Energy":"XLE","Basic Materials":"XLB","Industrial":"XLI","Utilities":"XLU","Consumer Cyclical":"XLY"}}'
+      BENCHMARK_MAX_STALENESS_SECONDS: ${BENCHMARK_MAX_STALENESS_SECONDS:-30}
+      SESSION_TIMEZONE: ${SESSION_TIMEZONE:-America/Toronto}
+      US_SESSION_TIMEZONE: ${US_SESSION_TIMEZONE:-America/New_York}
+      PAPER_MODEL_TRAINING_ENABLED: ${PAPER_MODEL_TRAINING_ENABLED:-true}
+      PAPER_MODEL_TRAINING_CHECK_MS: ${PAPER_MODEL_TRAINING_CHECK_MS:-}
+      BACKTEST_AUTOMATION_ENABLED: ${BACKTEST_AUTOMATION_ENABLED:-false}
+      BACKTEST_AUTOMATION_MAX_OUTSTANDING: ${BACKTEST_AUTOMATION_MAX_OUTSTANDING:-2}
+      OPENING_RANGE_START: ${OPENING_RANGE_START:-09:30}
+      OPENING_RANGE_END: ${OPENING_RANGE_END:-09:45}
+      SCANNING_START: ${SCANNING_START:-09:45}
+      SCANNING_END: ${SCANNING_END:-16:00}
+      ENTRY_PREFERRED_START: ${ENTRY_PREFERRED_START:-10:00}
+      ENTRY_PREFERRED_END: ${ENTRY_PREFERRED_END:-11:30}
+      ENTRY_HARD_END: ${ENTRY_HARD_END:-16:00}
+      PAPER_BOT_FEE_PER_TRADE: ${PAPER_BOT_FEE_PER_TRADE:-0}
+      PAPER_BOT_SLIPPAGE_BPS: ${PAPER_BOT_SLIPPAGE_BPS:-2}
+      PAPER_BOT_RISK_BUDGET: ${PAPER_BOT_RISK_BUDGET:-100}
+      PAPER_BOT_RISK_BUDGET_CAD: ${PAPER_BOT_RISK_BUDGET_CAD:-50}
+      PAPER_BOT_RISK_BUDGET_USD: ${PAPER_BOT_RISK_BUDGET_USD:-25}
+      PAPER_FUNDED_CAD_ACCOUNT_ID: ${PAPER_FUNDED_CAD_ACCOUNT_ID:-}
+      PAPER_FUNDED_USD_ACCOUNT_ID: ${PAPER_FUNDED_USD_ACCOUNT_ID:-}
+      PAPER_FUNDED_INITIAL_CASH_CAD: ${PAPER_FUNDED_INITIAL_CASH_CAD:-10000}
+      PAPER_FUNDED_INITIAL_CASH_USD: ${PAPER_FUNDED_INITIAL_CASH_USD:-10000}
+      PAPER_FUNDED_DAILY_LOSS_LIMIT_CAD: ${PAPER_FUNDED_DAILY_LOSS_LIMIT_CAD:-200}
+      PAPER_FUNDED_DAILY_LOSS_LIMIT_USD: ${PAPER_FUNDED_DAILY_LOSS_LIMIT_USD:-100}
+      PAPER_BOT_MIN_NET_REWARD_RISK: ${PAPER_BOT_MIN_NET_REWARD_RISK:-1}
+      PAPER_BOT_MIN_STOP_FRICTION_MULTIPLE: ${PAPER_BOT_MIN_STOP_FRICTION_MULTIPLE:-2}
+      PAPER_BOT_MIN_TARGET_FRICTION_MULTIPLE: ${PAPER_BOT_MIN_TARGET_FRICTION_MULTIPLE:-3}
+      PAPER_BOT_MAX_SPREAD_PCT: ${PAPER_BOT_MAX_SPREAD_PCT:-0.5}
+      PAPER_COORDINATION_MAX_SYMBOL_NOTIONAL: ${PAPER_COORDINATION_MAX_SYMBOL_NOTIONAL:-10000}
+      PAPER_COORDINATION_MAX_SYMBOL_NOTIONAL_CAD: ${PAPER_COORDINATION_MAX_SYMBOL_NOTIONAL_CAD:-3000}
+      PAPER_COORDINATION_MAX_SYMBOL_NOTIONAL_USD: ${PAPER_COORDINATION_MAX_SYMBOL_NOTIONAL_USD:-1500}
+      PAPER_COORDINATION_MAX_SECTOR_NOTIONAL: ${PAPER_COORDINATION_MAX_SECTOR_NOTIONAL:-20000}
+      PAPER_COORDINATION_MAX_SECTOR_NOTIONAL_CAD: ${PAPER_COORDINATION_MAX_SECTOR_NOTIONAL_CAD:-5000}
+      PAPER_COORDINATION_MAX_SECTOR_NOTIONAL_USD: ${PAPER_COORDINATION_MAX_SECTOR_NOTIONAL_USD:-2500}
+      PAPER_COORDINATION_MAX_DISPLAYED_SIZE_PARTICIPATION: ${PAPER_COORDINATION_MAX_DISPLAYED_SIZE_PARTICIPATION:-0.25}
+      PAPER_COORDINATION_REQUIRE_FRESH_CONTEXT: ${PAPER_COORDINATION_REQUIRE_FRESH_CONTEXT:-true}
+      PAPER_COORDINATION_CONTEXT_REQUIREMENT: ${PAPER_COORDINATION_CONTEXT_REQUIREMENT:-MARKET_AND_SECTOR_REQUIRED}
+      PAPER_COORDINATION_CONTEXT_MAX_AGE_SECONDS: ${PAPER_COORDINATION_CONTEXT_MAX_AGE_SECONDS:-300}
+      PAPER_COORDINATION_VETO_ON_WEAK_CONTEXT: ${PAPER_COORDINATION_VETO_ON_WEAK_CONTEXT:-true}
+      PAPER_COORDINATION_COOLDOWN_MINUTES_AFTER_STOP: ${PAPER_COORDINATION_COOLDOWN_MINUTES_AFTER_STOP:-15}
+      PAPER_COORDINATION_MAX_OPEN_POSITIONS: ${PAPER_COORDINATION_MAX_OPEN_POSITIONS:-3}
+      PAPER_COORDINATION_MAX_TOTAL_OPEN_RISK: ${PAPER_COORDINATION_MAX_TOTAL_OPEN_RISK:-1000}
+      PAPER_COORDINATION_MAX_TOTAL_OPEN_RISK_CAD: ${PAPER_COORDINATION_MAX_TOTAL_OPEN_RISK_CAD:-150}
+      PAPER_COORDINATION_MAX_TOTAL_OPEN_RISK_USD: ${PAPER_COORDINATION_MAX_TOTAL_OPEN_RISK_USD:-75}
+      PAPER_COORDINATION_MAX_DAILY_LOSS: ${PAPER_COORDINATION_MAX_DAILY_LOSS:-1000}
+      PAPER_COORDINATION_MAX_DAILY_LOSS_CAD: ${PAPER_COORDINATION_MAX_DAILY_LOSS_CAD:-200}
+      PAPER_COORDINATION_MAX_DAILY_LOSS_USD: ${PAPER_COORDINATION_MAX_DAILY_LOSS_USD:-100}
+      PAPER_COORDINATION_DAILY_LOSS_LIMIT_TYPE: ${PAPER_COORDINATION_DAILY_LOSS_LIMIT_TYPE:-CUMULATIVE_LOSS}
+      PAPER_COORDINATION_RESERVE_REMAINING_DAILY_RISK: ${PAPER_COORDINATION_RESERVE_REMAINING_DAILY_RISK:-true}
+      PAPER_COORDINATION_MAX_CONSECUTIVE_STOPS: ${PAPER_COORDINATION_MAX_CONSECUTIVE_STOPS:-3}
+      PAPER_COORDINATION_MAX_HOLDING_MINUTES: ${PAPER_COORDINATION_MAX_HOLDING_MINUTES:-45}
+      PAPER_COORDINATION_MAX_HOLDING_MINUTES_BY_STRATEGY: "${PAPER_COORDINATION_MAX_HOLDING_MINUTES_BY_STRATEGY:-{}}"
+      PAPER_COORDINATION_STALLED_BREAKOUT_MINUTES: ${PAPER_COORDINATION_STALLED_BREAKOUT_MINUTES:-15}
+      PAPER_COORDINATION_STALLED_BREAKOUT_MIN_PROGRESS_R: ${PAPER_COORDINATION_STALLED_BREAKOUT_MIN_PROGRESS_R:-0.25}
+      APP_MASTER_KEY: ${APP_MASTER_KEY:-}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      # W5 Phase B: unset/false in the default profile (Phase A never shows a login screen). The
+      # remote profile must export these before `docker compose --profile remote up` -- see
+      # docs/operations-runbook.md "Remote-access profile".
+      REMOTE_ACCESS_ENABLED: ${REMOTE_ACCESS_ENABLED:-false}
+      OPERATOR_PASSWORD_HASH: ${OPERATOR_PASSWORD_HASH:-}
+      SESSION_SECRET: ${SESSION_SECRET:-}
+    # W5: no host port. The web/nginx container is the only published front door; it reverse
+    # proxies /api/, /health/, /metrics, and /ws to this service over the internal network.
+    depends_on:
+      postgres:
+        condition: service_healthy
+      scanner:
+        condition: service_healthy
+    healthcheck:
+      test:
+        ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:3000/health/ready"]
+      interval: 15s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+  worker:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    command: ["node", "apps/api/dist/worker.js"]
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-tsx_scanner}:${POSTGRES_PASSWORD:-local_development_only}@postgres:5432/${POSTGRES_DB:-tsx_scanner}
+      SCANNER_URL: http://scanner:8000
+      SCANNER_SERVICE_TOKEN: ${SCANNER_SERVICE_TOKEN:-local-development-only-scanner-token}
+      MARKET_DATA_MODE: ${MARKET_DATA_MODE:-mock}
+      # The worker loads the shared API configuration at startup. In live mode that
+      # configuration validates the refresh token even though the worker delegates
+      # market-data calls to the scanner, so forward the same deployment secret.
+      QUESTRADE_REFRESH_TOKEN: ${QUESTRADE_REFRESH_TOKEN:-}
+      ENABLED_MARKETS: ${ENABLED_MARKETS:-CA_TSX,US_EQUITIES}
+      US_MARKET_DATA_ENABLED: ${US_MARKET_DATA_ENABLED:-true}
+      US_PAPER_TRADING_ENABLED: ${US_PAPER_TRADING_ENABLED:-true}
+      PAPER_BOT_RISK_BUDGET_CAD: ${PAPER_BOT_RISK_BUDGET_CAD:-50}
+      PAPER_BOT_RISK_BUDGET_USD: ${PAPER_BOT_RISK_BUDGET_USD:-25}
+      PAPER_COORDINATION_MAX_SYMBOL_NOTIONAL_CAD: ${PAPER_COORDINATION_MAX_SYMBOL_NOTIONAL_CAD:-3000}
+      PAPER_COORDINATION_MAX_SYMBOL_NOTIONAL_USD: ${PAPER_COORDINATION_MAX_SYMBOL_NOTIONAL_USD:-1500}
+      PAPER_COORDINATION_MAX_SECTOR_NOTIONAL_CAD: ${PAPER_COORDINATION_MAX_SECTOR_NOTIONAL_CAD:-5000}
+      PAPER_COORDINATION_MAX_SECTOR_NOTIONAL_USD: ${PAPER_COORDINATION_MAX_SECTOR_NOTIONAL_USD:-2500}
+      PAPER_COORDINATION_MAX_TOTAL_OPEN_RISK_CAD: ${PAPER_COORDINATION_MAX_TOTAL_OPEN_RISK_CAD:-150}
+      PAPER_COORDINATION_MAX_TOTAL_OPEN_RISK_USD: ${PAPER_COORDINATION_MAX_TOTAL_OPEN_RISK_USD:-75}
+      PAPER_COORDINATION_MAX_DAILY_LOSS_CAD: ${PAPER_COORDINATION_MAX_DAILY_LOSS_CAD:-200}
+      PAPER_COORDINATION_MAX_DAILY_LOSS_USD: ${PAPER_COORDINATION_MAX_DAILY_LOSS_USD:-100}
+      PAPER_COORDINATION_DAILY_LOSS_LIMIT_TYPE: ${PAPER_COORDINATION_DAILY_LOSS_LIMIT_TYPE:-CUMULATIVE_LOSS}
+      PAPER_COORDINATION_RESERVE_REMAINING_DAILY_RISK: ${PAPER_COORDINATION_RESERVE_REMAINING_DAILY_RISK:-true}
+      SESSION_TIMEZONE: ${SESSION_TIMEZONE:-America/Toronto}
+      US_SESSION_TIMEZONE: ${US_SESSION_TIMEZONE:-America/New_York}
+      PAPER_MODEL_TRAINING_ENABLED: ${PAPER_MODEL_TRAINING_ENABLED:-true}
+      PAPER_MODEL_TRAINING_CHECK_MS: ${PAPER_MODEL_TRAINING_CHECK_MS:-}
+      BACKTEST_AUTOMATION_ENABLED: ${BACKTEST_AUTOMATION_ENABLED:-false}
+      BACKTEST_AUTOMATION_MAX_OUTSTANDING: ${BACKTEST_AUTOMATION_MAX_OUTSTANDING:-2}
+      OPENING_RANGE_START: ${OPENING_RANGE_START:-09:30}
+      OPENING_RANGE_END: ${OPENING_RANGE_END:-09:45}
+      SCANNING_START: ${SCANNING_START:-09:45}
+      SCANNING_END: ${SCANNING_END:-16:00}
+      ENTRY_PREFERRED_START: ${ENTRY_PREFERRED_START:-10:00}
+      ENTRY_PREFERRED_END: ${ENTRY_PREFERRED_END:-11:30}
+      ENTRY_HARD_END: ${ENTRY_HARD_END:-16:00}
+      BENCHMARK_MAX_STALENESS_SECONDS: ${BENCHMARK_MAX_STALENESS_SECONDS:-30}
+      APP_MASTER_KEY: ${APP_MASTER_KEY:-}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      RESEARCH_JOB_LEASE_MS: ${RESEARCH_JOB_LEASE_MS:-720000}
+      RESEARCH_JOB_POLL_MS: ${RESEARCH_JOB_POLL_MS:-2000}
+      # The worker never serves HTTP, but it shares apps/api/src/config.ts with the API process,
+      # so a remote-profile secret requirement (OPERATOR_PASSWORD_HASH/SESSION_SECRET) must be
+      # satisfied here too or the worker refuses to boot.
+      REMOTE_ACCESS_ENABLED: ${REMOTE_ACCESS_ENABLED:-false}
+      OPERATOR_PASSWORD_HASH: ${OPERATOR_PASSWORD_HASH:-}
+      SESSION_SECRET: ${SESSION_SECRET:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      scanner:
+        condition: service_healthy
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    # W5 Phase A: the only host-published port in the default profile, and only on loopback --
+    # this is what makes the deployment "safe for its documented single-workstation use". Set
+    # WEB_BIND_ADDRESS=0.0.0.0 only if you understand the exposure (better: use the `remote`
+    # profile's TLS+auth `web-remote` service instead).
+    ports:
+      - "${WEB_BIND_ADDRESS:-127.0.0.1}:${WEB_PORT:-5173}:8080"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:8080/"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /var/cache/nginx
+      - /var/run
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+  # W5 Phase B: optional remote-access front door. Same image and static bundle as `web`, a
+  # different (TLS-terminating, rate-limited) server block, and published on a real network
+  # interface instead of loopback. Only starts with `docker compose --profile remote up`, and
+  # only alongside the always-on `web` service unless you also override WEB_BIND_ADDRESS to stop
+  # publishing the unauthenticated loopback front door. Requires:
+  #   - a certificate/key at ${REMOTE_CERT_DIR:-./certs}/server.crt and server.key (self-signed
+  #     for evaluation, or a real cert -- see docs/operations-runbook.md);
+  #   - REMOTE_ACCESS_ENABLED=true, OPERATOR_PASSWORD_HASH, and SESSION_SECRET exported for the
+  #     api/worker services above.
+  web-remote:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    profiles: ["remote"]
+    volumes:
+      - ./apps/web/nginx.remote.conf:/etc/nginx/conf.d/default.conf:ro
+      - ${REMOTE_CERT_DIR:-./certs}:/etc/nginx/certs:ro
+    ports:
+      - "${REMOTE_BIND_ADDRESS:-0.0.0.0}:${REMOTE_PORT:-8443}:8443"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "-q",
+          "--spider",
+          "--no-check-certificate",
+          "https://127.0.0.1:8443/",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /var/cache/nginx
+      - /var/run
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  postgres_data:

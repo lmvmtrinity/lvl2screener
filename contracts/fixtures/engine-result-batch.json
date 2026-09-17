@@ -1,0 +1,668 @@
+{
+  "benchmarkReadiness": {
+    "market": null,
+    "sectors": []
+  },
+  "contexts": [],
+  "evaluations": [
+    {
+      "configVersion": "phase4-default-v1",
+      "entryReference": 111.39,
+      "entryWindow": null,
+      "estimatedRr": 12.027095525551708,
+      "featureSnapshot": {
+        "actionable": true,
+        "ask": 112.02,
+        "atr14": 2.0,
+        "atrPct": 1.7855548611731096,
+        "bid": 112.0,
+        "changeFromOpenAtr": 0.5095950450450476,
+        "changeFromOpenPct": 0.9099099099099145,
+        "closeAboveVwap": true,
+        "completedBarVwap": 111.17833333333333,
+        "completedBarVwapTimestamp": "2026-08-24T14:00:00Z",
+        "configVersion": "phase3-default-v1",
+        "consecutiveGreenCandles": 6,
+        "currentCumulativeVolume": 6000,
+        "dailyEmaContext": {
+          "ema13": 108.5,
+          "ema21": null,
+          "reason": "DAILY_EMA_HISTORY_UNAVAILABLE",
+          "slope13": null,
+          "slope21": null,
+          "sourceTimestamp": "2026-08-17T19:30:00Z",
+          "status": "UNAVAILABLE"
+        },
+        "dataStatus": "REALTIME",
+        "distanceFromOrhAtr": 0.33500000000000085,
+        "distanceFromVwapAtr": 0.41583333333333883,
+        "distanceFromVwapPct": 0.7480474313040709,
+        "featureVersion": "1.2.0",
+        "historicalMeanCumulativeVolume": 3000.0,
+        "instrumentId": "11111111-1111-4111-8111-111111111111",
+        "last3ClosesAboveVwap": 0,
+        "marketId": "CA_TSX",
+        "mid": 112.00999999999999,
+        "nearestResistance": {
+          "ageBars": 3,
+          "price": 114.0,
+          "provenance": {
+            "availableAt": "2026-08-24T13:55:00Z",
+            "levelId": "11111111-1111-4111-8111-111111111111:FiveMinutes:SWING_HIGH:2026-08-24T13:45:00+00:00",
+            "originAt": "2026-08-24T13:45:00Z"
+          },
+          "strength": 0.52,
+          "tests": 1,
+          "type": "SWING_HIGH"
+        },
+        "nearestSupport": {
+          "ageBars": 0,
+          "price": 111.49000000000001,
+          "provenance": null,
+          "strength": 0.7,
+          "tests": 1,
+          "type": "INTRADAY_HIGH"
+        },
+        "openingRange": {
+          "complete": true,
+          "high": 111.34,
+          "low": 110.8,
+          "mid": 111.07,
+          "volume": 3000,
+          "width": 0.5400000000000063,
+          "widthAtr": 0.2700000000000031,
+          "widthPct": 0.4861798865580321
+        },
+        "price": 111.39,
+        "recentMoveVelocityAtr": 0.14999999999999858,
+        "resistanceConfluence": {
+          "count": 1,
+          "levelTypes": [
+            "SWING_HIGH"
+          ],
+          "price": 114.0
+        },
+        "rollingReturn5mPct": 0.601760373630336,
+        "rsi14": null,
+        "rsiTimestamp": "2026-08-24T14:00:00Z",
+        "rvolAtTime": 2.0,
+        "spreadAbsolute": 0.01999999999999602,
+        "spreadPct": 0.017855548611727546,
+        "supportConfluence": {
+          "count": 2,
+          "levelTypes": [
+            "INTRADAY_HIGH",
+            "OPENING_RANGE_HIGH"
+          ],
+          "price": 111.49000000000001
+        },
+        "swingHighs": [
+          {
+            "ageBars": 3,
+            "price": 114.0,
+            "provenance": {
+              "availableAt": "2026-08-24T13:55:00Z",
+              "levelId": "11111111-1111-4111-8111-111111111111:FiveMinutes:SWING_HIGH:2026-08-24T13:45:00+00:00",
+              "originAt": "2026-08-24T13:45:00Z"
+            },
+            "strength": 0.52,
+            "tests": 1,
+            "type": "SWING_HIGH"
+          }
+        ],
+        "swingLows": [
+          {
+            "ageBars": 3,
+            "price": 107.0,
+            "provenance": {
+              "availableAt": "2026-08-24T13:55:00Z",
+              "levelId": "11111111-1111-4111-8111-111111111111:FiveMinutes:SWING_LOW:2026-08-24T13:45:00+00:00",
+              "originAt": "2026-08-24T13:45:00Z"
+            },
+            "strength": 0.52,
+            "tests": 1,
+            "type": "SWING_LOW"
+          }
+        ],
+        "symbol": "TEST.TO",
+        "timeframe": "OneMinute",
+        "timestamp": "2026-08-24T14:10:00Z",
+        "touchVwap": true,
+        "vwap": 111.17833333333333,
+        "vwapReclaim": false,
+        "vwapRejection": false,
+        "vwapSlopePct": 0.044993026080954894,
+        "warmingUp": []
+      },
+      "formationEvidence": {
+        "formationKey": null,
+        "retest": {
+          "impulseEndAt": "2026-08-24T14:05:00Z",
+          "impulseMeanVolume": 200.0,
+          "impulseStartAt": "2026-08-24T14:00:00Z",
+          "pullbackVolumeCount": 0,
+          "pullbackVolumeSum": 0.0,
+          "retestBarEnd": null,
+          "retestBarHigh": null,
+          "retestBarLow": null,
+          "supportRejectionConfirmed": false,
+          "volumeContractionRatio": null,
+          "volumeUnavailable": false
+        },
+        "rsiVwapReclaim": null,
+        "setupLevel": 111.34,
+        "stopLevel": 111.17299,
+        "strategy": "ORB_RETEST",
+        "version": "formation-evidence-v1"
+      },
+      "instrumentId": "11111111-1111-4111-8111-111111111111",
+      "kind": "SETUP",
+      "marketId": "CA_TSX",
+      "patternStopReference": 111.17299,
+      "profileId": "10000000-0000-4000-8000-000000000081",
+      "profileName": "ORB Standard",
+      "reasonCodes": [
+        "REALTIME_DATA",
+        "SPREAD_GOOD",
+        "RVOL_STRONG",
+        "ABOVE_VWAP",
+        "ORB_BREAKOUT_CONFIRMED",
+        "ORB_RETEST_CONFIRMED"
+      ],
+      "score": 77,
+      "scoreComponents": {
+        "confirmation": 20,
+        "liquidity": 15,
+        "pattern": 18,
+        "penalties": 0,
+        "structure": 15,
+        "timing": 9
+      },
+      "scoreExplanation": [
+        {
+          "detail": "Observed in this evaluation",
+          "group": "pattern",
+          "key": "ORB_BREAKOUT_CONFIRMED",
+          "label": "Volume-confirmed close above the opening range high",
+          "maximum": 18,
+          "points": 18,
+          "value": null
+        },
+        {
+          "detail": "Observed in this evaluation",
+          "group": "confirmation",
+          "key": "ORB_RETEST_CONFIRMED",
+          "label": "Retest held the opening range high on a completed bar",
+          "maximum": 20,
+          "points": 20,
+          "value": null
+        },
+        {
+          "detail": "Invalidation is only 0.11 ATR away and is likely to be hit by noise",
+          "group": "structure",
+          "key": "DISTANCE_TO_INVALIDATION",
+          "label": "Distance to invalidation",
+          "maximum": 8,
+          "points": 3,
+          "value": 0.10850500000000096
+        },
+        {
+          "detail": "Estimated reward/risk 12.03 against the nearest structural target",
+          "group": "structure",
+          "key": "RISK_REWARD_VALIDITY",
+          "label": "Risk/reward validity",
+          "maximum": 8,
+          "points": 8,
+          "value": 12.027095525551708
+        },
+        {
+          "detail": "Price is 0.42 ATR from VWAP; entries far above VWAP pay a worse price",
+          "group": "structure",
+          "key": "VWAP_EXTENSION",
+          "label": "Extension from VWAP",
+          "maximum": 4,
+          "points": 4,
+          "value": 0.41583333333333883
+        },
+        {
+          "detail": "Saturating curve on ATR 1.79% of price; 1.50% earns half the available points",
+          "group": "liquidity",
+          "key": "RANGE_AVAILABLE",
+          "label": "Range available",
+          "maximum": 4,
+          "points": 2,
+          "value": 1.7855548611731096
+        },
+        {
+          "detail": "Saturating curve on RVOL 2.00\u00d7; 1.50\u00d7 earns half the available points",
+          "group": "liquidity",
+          "key": "RELATIVE_VOLUME",
+          "label": "Relative volume",
+          "maximum": 8,
+          "points": 5,
+          "value": 2.0
+        },
+        {
+          "detail": "Spread 0.018% is at or below the preferred 0.15%",
+          "group": "liquidity",
+          "key": "SPREAD_QUALITY",
+          "label": "Spread quality",
+          "maximum": 8,
+          "points": 8,
+          "value": 0.017855548611727546
+        },
+        {
+          "detail": "Formation armed 5 min ago against a 20 min timeout",
+          "group": "timing",
+          "key": "SETUP_FRESHNESS",
+          "label": "Setup freshness",
+          "maximum": 7,
+          "points": 5,
+          "value": 5.0
+        },
+        {
+          "detail": "No session window is configured; scored neutral",
+          "group": "timing",
+          "key": "TIME_OF_DAY",
+          "label": "Time of day",
+          "maximum": 8,
+          "points": 4,
+          "value": null
+        }
+      ],
+      "scoreVersion": "setup-score-v1",
+      "setupInstanceId": "218d9ec6-44f7-55b1-bbbb-900c8888a8c3",
+      "setupScore": 77,
+      "signalSemanticsVersion": "setup-semantics-v2",
+      "state": "READY",
+      "stopPolicy": "HYBRID",
+      "stopReference": 111.17299,
+      "stopSelectionReason": "PATTERN",
+      "strategy": "ORB_RETEST",
+      "strategyVersion": "1.0.0",
+      "symbol": "TEST.TO",
+      "targetReference": 114.0,
+      "timestamp": "2026-08-24T14:10:00Z"
+    },
+    {
+      "configVersion": "phase4-default-v1",
+      "entryReference": null,
+      "entryWindow": null,
+      "estimatedRr": null,
+      "featureSnapshot": {
+        "actionable": true,
+        "ask": 112.02,
+        "atr14": 2.0,
+        "atrPct": 1.7855548611731096,
+        "bid": 112.0,
+        "changeFromOpenAtr": 0.5095950450450476,
+        "changeFromOpenPct": 0.9099099099099145,
+        "closeAboveVwap": true,
+        "completedBarVwap": 111.17833333333333,
+        "completedBarVwapTimestamp": "2026-08-24T14:00:00Z",
+        "configVersion": "phase3-default-v1",
+        "consecutiveGreenCandles": 6,
+        "currentCumulativeVolume": 6000,
+        "dailyEmaContext": {
+          "ema13": 108.5,
+          "ema21": null,
+          "reason": "DAILY_EMA_HISTORY_UNAVAILABLE",
+          "slope13": null,
+          "slope21": null,
+          "sourceTimestamp": "2026-08-17T19:30:00Z",
+          "status": "UNAVAILABLE"
+        },
+        "dataStatus": "REALTIME",
+        "distanceFromOrhAtr": 0.33500000000000085,
+        "distanceFromVwapAtr": 0.41583333333333883,
+        "distanceFromVwapPct": 0.7480474313040709,
+        "featureVersion": "1.2.0",
+        "historicalMeanCumulativeVolume": 3000.0,
+        "instrumentId": "11111111-1111-4111-8111-111111111111",
+        "last3ClosesAboveVwap": 0,
+        "marketId": "CA_TSX",
+        "mid": 112.00999999999999,
+        "nearestResistance": {
+          "ageBars": 3,
+          "price": 114.0,
+          "provenance": {
+            "availableAt": "2026-08-24T13:55:00Z",
+            "levelId": "11111111-1111-4111-8111-111111111111:FiveMinutes:SWING_HIGH:2026-08-24T13:45:00+00:00",
+            "originAt": "2026-08-24T13:45:00Z"
+          },
+          "strength": 0.52,
+          "tests": 1,
+          "type": "SWING_HIGH"
+        },
+        "nearestSupport": {
+          "ageBars": 0,
+          "price": 111.49000000000001,
+          "provenance": null,
+          "strength": 0.7,
+          "tests": 1,
+          "type": "INTRADAY_HIGH"
+        },
+        "openingRange": {
+          "complete": true,
+          "high": 111.34,
+          "low": 110.8,
+          "mid": 111.07,
+          "volume": 3000,
+          "width": 0.5400000000000063,
+          "widthAtr": 0.2700000000000031,
+          "widthPct": 0.4861798865580321
+        },
+        "price": 111.39,
+        "recentMoveVelocityAtr": 0.14999999999999858,
+        "resistanceConfluence": {
+          "count": 1,
+          "levelTypes": [
+            "SWING_HIGH"
+          ],
+          "price": 114.0
+        },
+        "rollingReturn5mPct": 0.601760373630336,
+        "rsi14": null,
+        "rsiTimestamp": "2026-08-24T14:00:00Z",
+        "rvolAtTime": 2.0,
+        "spreadAbsolute": 0.01999999999999602,
+        "spreadPct": 0.017855548611727546,
+        "supportConfluence": {
+          "count": 2,
+          "levelTypes": [
+            "INTRADAY_HIGH",
+            "OPENING_RANGE_HIGH"
+          ],
+          "price": 111.49000000000001
+        },
+        "swingHighs": [
+          {
+            "ageBars": 3,
+            "price": 114.0,
+            "provenance": {
+              "availableAt": "2026-08-24T13:55:00Z",
+              "levelId": "11111111-1111-4111-8111-111111111111:FiveMinutes:SWING_HIGH:2026-08-24T13:45:00+00:00",
+              "originAt": "2026-08-24T13:45:00Z"
+            },
+            "strength": 0.52,
+            "tests": 1,
+            "type": "SWING_HIGH"
+          }
+        ],
+        "swingLows": [
+          {
+            "ageBars": 3,
+            "price": 107.0,
+            "provenance": {
+              "availableAt": "2026-08-24T13:55:00Z",
+              "levelId": "11111111-1111-4111-8111-111111111111:FiveMinutes:SWING_LOW:2026-08-24T13:45:00+00:00",
+              "originAt": "2026-08-24T13:45:00Z"
+            },
+            "strength": 0.52,
+            "tests": 1,
+            "type": "SWING_LOW"
+          }
+        ],
+        "symbol": "TEST.TO",
+        "timeframe": "OneMinute",
+        "timestamp": "2026-08-24T14:10:00Z",
+        "touchVwap": true,
+        "vwap": 111.17833333333333,
+        "vwapReclaim": false,
+        "vwapRejection": false,
+        "vwapSlopePct": 0.044993026080954894,
+        "warmingUp": []
+      },
+      "formationEvidence": null,
+      "instrumentId": "11111111-1111-4111-8111-111111111111",
+      "kind": "SETUP",
+      "marketId": "CA_TSX",
+      "patternStopReference": null,
+      "profileId": "10000000-0000-4000-8000-000000000082",
+      "profileName": "VWAP Hold",
+      "reasonCodes": [
+        "REALTIME_DATA",
+        "SPREAD_GOOD",
+        "RVOL_STRONG",
+        "ABOVE_VWAP",
+        "WAITING_FOR_VWAP_STRUCTURE"
+      ],
+      "score": 31,
+      "scoreComponents": {
+        "confirmation": 0,
+        "liquidity": 15,
+        "pattern": 8,
+        "penalties": 0,
+        "structure": 4,
+        "timing": 4
+      },
+      "scoreExplanation": [
+        {
+          "detail": "Observed in this evaluation",
+          "group": "pattern",
+          "key": "ABOVE_VWAP",
+          "label": "Price is working above session VWAP",
+          "maximum": 8,
+          "points": 8,
+          "value": null
+        },
+        {
+          "detail": "No structural invalidation level is known yet",
+          "group": "structure",
+          "key": "DISTANCE_TO_INVALIDATION",
+          "label": "Distance to invalidation",
+          "maximum": 8,
+          "points": 0,
+          "value": null
+        },
+        {
+          "detail": "No complete entry, stop, and target geometry yet",
+          "group": "structure",
+          "key": "RISK_REWARD_VALIDITY",
+          "label": "Risk/reward validity",
+          "maximum": 8,
+          "points": 0,
+          "value": null
+        },
+        {
+          "detail": "Price is 0.42 ATR from VWAP; entries far above VWAP pay a worse price",
+          "group": "structure",
+          "key": "VWAP_EXTENSION",
+          "label": "Extension from VWAP",
+          "maximum": 4,
+          "points": 4,
+          "value": 0.41583333333333883
+        },
+        {
+          "detail": "Saturating curve on ATR 1.79% of price; 1.50% earns half the available points",
+          "group": "liquidity",
+          "key": "RANGE_AVAILABLE",
+          "label": "Range available",
+          "maximum": 4,
+          "points": 2,
+          "value": 1.7855548611731096
+        },
+        {
+          "detail": "Saturating curve on RVOL 2.00\u00d7; 1.50\u00d7 earns half the available points",
+          "group": "liquidity",
+          "key": "RELATIVE_VOLUME",
+          "label": "Relative volume",
+          "maximum": 8,
+          "points": 5,
+          "value": 2.0
+        },
+        {
+          "detail": "Spread 0.018% is at or below the preferred 0.15%",
+          "group": "liquidity",
+          "key": "SPREAD_QUALITY",
+          "label": "Spread quality",
+          "maximum": 8,
+          "points": 8,
+          "value": 0.017855548611727546
+        },
+        {
+          "detail": "No formation has armed yet",
+          "group": "timing",
+          "key": "SETUP_FRESHNESS",
+          "label": "Setup freshness",
+          "maximum": 7,
+          "points": 0,
+          "value": null
+        },
+        {
+          "detail": "No session window is configured; scored neutral",
+          "group": "timing",
+          "key": "TIME_OF_DAY",
+          "label": "Time of day",
+          "maximum": 8,
+          "points": 4,
+          "value": null
+        }
+      ],
+      "scoreVersion": "setup-score-v1",
+      "setupInstanceId": null,
+      "setupScore": 31,
+      "signalSemanticsVersion": "setup-semantics-v2",
+      "state": "WATCH",
+      "stopPolicy": "HYBRID",
+      "stopReference": null,
+      "stopSelectionReason": null,
+      "strategy": "VWAP_HOLD",
+      "strategyVersion": "1.0.0",
+      "symbol": "TEST.TO",
+      "targetReference": null,
+      "timestamp": "2026-08-24T14:10:00Z"
+    }
+  ],
+  "events": [],
+  "snapshots": [
+    {
+      "actionable": true,
+      "ask": 112.02,
+      "atr14": 2.0,
+      "atrPct": 1.7855548611731096,
+      "bid": 112.0,
+      "changeFromOpenAtr": 0.5095950450450476,
+      "changeFromOpenPct": 0.9099099099099145,
+      "closeAboveVwap": true,
+      "completedBarVwap": 111.17833333333333,
+      "completedBarVwapTimestamp": "2026-08-24T14:00:00Z",
+      "configVersion": "phase3-default-v1",
+      "consecutiveGreenCandles": 6,
+      "currentCumulativeVolume": 6000,
+      "dailyEmaContext": {
+        "ema13": 108.5,
+        "ema21": null,
+        "reason": "DAILY_EMA_HISTORY_UNAVAILABLE",
+        "slope13": null,
+        "slope21": null,
+        "sourceTimestamp": "2026-08-17T19:30:00Z",
+        "status": "UNAVAILABLE"
+      },
+      "dataStatus": "REALTIME",
+      "distanceFromOrhAtr": 0.33500000000000085,
+      "distanceFromVwapAtr": 0.41583333333333883,
+      "distanceFromVwapPct": 0.7480474313040709,
+      "featureVersion": "1.2.0",
+      "historicalMeanCumulativeVolume": 3000.0,
+      "instrumentId": "11111111-1111-4111-8111-111111111111",
+      "last3ClosesAboveVwap": 0,
+      "marketId": "CA_TSX",
+      "mid": 112.00999999999999,
+      "nearestResistance": {
+        "ageBars": 3,
+        "price": 114.0,
+        "provenance": {
+          "availableAt": "2026-08-24T13:55:00Z",
+          "levelId": "11111111-1111-4111-8111-111111111111:FiveMinutes:SWING_HIGH:2026-08-24T13:45:00+00:00",
+          "originAt": "2026-08-24T13:45:00Z"
+        },
+        "strength": 0.52,
+        "tests": 1,
+        "type": "SWING_HIGH"
+      },
+      "nearestSupport": {
+        "ageBars": 0,
+        "price": 111.49000000000001,
+        "provenance": null,
+        "strength": 0.7,
+        "tests": 1,
+        "type": "INTRADAY_HIGH"
+      },
+      "openingRange": {
+        "complete": true,
+        "high": 111.34,
+        "low": 110.8,
+        "mid": 111.07,
+        "volume": 3000,
+        "width": 0.5400000000000063,
+        "widthAtr": 0.2700000000000031,
+        "widthPct": 0.4861798865580321
+      },
+      "price": 112.01,
+      "recentMoveVelocityAtr": 0.14999999999999858,
+      "resistanceConfluence": {
+        "count": 1,
+        "levelTypes": [
+          "SWING_HIGH"
+        ],
+        "price": 114.0
+      },
+      "rollingReturn5mPct": 0.601760373630336,
+      "rsi14": null,
+      "rsiTimestamp": "2026-08-24T14:00:00Z",
+      "rvolAtTime": 2.0,
+      "spreadAbsolute": 0.01999999999999602,
+      "spreadPct": 0.017855548611727546,
+      "supportConfluence": {
+        "count": 2,
+        "levelTypes": [
+          "INTRADAY_HIGH",
+          "OPENING_RANGE_HIGH"
+        ],
+        "price": 111.49000000000001
+      },
+      "swingHighs": [
+        {
+          "ageBars": 3,
+          "price": 114.0,
+          "provenance": {
+            "availableAt": "2026-08-24T13:55:00Z",
+            "levelId": "11111111-1111-4111-8111-111111111111:FiveMinutes:SWING_HIGH:2026-08-24T13:45:00+00:00",
+            "originAt": "2026-08-24T13:45:00Z"
+          },
+          "strength": 0.52,
+          "tests": 1,
+          "type": "SWING_HIGH"
+        }
+      ],
+      "swingLows": [
+        {
+          "ageBars": 3,
+          "price": 107.0,
+          "provenance": {
+            "availableAt": "2026-08-24T13:55:00Z",
+            "levelId": "11111111-1111-4111-8111-111111111111:FiveMinutes:SWING_LOW:2026-08-24T13:45:00+00:00",
+            "originAt": "2026-08-24T13:45:00Z"
+          },
+          "strength": 0.52,
+          "tests": 1,
+          "type": "SWING_LOW"
+        }
+      ],
+      "symbol": "TEST.TO",
+      "timeframe": "OneMinute",
+      "timestamp": "2026-08-24T14:00:00Z",
+      "touchVwap": true,
+      "vwap": 111.17833333333333,
+      "vwapReclaim": false,
+      "vwapRejection": false,
+      "vwapSlopePct": 0.044993026080954894,
+      "warmingUp": []
+    }
+  ],
+  "timings": {
+    "evaluationMs": 2.345,
+    "featureMs": 1.234
+  }
+}

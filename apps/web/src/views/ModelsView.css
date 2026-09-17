@@ -1,0 +1,217 @@
+/*
+ * Styling for the unmounted statistical models view. These rules previously
+ * lived in `backtests.css`; they stay beside the view until it is migrated to
+ * `tw:` utilities like the mounted Backtests surface.
+ */
+@layer legacy {
+  .backtest-form {
+    display: block;
+  }
+
+  .backtest-form .panel-title p {
+    margin: 4px 0 0;
+    color: var(--ink-350);
+    font-size: 0.72rem;
+  }
+
+  .backtest-fields {
+    display: grid;
+    gap: 14px;
+    padding: 20px;
+  }
+
+  .backtest-metrics {
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    gap: 1px;
+    margin-bottom: 16px;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    overflow: hidden;
+    background: var(--surface-sunken);
+  }
+
+  .backtest-metrics div {
+    padding: 16px;
+    background: var(--surface);
+  }
+
+  .backtest-metrics span {
+    display: block;
+    margin-bottom: 7px;
+    color: var(--ink-350);
+    font: 700 0.62rem var(--mono);
+    letter-spacing: 0.08em;
+  }
+
+  .backtest-metrics strong {
+    font-size: 1.05rem;
+  }
+
+  .run-status {
+    padding: 5px 7px;
+    border: 1px solid var(--line-dim);
+    border-radius: 5px;
+    color: var(--ink-550);
+    font: 700 0.56rem var(--mono);
+  }
+
+  .run-status.completed {
+    color: var(--accent);
+    border-color: var(--line-accent);
+  }
+
+  .run-status.failed {
+    color: var(--danger);
+    border-color: var(--line-danger-strong);
+  }
+
+  @media (max-width: 1000px) {
+    .backtest-metrics {
+      grid-template-columns: repeat(3, 1fr);
+    }
+  }
+
+  @media (max-width: 620px) {
+    .backtest-metrics {
+      grid-template-columns: repeat(2, 1fr);
+    }
+  }
+}
+
+/*
+ * Statistical models page chrome (previously `models.css`). Kept beside the
+ * unmounted view; `globals.css` no longer imports it, so it loads only if the
+ * view module ever does.
+ */
+@layer legacy {
+  .statistical-layout {
+    display: grid;
+    grid-template-columns: minmax(390px, 0.8fr) minmax(500px, 1.2fr);
+    gap: 16px;
+    margin: 18px 0 16px;
+  }
+
+  .model-list {
+    overflow: hidden;
+  }
+
+  .model-row {
+    width: 100%;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    align-items: center;
+    gap: 18px;
+    padding: 16px 20px;
+    border: 0;
+    border-bottom: 1px solid var(--line-subtle);
+    color: var(--ink-150);
+    background: transparent;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .model-row:hover,
+  .model-row.selected {
+    background: var(--surface-raised);
+  }
+
+  .model-row > span {
+    display: grid;
+    gap: 4px;
+  }
+
+  .model-row small {
+    color: var(--ink-700);
+  }
+
+  .model-row i {
+    font-style: normal;
+  }
+
+  .active-model {
+    color: var(--accent);
+  }
+
+  .model-disclaimer {
+    display: block;
+    color: var(--ink-700);
+    line-height: 1.5;
+  }
+
+  .model-actions {
+    margin-top: 12px;
+  }
+
+  .model-actions button {
+    padding: 9px 13px;
+    border: 1px solid var(--line-accent-bright);
+    border-radius: 7px;
+    color: var(--accent-tint);
+    background: var(--surface-raised);
+    cursor: pointer;
+  }
+
+  .model-actions button:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+
+  .prediction-panel {
+    margin-top: 16px;
+    overflow: hidden;
+  }
+
+  .prediction-row {
+    display: grid;
+    grid-template-columns: 1.6fr repeat(4, 0.65fr) 1.2fr;
+    align-items: center;
+    gap: 14px;
+    padding: 14px 20px;
+    border-bottom: 1px solid var(--line-subtle);
+    font-size: 0.72rem;
+  }
+
+  .prediction-row strong {
+    display: grid;
+    gap: 4px;
+  }
+
+  .prediction-row small {
+    color: var(--ink-700);
+  }
+
+  .prediction-header {
+    color: var(--ink-750);
+    font: 700 0.61rem var(--mono);
+    letter-spacing: 0.07em;
+  }
+
+  .empty.compact {
+    padding: 25px;
+  }
+
+  @media (max-width: 1000px) {
+    .statistical-layout {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  @media (max-width: 760px) {
+    .prediction-panel {
+      overflow-x: auto;
+    }
+
+    .prediction-row {
+      min-width: 780px;
+    }
+
+    .model-row {
+      grid-template-columns: 1fr auto;
+    }
+
+    .model-row > b {
+      display: none;
+    }
+  }
+}

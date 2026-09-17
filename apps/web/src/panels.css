@@ -1,0 +1,50 @@
+/* Shared card chrome, status text tones and the scanner table scroll owner.
+ * Kept global because active Bot/Backtests/Detail elements still carry these
+ * class hooks and the unmounted Calibration/Models views depend on the panel
+ * primitives. Badge chrome lives beside the state-badge hook in globals.css. */
+
+.panel {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.panel-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 20px 22px;
+  border-bottom: 1px solid var(--line);
+}
+
+.panel-title h3 {
+  margin: 0;
+  color: var(--ink-100);
+  font-size: 1rem;
+  letter-spacing: -0.01em;
+}
+
+.panel-title p {
+  line-height: 1.5;
+}
+
+.panel-title > span {
+  flex: 0 0 auto;
+  color: var(--accent);
+  font: 700 0.63rem var(--mono);
+  letter-spacing: 0.1em;
+}
+
+.candidate-table {
+  overflow-x: auto;
+}
+
+.positive {
+  color: var(--accent);
+}
+
+.negative {
+  color: var(--danger);
+}

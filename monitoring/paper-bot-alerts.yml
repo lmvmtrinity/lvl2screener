@@ -1,0 +1,227 @@
+groups:
+  - name: paper-bot-safety
+    rules:
+      - alert: ScannerMetricsUnavailable
+        expr: up{job=~"paper-bot-ca|paper-bot-us"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: Market metrics cannot be scraped
+          description: Inspect the API, enabled markets and Prometheus target errors.
+      - alert: PaperProcessingStalled
+        expr: ((time() - scanner_paper_bot_last_success_timestamp_seconds > 60) and on(instance, job) (scanner_market_data_state == 1 or scanner_market_data_state == 4)) or ((scanner_market_data_state == 1 or scanner_market_data_state == 4) unless on(instance, job) scanner_paper_bot_last_success_timestamp_seconds)
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: Independent paper processing has stopped completing
+          description: Inspect live cycle progress and quote coverage; a null error does not prove successful processing.
+      - alert: FundedBacklogStalled
+        expr: scanner_paper_bot_funded_pending_facts > 0 and scanner_paper_bot_funded_oldest_pending_fact_age_ms > 120000
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: Funded replay is behind live time
+          description: Inspect bounded batch progress and account persistence. Never skip facts or advance the clock past unacknowledged inputs.
+      - alert: FundedBacklogCritical
+        expr: scanner_paper_bot_funded_pending_facts > 1000 and scanner_paper_bot_funded_oldest_pending_fact_age_ms > 300000
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: Funded processing has a severe backlog
+          description: More than 1000 funded facts are pending and the oldest exceeds five minutes. Inspect processing errors and batch progress, including after market close. Do not skip retained facts.
+      - alert: ScannerPersistenceSeverelyDelayed
+        expr: scanner_persistence_p95_latency_ms > 2000
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: Database persistence is severely delayed
+          description: The rolling persistence p95 gauge has remained above two seconds for five minutes. With a small or unchanged sample this can reflect one old slow write, not repeated slow writes; compare writes_total and last_latency before attributing ongoing latency. Inspect database locks, disk latency and overlapping app work.
+      - alert: ScannerFeedStale
+        expr: scanner_quote_age_ms > 30000 and on(instance, job) (scanner_market_data_state == 1 or scanner_market_data_state == 4)
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: Quote feed is stale during active scanning
+          description: Suspend new paper entries and inspect broker connectivity and quote timestamps. Do not infer a healthy feed from process liveness.
+      - alert: ScannerFeedTimestampMissing
+        expr: (scanner_market_data_state == 1 or scanner_market_data_state == 4) unless on(instance, job) scanner_quote_age_ms
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: Active scanner has no quote freshness measurement
+          description: Inspect feed initialization and ingestion before trusting new executions.
+      - alert: PaperRunRecoveryOverdue
+        expr: scanner_paper_bot_overdue_runs > 0
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: Paper runs remain unresolved after session close
+          description: Inspect recovery logs and retained quotes. Never fabricate a closing fill to clear the alert.
+      - alert: PaperCompletedRunHasPositions
+        expr: scanner_paper_bot_completed_runs_with_unresolved_positions > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: Completed paper run still owns unresolved positions
+          description: Investigate lifecycle integrity and exclude the affected evidence from qualification.
+      - alert: PaperUnknownLiquidityUnits
+        expr: scanner_paper_bot_unknown_quote_size_units > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Quote capacity units are unknown
+          description: Check the provider size normalization. Do not assume lots are shares.
+      - alert: FundedClosePendingStalled
+        expr: scanner_paper_bot_funded_close_pending_orders > 0 and scanner_paper_bot_funded_oldest_close_pending_age_ms > 300000
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: Funded position remains close-pending
+          description: Inspect retained actionable quotes and funded ledger state across current and recovery runs. Never fabricate a close fill or complete the run while the funded position remains unresolved.
+      - alert: FundedRiskVetoPersistent
+        expr: increase(scanner_paper_bot_funded_risk_vetoes_total[10m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Funded account risk vetoes continue
+          description: Inspect buying-power, daily-loss and stale-mark constraints. A veto is a safety decision, not evidence of a fill.
+      - alert: FundedRecoveryFailure
+        expr: increase(scanner_paper_bot_funded_recovery_failures_total[10m]) > 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: Funded live-cycle recovery failed
+          description: Inspect the funded inbox and database transaction logs; the legacy evidence path may still be running, but funded state may be stale.
+      - alert: FundedCoverageGap
+        expr: increase(scanner_paper_bot_funded_coverage_gaps_total[10m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Funded input coverage gap detected
+          description: Inspect skipped observations/quotes, late facts and retained quote coverage before using funded results for comparison.
+      - alert: FundedReconstructionBudgetFailure
+        expr: increase(scanner_paper_bot_funded_reconstruction_budget_failures_total[10m]) > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: Funded reconstruction failed closed on the event budget
+          description: A reconstruction could not be proven within the bounded event budget, so evidence capture or a report failed visibly. Inspect checkpoint availability and account event growth; do not raise the budget to hide an unprovable window.
+      - alert: FundedReconstructionSlow
+        expr: (scanner_paper_bot_funded_reconstruction_duration_ms > 15000) and on(instance, job, market_id) (time() - scanner_paper_bot_funded_reconstruction_last_observed_timestamp_seconds < 600)
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Funded reconstruction is approaching the event budget
+          description: Bounded ledger reconstruction is taking over fifteen seconds. Inspect replayed-event counts and checkpoint age; a missing or stale checkpoint window grows the replay toward the fail-closed budget.
+      - alert: FundedInboxDrainDeficit
+        expr: scanner_paper_bot_funded_arrival_minus_drain_per_minute > 60
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: Funded inbox arrivals exceed acknowledgements
+          description: The five-minute sustained arrival rate exceeds the drain rate by more than sixty facts per minute. Inspect cycle cadence and per-cycle overhead before changing batch size; the duration budget already caps each bounded drain.
+      - alert: ScannerRetentionFailure
+        expr: scanner_retention_last_run_status == 2 or scanner_retention_last_run_failed_tables > 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: Retention maintenance failed
+          description: Inspect retention job records and verify raw input coverage before replay. A successful maintenance run alone does not prove historical coverage.
+      - alert: ScannerPersistenceOverBudget
+        expr: scanner_persistence_p95_latency_ms > 500
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: Persistence p95 exceeds its operational target
+          description: The rolling bulk-write p95 gauge has remained above 500 ms for ten minutes. With a small or unchanged sample this can reflect one old slow write, not repeated slow writes; compare writes_total and last_latency before attributing ongoing latency. Inspect write latency by entity, database locks, disk latency and overlapping workloads.
+      - alert: ScannerDiscoveryProviderMissing
+        expr: scanner_discovery_scheduler_status == 1 and on(instance, job, market_id) scanner_discovery_mode > 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: Discovery is enabled without a provider
+          description: Discovery is configured for this market but its provider is unavailable. Keep discovery additions disabled and inspect provider credentials, entitlement and catalog freshness; do not treat missing coverage as ineligible symbols.
+      - alert: ScannerDiscoverySchedulerDegraded
+        expr: scanner_discovery_scheduler_status == 4 and on(instance, job, market_id) scanner_discovery_mode > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Discovery scheduler is degraded
+          description: Inspect discovery scheduler errors, queue pressure and provider responses. Existing candidate monitoring and position recovery must retain priority; do not hide deferred work by shrinking the denominator.
+      - alert: ScannerDiscoveryCatalogUnavailable
+        expr: scanner_discovery_catalog_status == 3 and on(instance, job, market_id) scanner_discovery_mode > 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: Discovery catalog is unavailable
+          description: Discovery has no usable current or last-good catalog for this market. Preserve the failure and catalog age evidence; do not run intake from an incomplete catalog.
+      - alert: ScannerDiscoveryQueueOverdue
+        expr: scanner_discovery_oldest_queue_age_ms > 120000 and on(instance, job, market_id) scanner_discovery_mode > 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: Discovery queue exceeds its expiry boundary
+          description: Discovery work has waited beyond the 120-second expiry boundary. Inspect shared-budget starvation and active-monitoring impact; expired or deferred work must remain visible rather than being counted as a fresh pass.
+      - alert: ScannerDiscoveryCoverageDeferred
+        expr: scanner_discovery_last_run_total > 0 and scanner_discovery_last_run_deferred_fraction > 0.01 and on(instance, job, market_id) scanner_discovery_mode > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Discovery deferred coverage exceeds one percent
+          description: More than one percent of the most recent discovery run remains deferred or unfinished. Preserve the full catalog and eligible denominator; this is a coverage gap, not proof that deferred symbols failed qualification.
+      - alert: ScannerDiscoveryLatencyOverBudget
+        expr: (scanner_discovery_cycle_p95_ms > 120000 or scanner_discovery_queue_p95_ms > 120000) and on(instance, job, market_id) scanner_discovery_mode > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Discovery p95 exceeds its commissioning budget
+          description: Discovery cycle or queue p95 is above 120 seconds over the bounded sample. Compare against the active-monitoring baseline and revisit capacity/provider architecture; do not relax the eligibility policy.
+      - alert: ScannerDiscoveryRunFailed
+        expr: scanner_discovery_last_run_status == 3 and on(instance, job, market_id) scanner_discovery_mode > 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: Most recent discovery run failed
+          description: Inspect the retained discovery failure, catalog/input provenance and scheduler state. A failed run must not produce intake additions or be reported as a zero-match result.
+      - alert: BacktestAutomationWorkFailed
+        expr: scanner_backtest_automation_failed_work > 0 or scanner_backtest_automation_stage_failed > 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: Backtest automation work needs review
+          description: A qualification work item or follow-on stage is terminally failed. Inspect the Backtest & Studies automation surface and its failure reason; do not clear the evidence by re-running unrelated work.
+      - alert: BacktestAutomationQueueStalled
+        expr: scanner_backtest_automation_enabled == 1 and scanner_backtest_automation_outstanding > 0 and scanner_backtest_automation_oldest_outstanding_age_ms > 86400000
+        for: 15m
+        labels:
+          severity: critical
+        annotations:
+          summary: Backtest automation queue appears stalled
+          description: Scheduled automation is enabled and an outstanding replay has not completed for over 24 hours. Inspect the worker lease, scanner runtime and retained-input coverage; a queued item is not evidence of progress.

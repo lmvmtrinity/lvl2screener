@@ -1,0 +1,283 @@
+/*
+ * Global stylesheet entry point.
+ *
+ * Cascade ownership (low to high precedence):
+ *   theme      Tailwind theme variables (aliased to the tokens below)
+ *   base       reserved for future Tailwind base rules
+ *   legacy     the existing page-sized stylesheets, in their original order
+ *   components shared CSS we keep beside its owner
+ *   utilities  Tailwind utilities, used as `tw:` classes
+ *
+ * Preflight is intentionally omitted: base.css remains the reset so the
+ * existing appearance is preserved exactly.
+ */
+@layer theme, base, legacy, components, utilities;
+
+@import "tailwindcss/theme.css" layer(theme) prefix(tw);
+@import "tailwindcss/utilities.css" layer(utilities) prefix(tw);
+
+/* Legacy import order is preserved from the original main.tsx. */
+@import "../tokens.css" layer(legacy);
+@import "../base.css" layer(legacy);
+@import "../panels.css" layer(legacy);
+@import "../detail.css" layer(legacy);
+
+/*
+ * Shared state-badge chrome. The `stateClass()` helper in lib/format.ts emits
+ * `badge badge-<state>` on Scanner, Detail, Bot and Backtests elements, and
+ * Bot Performance emits `badge badge-recovered`, so this base treatment stays
+ * global. Migrated surfaces that render their own status labels use utilities.
+ */
+@layer legacy {
+  /* The effective base is the merge of the original panels.css badge and the
+   * Learning-pilot override that used to be imported last. */
+  .badge {
+    display: inline-block;
+    width: max-content;
+    padding: 2px 8px;
+    border: 1px solid var(--line-accent-dim);
+    border-radius: 4px;
+    color: var(--ink-400);
+    background: var(--surface-raised);
+    font-family: var(--mono);
+    font-size: 0.7rem;
+    font-weight: 600;
+    line-height: 1;
+    letter-spacing: 0.04em;
+    font-style: normal;
+  }
+
+  /* Trading-state tones emitted by `stateClass()` (panels primitives that the
+   * Learning-pilot badge base previously overrode). */
+  .badge-ready {
+    color: var(--on-accent);
+    background: var(--accent);
+    border-color: var(--accent);
+  }
+
+  .badge-forming {
+    color: var(--warn-soft);
+    background: var(--surface-warn);
+    border-color: var(--line-warn);
+  }
+
+  .badge-invalidated,
+  .badge-halted,
+  .badge-data-stale {
+    color: var(--danger-tint-soft);
+    background: var(--surface-danger);
+    border-color: var(--line-danger);
+  }
+
+  .badge-strong {
+    color: var(--accent);
+    border-color: var(--line-accent);
+  }
+
+  .badge-weak,
+  .badge-stale,
+  .badge-unavailable {
+    color: var(--warn);
+    border-color: var(--line-warn);
+  }
+
+  .badge-success {
+    background: rgba(34, 197, 94, 0.15);
+    color: #4ade80;
+    border: 1px solid rgba(34, 197, 94, 0.3);
+  }
+
+  .badge-neutral {
+    background: var(--surface-raised);
+    color: var(--ink-400);
+    border: 1px solid var(--line-subtle);
+  }
+
+  .badge-warn {
+    background: rgba(245, 158, 11, 0.15);
+    color: var(--accent);
+    border: 1px solid rgba(245, 158, 11, 0.3);
+  }
+
+  .badge-danger {
+    background: rgba(248, 113, 113, 0.15);
+    color: var(--danger);
+    border: 1px solid rgba(248, 113, 113, 0.3);
+  }
+
+  .badge-info {
+    background: rgba(56, 189, 248, 0.15);
+    color: #38bdf8;
+    border: 1px solid rgba(56, 189, 248, 0.3);
+  }
+}
+
+/*
+ * Inclusive legacy boundaries. Tailwind's `max-*` variants are exclusive
+ * (`width < N`); the existing responsive rules use `max-width`, so these keep
+ * the exact inclusive behavior. These match the remaining page stylesheet
+ * boundaries (1050 / 1100 / 1000 / 980 / 960 / 900 / 760 / 720 / 700 / 620 /
+ * 560 / 520 / 480px).
+ */
+@custom-variant below-1100 {
+  @media (max-width: 1100px) {
+    @slot;
+  }
+}
+@custom-variant below-lg {
+  @media (max-width: 1050px) {
+    @slot;
+  }
+}
+@custom-variant below-1000 {
+  @media (max-width: 1000px) {
+    @slot;
+  }
+}
+@custom-variant below-980 {
+  @media (max-width: 980px) {
+    @slot;
+  }
+}
+@custom-variant below-960 {
+  @media (max-width: 960px) {
+    @slot;
+  }
+}
+@custom-variant below-900 {
+  @media (max-width: 900px) {
+    @slot;
+  }
+}
+@custom-variant below-md {
+  @media (max-width: 760px) {
+    @slot;
+  }
+}
+@custom-variant below-720 {
+  @media (max-width: 720px) {
+    @slot;
+  }
+}
+@custom-variant below-700 {
+  @media (max-width: 700px) {
+    @slot;
+  }
+}
+@custom-variant below-620 {
+  @media (max-width: 620px) {
+    @slot;
+  }
+}
+@custom-variant below-560 {
+  @media (max-width: 560px) {
+    @slot;
+  }
+}
+@custom-variant below-520 {
+  @media (max-width: 520px) {
+    @slot;
+  }
+}
+@custom-variant below-sm {
+  @media (max-width: 480px) {
+    @slot;
+  }
+}
+
+/* Shared status pulse used by header and automation indicators. */
+@theme {
+  --animate-status-pulse: status-pulse 1.5s ease-in-out infinite;
+  --animate-status-pulse-slow: status-pulse 2.4s ease-in-out infinite;
+
+  @keyframes status-pulse {
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.45;
+    }
+  }
+}
+
+/*
+ * Semantic aliases for the legacy tokens. Keep values in tokens.css; this
+ * block only maps them into Tailwind's namespaces. `inline` keeps utilities
+ * pointing at the original custom properties instead of copying values.
+ */
+@theme inline {
+  /* Existing breakpoints: 480 / 760 / 1050 px. Replacing the defaults keeps
+   * `tw:sm:`/`tw:md:`/`tw:lg:` aligned with responsive.css instead of the
+   * framework's 640/768/1024 defaults. */
+  --breakpoint-*: initial;
+  --breakpoint-sm: 480px;
+  --breakpoint-md: 760px;
+  --breakpoint-lg: 1050px;
+
+  --font-sans: var(--sans);
+  --font-mono: var(--mono);
+
+  --radius-panel: var(--radius-card);
+  --radius-input: var(--radius-control);
+
+  /* Surfaces */
+  --color-bg: var(--bg);
+  --color-on-accent: var(--on-accent);
+  --color-surface: var(--surface);
+  --color-surface-raised: var(--surface-raised);
+  --color-surface-sunken: var(--surface-sunken);
+  --color-surface-olive: var(--surface-olive);
+  --color-surface-warn: var(--surface-warn);
+  --color-surface-danger: var(--surface-danger);
+  --color-surface-danger-strong: var(--surface-danger-strong);
+
+  /* Lines */
+  --color-line-subtle: var(--line-subtle);
+  --color-line: var(--line);
+  --color-line-bar: var(--line-bar);
+  --color-line-input: var(--line-input);
+  --color-line-dim: var(--line-dim);
+  --color-line-accent: var(--line-accent);
+  --color-line-accent-dim: var(--line-accent-dim);
+  --color-line-accent-mid: var(--line-accent-mid);
+  --color-line-accent-strong: var(--line-accent-strong);
+  --color-line-accent-bright: var(--line-accent-bright);
+  --color-line-warn: var(--line-warn);
+  --color-line-warn-strong: var(--line-warn-strong);
+  --color-line-danger: var(--line-danger);
+  --color-line-danger-strong: var(--line-danger-strong);
+
+  /* Accent */
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-tint: var(--accent-tint);
+
+  /* Status */
+  --color-warn: var(--warn);
+  --color-warn-soft: var(--warn-soft);
+  --color-warn-dim: var(--warn-dim);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+  --color-danger-bright: var(--danger-bright);
+  --color-danger-tint: var(--danger-tint);
+  --color-danger-tint-soft: var(--danger-tint-soft);
+  --color-danger-tint-pale: var(--danger-tint-pale);
+
+  /* Ink (text), brightest to dimmest */
+  --color-ink-50: var(--ink-50);
+  --color-ink-100: var(--ink-100);
+  --color-ink-150: var(--ink-150);
+  --color-ink-200: var(--ink-200);
+  --color-ink-250: var(--ink-250);
+  --color-ink-300: var(--ink-300);
+  --color-ink-350: var(--ink-350);
+  --color-ink-400: var(--ink-400);
+  --color-ink-450: var(--ink-450);
+  --color-ink-500: var(--ink-500);
+  --color-ink-550: var(--ink-550);
+  --color-ink-600: var(--ink-600);
+  --color-ink-650: var(--ink-650);
+  --color-ink-700: var(--ink-700);
+  --color-ink-750: var(--ink-750);
+}

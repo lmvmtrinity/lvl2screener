@@ -1,0 +1,300 @@
+/*
+ * Styling for the unmounted Calibration view. These rules previously lived in
+ * `backtests.css`; they stay beside the view until it is migrated to `tw:`
+ * utilities like the mounted Backtests surface.
+ */
+@layer legacy {
+  .backtest-form {
+    display: block;
+  }
+
+  .backtest-form .panel-title p,
+  .run-list .panel-title p {
+    margin: 4px 0 0;
+    color: var(--ink-350);
+    font-size: 0.72rem;
+  }
+
+  .backtest-fields {
+    display: grid;
+    gap: 14px;
+    padding: 20px;
+  }
+
+  .backtest-form[data-captured-history] .backtest-fields::before {
+    content: attr(data-captured-history);
+    display: block;
+    grid-column: 1 / -1;
+    color: var(--danger-tint-soft);
+    font-size: 0.8rem;
+    line-height: 1.4;
+  }
+
+  .backtest-fields label {
+    display: grid;
+    gap: 7px;
+    color: var(--ink-350);
+    font: 700 0.64rem var(--mono);
+    letter-spacing: 0.07em;
+  }
+
+  .backtest-fields label small {
+    font-weight: 500;
+    letter-spacing: 0;
+  }
+
+  .backtest-fields input {
+    width: 100%;
+    padding: 10px 11px;
+    border: 1px solid var(--line-input);
+    border-radius: 7px;
+    outline: 0;
+    color: var(--ink-100);
+    background: var(--bg);
+  }
+
+  .backtest-fields input:focus {
+    border-color: var(--accent);
+  }
+
+  .field-pair {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+
+  .run-backtest {
+    padding: 11px 14px;
+    border: 1px solid var(--accent);
+    border-radius: 7px;
+    color: var(--on-accent);
+    background: var(--accent);
+    font: 750 0.65rem var(--mono);
+    letter-spacing: 0.08em;
+    cursor: pointer;
+  }
+
+  .run-backtest:disabled {
+    cursor: wait;
+    opacity: 0.45;
+  }
+
+  .run-status {
+    padding: 5px 7px;
+    border: 1px solid var(--line-dim);
+    border-radius: 5px;
+    color: var(--ink-550);
+    font: 700 0.56rem var(--mono);
+  }
+
+  .run-status.completed {
+    color: var(--accent);
+    border-color: var(--line-accent);
+  }
+
+  .run-status.failed {
+    color: var(--danger);
+    border-color: var(--line-danger-strong);
+  }
+
+  .calibration-recommendation[data-captured-history]::before {
+    content: attr(data-captured-history);
+    display: block;
+    grid-column: 1 / -1;
+    color: var(--danger-tint-soft);
+    font-size: 0.8rem;
+    line-height: 1.4;
+  }
+
+  .analysis-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+    margin-bottom: 16px;
+  }
+
+  .slice-row {
+    display: grid;
+    grid-template-columns: 1.2fr 0.7fr 0.55fr 0.55fr 1fr;
+    gap: 8px;
+    padding: 12px 15px;
+    border-bottom: 1px solid var(--line-subtle);
+    font-size: 0.7rem;
+  }
+
+  .slice-row span {
+    color: var(--ink-350);
+  }
+
+  .slice-row b {
+    text-align: right;
+  }
+
+  @media (max-width: 1000px) {
+    .analysis-grid {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  @media (max-width: 620px) {
+    .field-pair {
+      grid-template-columns: 1fr;
+    }
+
+    .slice-row {
+      min-width: 550px;
+    }
+
+    .slice-panel {
+      overflow-x: auto;
+    }
+  }
+}
+
+/*
+ * Calibration page chrome (previously `calibration.css`). Kept beside the
+ * unmounted view; `globals.css` no longer imports it, so it loads only if the
+ * view module ever does.
+ */
+@layer legacy {
+  .calibration-layout {
+    display: grid;
+    grid-template-columns: minmax(390px, 0.8fr) minmax(500px, 1.2fr);
+    gap: 16px;
+    margin: 18px 0 16px;
+  }
+
+  .backtest-fields select {
+    width: 100%;
+    padding: 10px 11px;
+    border: 1px solid var(--line-input);
+    border-radius: 7px;
+    color: var(--ink-100);
+    background: var(--bg);
+  }
+
+  .calibration-run {
+    width: 100%;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    align-items: center;
+    gap: 18px;
+    padding: 16px 20px;
+    border: 0;
+    border-bottom: 1px solid var(--line-subtle);
+    color: var(--ink-150);
+    background: transparent;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .calibration-run.selected,
+  .calibration-run:hover {
+    background: var(--surface-raised);
+  }
+
+  .calibration-run span {
+    display: grid;
+    gap: 4px;
+  }
+
+  .calibration-run small {
+    color: var(--ink-700);
+  }
+
+  .calibration-run i {
+    font-style: normal;
+  }
+
+  .calibration-recommendation {
+    padding: 18px 20px;
+    margin: 16px 0;
+    border: 1px solid var(--line-accent);
+    border-radius: 10px;
+    background: var(--surface-raised);
+  }
+
+  .calibration-recommendation.warning {
+    border-color: var(--line-warn-strong);
+    background: var(--surface-warn);
+  }
+
+  .calibration-recommendation strong {
+    font: 750 0.68rem var(--mono);
+    letter-spacing: 0.1em;
+    color: var(--accent);
+  }
+
+  .calibration-recommendation.warning strong {
+    color: var(--warn-soft);
+  }
+
+  .calibration-recommendation p {
+    margin: 8px 0 0;
+    color: var(--ink-350);
+  }
+
+  .calibration-recommendation small {
+    display: block;
+    margin-top: 8px;
+    color: var(--ink-550);
+  }
+
+  .calibration-table {
+    overflow-x: auto;
+  }
+
+  .calibration-row {
+    min-width: 1050px;
+    display: grid;
+    grid-template-columns: 3.2fr repeat(6, 0.65fr);
+    align-items: center;
+    gap: 12px;
+    padding: 14px 20px;
+    border-bottom: 1px solid var(--line-subtle);
+    font-size: 0.7rem;
+  }
+
+  .calibration-row > span {
+    display: grid;
+    gap: 5px;
+  }
+
+  .calibration-row small {
+    color: var(--ink-700);
+  }
+
+  .calibration-row > b {
+    text-align: right;
+  }
+
+  .calibration-header {
+    color: var(--ink-750);
+    font: 700 0.61rem var(--mono);
+    letter-spacing: 0.08em;
+  }
+
+  .calibration-slices {
+    margin-top: 16px;
+  }
+
+  .empty.compact {
+    padding: 25px;
+  }
+
+  @media (max-width: 1000px) {
+    .calibration-layout {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  @media (max-width: 620px) {
+    .calibration-run {
+      grid-template-columns: 1fr auto;
+    }
+
+    .calibration-run > b {
+      display: none;
+    }
+  }
+}

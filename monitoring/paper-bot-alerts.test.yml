@@ -1,0 +1,250 @@
+rule_files:
+  - paper-bot-alerts.yml
+evaluation_interval: 1m
+tests:
+  - interval: 1m
+    input_series:
+      - series: 'up{instance="test",job="paper-bot-ca"}'
+        values: "0 0 0 0"
+      - series: 'scanner_market_data_state{instance="test",job="paper-bot-ca"}'
+        values: "1 1 1 1"
+      - series: 'scanner_paper_bot_funded_pending_facts{instance="test",job="paper-bot-ca"}'
+        values: "10 10 10 10"
+      - series: 'scanner_paper_bot_funded_oldest_pending_fact_age_ms{instance="test",job="paper-bot-ca"}'
+        values: "130000 190000 250000 310000"
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: ScannerMetricsUnavailable
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              instance: test
+              job: paper-bot-ca
+            exp_annotations:
+              summary: Market metrics cannot be scraped
+              description: Inspect the API, enabled markets and Prometheus target errors.
+      - eval_time: 3m
+        alertname: PaperProcessingStalled
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              instance: test
+              job: paper-bot-ca
+            exp_annotations:
+              summary: Independent paper processing has stopped completing
+              description: Inspect live cycle progress and quote coverage; a null error does not prove successful processing.
+      - eval_time: 3m
+        alertname: FundedBacklogStalled
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              instance: test
+              job: paper-bot-ca
+            exp_annotations:
+              summary: Funded replay is behind live time
+              description: Inspect bounded batch progress and account persistence. Never skip facts or advance the clock past unacknowledged inputs.
+  - interval: 1m
+    input_series:
+      - series: 'scanner_market_data_state{instance="test",job="api"}'
+        values: "1 1 1 1"
+      - series: 'scanner_quote_age_ms{instance="test",job="api"}'
+        values: "40000 40000 40000 40000"
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: ScannerFeedStale
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              instance: test
+              job: api
+            exp_annotations:
+              summary: Quote feed is stale during active scanning
+              description: Suspend new paper entries and inspect broker connectivity and quote timestamps. Do not infer a healthy feed from process liveness.
+  - interval: 1m
+    input_series:
+      - series: 'scanner_market_data_state{instance="test",job="api"}'
+        values: "2 2 2 2"
+      - series: 'scanner_quote_age_ms{instance="test",job="api"}'
+        values: "40000 40000 40000 40000"
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: ScannerFeedStale
+        exp_alerts: []
+  - interval: 1m
+    input_series:
+      - series: 'scanner_paper_bot_funded_close_pending_orders{instance="test",job="api"}'
+        values: "1 1 1 1 1 1 1"
+      - series: 'scanner_paper_bot_funded_oldest_close_pending_age_ms{instance="test",job="api"}'
+        values: "360000 360000 360000 360000 360000 360000 360000"
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: FundedClosePendingStalled
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              instance: test
+              job: api
+            exp_annotations:
+              summary: Funded position remains close-pending
+              description: Inspect retained actionable quotes and funded ledger state across current and recovery runs. Never fabricate a close fill or complete the run while the funded position remains unresolved.
+  - interval: 1m
+    input_series:
+      - series: 'scanner_paper_bot_funded_risk_vetoes_total{instance="test",job="api"}'
+        values: "0 0 1 1 2 2 2 2"
+      - series: 'scanner_paper_bot_funded_recovery_failures_total{instance="test",job="api"}'
+        values: "0 0 0 1 1 1 1 1"
+      - series: 'scanner_paper_bot_funded_coverage_gaps_total{instance="test",job="api"}'
+        values: "0 0 0 0 1 1 1 1"
+    alert_rule_test:
+      - eval_time: 8m
+        alertname: FundedRiskVetoPersistent
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              instance: test
+              job: api
+            exp_annotations:
+              summary: Funded account risk vetoes continue
+              description: Inspect buying-power, daily-loss and stale-mark constraints. A veto is a safety decision, not evidence of a fill.
+      - eval_time: 8m
+        alertname: FundedRecoveryFailure
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              instance: test
+              job: api
+            exp_annotations:
+              summary: Funded live-cycle recovery failed
+              description: Inspect the funded inbox and database transaction logs; the legacy evidence path may still be running, but funded state may be stale.
+      - eval_time: 10m
+        alertname: FundedCoverageGap
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              instance: test
+              job: api
+            exp_annotations:
+              summary: Funded input coverage gap detected
+              description: Inspect skipped observations/quotes, late facts and retained quote coverage before using funded results for comparison.
+  - interval: 1m
+    input_series:
+      - series: 'scanner_discovery_mode{instance="test",job="api",market_id="CA_TSX"}'
+        values: "1 1 1 1 1 1 1"
+      - series: 'scanner_discovery_scheduler_status{instance="test",job="api",market_id="CA_TSX"}'
+        values: "1 1 1 1 1 1 1"
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: ScannerDiscoveryProviderMissing
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              instance: test
+              job: api
+              market_id: CA_TSX
+            exp_annotations:
+              summary: Discovery is enabled without a provider
+              description: Discovery is configured for this market but its provider is unavailable. Keep discovery additions disabled and inspect provider credentials, entitlement and catalog freshness; do not treat missing coverage as ineligible symbols.
+  - interval: 1m
+    input_series:
+      - series: 'scanner_discovery_mode{instance="test",job="api",market_id="CA_TSX"}'
+        values: "0 0 0 0 0 0 0"
+      - series: 'scanner_discovery_scheduler_status{instance="test",job="api",market_id="CA_TSX"}'
+        values: "4 4 4 4 4 4 4"
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: ScannerDiscoverySchedulerDegraded
+        exp_alerts: []
+  - interval: 1m
+    input_series:
+      - series: 'scanner_discovery_mode{instance="test",job="api",market_id="US_EQUITIES"}'
+        values: "1 1 1 1 1 1 1"
+      - series: 'scanner_discovery_catalog_status{instance="test",job="api",market_id="US_EQUITIES"}'
+        values: "3 3 3 3 3 3 3"
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: ScannerDiscoveryCatalogUnavailable
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              instance: test
+              job: api
+              market_id: US_EQUITIES
+            exp_annotations:
+              summary: Discovery catalog is unavailable
+              description: Discovery has no usable current or last-good catalog for this market. Preserve the failure and catalog age evidence; do not run intake from an incomplete catalog.
+  - interval: 1m
+    input_series:
+      - series: 'scanner_discovery_mode{instance="test",job="api",market_id="CA_TSX"}'
+        values: "1 1 1 1"
+      - series: 'scanner_discovery_oldest_queue_age_ms{instance="test",job="api",market_id="CA_TSX"}'
+        values: "130000 130000 130000 130000"
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: ScannerDiscoveryQueueOverdue
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              instance: test
+              job: api
+              market_id: CA_TSX
+            exp_annotations:
+              summary: Discovery queue exceeds its expiry boundary
+              description: Discovery work has waited beyond the 120-second expiry boundary. Inspect shared-budget starvation and active-monitoring impact; expired or deferred work must remain visible rather than being counted as a fresh pass.
+  - interval: 1m
+    input_series:
+      - series: 'scanner_discovery_mode{instance="test",job="api",market_id="CA_TSX"}'
+        values: "1 1 1 1 1 1 1"
+      - series: 'scanner_discovery_last_run_total{instance="test",job="api",market_id="CA_TSX"}'
+        values: "100 100 100 100 100 100 100"
+      - series: 'scanner_discovery_last_run_deferred_fraction{instance="test",job="api",market_id="CA_TSX"}'
+        values: "0.02 0.02 0.02 0.02 0.02 0.02 0.02"
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: ScannerDiscoveryCoverageDeferred
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              instance: test
+              job: api
+              market_id: CA_TSX
+            exp_annotations:
+              summary: Discovery deferred coverage exceeds one percent
+              description: More than one percent of the most recent discovery run remains deferred or unfinished. Preserve the full catalog and eligible denominator; this is a coverage gap, not proof that deferred symbols failed qualification.
+  - interval: 1m
+    input_series:
+      - series: 'scanner_discovery_mode{instance="test",job="api",market_id="US_EQUITIES"}'
+        values: "1 1 1 1 1 1 1"
+      - series: 'scanner_discovery_cycle_p95_ms{instance="test",job="api",market_id="US_EQUITIES"}'
+        values: "120001 120001 120001 120001 120001 120001 120001"
+      - series: 'scanner_discovery_queue_p95_ms{instance="test",job="api",market_id="US_EQUITIES"}'
+        values: "0 0 0 0 0 0 0"
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: ScannerDiscoveryLatencyOverBudget
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              instance: test
+              job: api
+              market_id: US_EQUITIES
+            exp_annotations:
+              summary: Discovery p95 exceeds its commissioning budget
+              description: Discovery cycle or queue p95 is above 120 seconds over the bounded sample. Compare against the active-monitoring baseline and revisit capacity/provider architecture; do not relax the eligibility policy.
+  - interval: 1m
+    input_series:
+      - series: 'scanner_discovery_mode{instance="test",job="api",market_id="CA_TSX"}'
+        values: "1 1 1 1 1 1 1"
+      - series: 'scanner_discovery_last_run_status{instance="test",job="api",market_id="CA_TSX"}'
+        values: "3 3 3 3 3 3 3"
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: ScannerDiscoveryRunFailed
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              instance: test
+              job: api
+              market_id: CA_TSX
+            exp_annotations:
+              summary: Most recent discovery run failed
+              description: Inspect the retained discovery failure, catalog/input provenance and scheduler state. A failed run must not produce intake additions or be reported as a zero-match result.

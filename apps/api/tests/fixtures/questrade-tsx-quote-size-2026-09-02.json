@@ -1,0 +1,17 @@
+{
+  "capturedAt": "2026-09-02T14:40:00.000Z",
+  "provider": "QUESTRADE",
+  "venue": "TSX",
+  "symbol": "REDACTED.TO",
+  "documentationUnit": "BOARD_LOTS",
+  "multiplier": 100,
+  "quote": {
+    "bidSize": 4,
+    "askSize": 5
+  },
+  "expectedDisplayedShares": {
+    "bid": 400,
+    "ask": 500
+  },
+  "containsCredentialsOrAccountData": false
+}
