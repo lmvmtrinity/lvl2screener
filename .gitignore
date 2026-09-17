@@ -1,0 +1,32 @@
+node_modules/
+.worktrees/
+dist/
+coverage/
+backups/
+.venv/
+.pytest_cache/
+.hypothesis/
+.mypy_cache/
+.ruff_cache/
+.superpowers/
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.tsbuildinfo
+.env
+.env.*
+!.env.example
+monitoring/alertmanager.generated.yml
+monitoring/alertmanager.email.generated.yml
+monitoring/secrets/
+*.log
+playwright-report/
+test-results/
+# Visual-verification harness output and dev-server cache (see scripts/visual).
+scripts/visual/shots/
+scripts/visual/.vite-cache/
+# W5: TLS material for the optional remote-access Compose profile (REMOTE_CERT_DIR default).
+/certs/
+
+# Content-addressed optional research build identity
+apps/api/research-runtime.json

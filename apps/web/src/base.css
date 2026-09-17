@@ -1,0 +1,125 @@
+/* Reset, page frame, base typography, and shared interaction states. */
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  min-width: 320px;
+  min-height: 100%;
+  background: var(--bg);
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  color: var(--ink-100);
+  background: var(--bg);
+  font-family: var(--sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button,
+select {
+  -webkit-tap-highlight-color: transparent;
+}
+
+button {
+  transition:
+    color 150ms ease,
+    background-color 150ms ease,
+    border-color 150ms ease,
+    opacity 150ms ease;
+}
+
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--ink-750);
+}
+
+select {
+  appearance: none;
+  padding-right: 30px !important;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%237a6a44' d='M6 8L1 3h10z'/%3E%3C/svg%3E") !important;
+  background-repeat: no-repeat !important;
+  background-position: right 10px center !important;
+}
+
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  border-radius: 3px;
+  background: var(--line);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--line-input);
+}
+
+main {
+  position: relative;
+  width: min(100%, 1480px);
+  min-height: 100vh;
+  margin: 0 auto;
+  padding: 0 32px 18px;
+}
+
+/* Narrow layout for the page frame (previously responsive.css). */
+@media (max-width: 760px) {
+  main {
+    width: 100%;
+    padding: 0 14px 14px;
+  }
+}
+
+h1 {
+  margin: 0;
+  color: var(--ink-100);
+  font-size: clamp(1.45rem, 2vw, 1.75rem);
+  line-height: 1.15;
+  letter-spacing: -0.035em;
+}
+
+h2 {
+  margin: 6px 0;
+  font-size: 2.5rem;
+  letter-spacing: -0.04em;
+}
+
+.error-banner {
+  margin: 0 0 14px;
+  padding: 12px 16px;
+  border: 1px solid var(--line-danger-strong);
+  border-radius: var(--radius-control);
+  color: var(--danger-tint-pale);
+  background: var(--surface-danger-strong);
+  font-size: 0.78rem;
+}
+
+.context-list {
+  display: grid;
+}

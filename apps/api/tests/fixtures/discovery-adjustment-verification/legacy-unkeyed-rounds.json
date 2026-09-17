@@ -1,0 +1,148 @@
+{
+  "protocolRevision": "questrade-adjustment-verification-v2",
+  "sampleSet": {
+    "protocolRevision": "questrade-adjustment-verification-v2",
+    "marketId": "CA_TSX",
+    "windowDays": 600,
+    "windowStart": "2025-01-19",
+    "frozenAt": "2026-09-10T21:00:00.000Z",
+    "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "limitations": [],
+    "samples": [
+      {
+        "sample": {
+          "marketId": "CA_TSX",
+          "symbol": "CTRL",
+          "exchange": "TSX",
+          "type": "CONTROL",
+          "effectiveDate": "2026-09-10",
+          "priceFactor": 1,
+          "volumeFactor": 1,
+          "source": "EODHD",
+          "sourceObservedAt": "2026-09-10T21:00:00.000Z"
+        },
+        "cashAmount": null,
+        "role": "CONTROL"
+      }
+    ]
+  },
+  "rounds": [
+    {
+      "round": 1,
+      "marketId": "CA_TSX",
+      "collectedAt": "2026-09-11T21:00:00.000Z",
+      "observedThrough": "2026-09-11T21:00:00.000Z",
+      "observations": [
+        {
+          "symbol": "CTRL",
+          "interval": "OneDay",
+          "pre": {
+            "start": "2026-09-09T20:00:00.000Z",
+            "close": 40,
+            "volume": 1000
+          },
+          "post": {
+            "start": "2026-09-10T20:00:00.000Z",
+            "close": 40,
+            "volume": 1000
+          },
+          "retrievedAt": "2026-09-11T21:00:00.000Z"
+        }
+      ],
+      "seriesRevisions": [
+        {
+          "symbol": "CTRL",
+          "interval": "OneDay",
+          "revision": "1111111111111111111111111111111111111111111111111111111111111111",
+          "barCount": 2,
+          "fetchedBarCount": 2
+        }
+      ],
+      "missing": [],
+      "revisionFindings": []
+    },
+    {
+      "round": 2,
+      "marketId": "CA_TSX",
+      "collectedAt": "2026-09-14T21:00:00.000Z",
+      "observedThrough": "2026-09-11T21:00:00.000Z",
+      "observations": [
+        {
+          "sampleKey": "[\"CA_TSX\",\"CTRL\",\"TSX\",\"CONTROL\",\"2026-09-10\",\"EODHD\",\"CONTROL\"]",
+          "symbol": "CTRL",
+          "interval": "OneDay",
+          "pre": {
+            "start": "2026-09-09T20:00:00.000Z",
+            "close": 40,
+            "volume": 1000
+          },
+          "post": {
+            "start": "2026-09-10T20:00:00.000Z",
+            "close": 40,
+            "volume": 1000
+          },
+          "retrievedAt": "2026-09-14T21:00:00.000Z"
+        }
+      ],
+      "seriesRevisions": [
+        {
+          "sampleKey": "[\"CA_TSX\",\"CTRL\",\"TSX\",\"CONTROL\",\"2026-09-10\",\"EODHD\",\"CONTROL\"]",
+          "symbol": "CTRL",
+          "interval": "OneDay",
+          "sampleType": "CONTROL",
+          "effectiveDate": "2026-09-10",
+          "role": "CONTROL",
+          "windowStart": "2026-08-21T00:00:00.000Z",
+          "windowEnd": "2026-09-30T00:00:00.000Z",
+          "revision": "2222222222222222222222222222222222222222222222222222222222222222",
+          "barCount": 2,
+          "fetchedBarCount": 3
+        }
+      ],
+      "missing": [],
+      "revisionFindings": []
+    },
+    {
+      "round": 3,
+      "marketId": "CA_TSX",
+      "collectedAt": "2026-09-15T21:00:00.000Z",
+      "observedThrough": "2026-09-11T21:00:00.000Z",
+      "observations": [
+        {
+          "sampleKey": "[\"CA_TSX\",\"CTRL\",\"TSX\",\"CONTROL\",\"2026-09-10\",\"EODHD\",\"CONTROL\"]",
+          "symbol": "CTRL",
+          "interval": "OneDay",
+          "pre": {
+            "start": "2026-09-09T20:00:00.000Z",
+            "close": 40,
+            "volume": 1000
+          },
+          "post": {
+            "start": "2026-09-10T20:00:00.000Z",
+            "close": 40,
+            "volume": 1000
+          },
+          "retrievedAt": "2026-09-15T21:00:00.000Z"
+        }
+      ],
+      "seriesRevisions": [
+        {
+          "sampleKey": "[\"CA_TSX\",\"CTRL\",\"TSX\",\"CONTROL\",\"2026-09-10\",\"EODHD\",\"CONTROL\"]",
+          "symbol": "CTRL",
+          "interval": "OneDay",
+          "sampleType": "CONTROL",
+          "effectiveDate": "2026-09-10",
+          "role": "CONTROL",
+          "windowStart": "2026-08-21T00:00:00.000Z",
+          "windowEnd": "2026-09-30T00:00:00.000Z",
+          "revision": "3333333333333333333333333333333333333333333333333333333333333333",
+          "barCount": 2,
+          "fetchedBarCount": 4
+        }
+      ],
+      "missing": [],
+      "revisionFindings": []
+    }
+  ],
+  "report": null
+}

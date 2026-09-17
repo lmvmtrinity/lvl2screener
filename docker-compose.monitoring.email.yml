@@ -1,0 +1,6 @@
+# Apply last, after the monitoring and optional local dashboard overlays.
+services:
+  alertmanager:
+    volumes:
+      - ./monitoring/alertmanager.email.generated.yml:/etc/alertmanager/alertmanager.yml:ro
+      - ./monitoring/secrets:/etc/alertmanager/secrets:ro

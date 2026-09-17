@@ -1,0 +1,95 @@
+rule_files:
+  - paper-bot-alerts.yml
+evaluation_interval: 1m
+tests:
+  - interval: 1m
+    input_series:
+      - series: 'scanner_paper_bot_funded_pending_facts{market_id="US_EQUITIES"}'
+        values: "50000+0x8"
+      - series: 'scanner_paper_bot_funded_oldest_pending_fact_age_ms{market_id="US_EQUITIES"}'
+        values: "400000+60000x8"
+      - series: 'scanner_market_data_state{market_id="US_EQUITIES"}'
+        values: "2+0x8"
+      - series: 'scanner_persistence_p95_latency_ms{entity="quote"}'
+        values: "2500+0x12"
+      - series: 'scanner_persistence_writes_total{entity="quote"}'
+        values: "6+0x12"
+      - series: 'scanner_persistence_last_latency_ms{entity="quote"}'
+        values: "880+0x12"
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: FundedBacklogCritical
+        exp_alerts: []
+      - eval_time: 3m
+        alertname: FundedBacklogCritical
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              market_id: US_EQUITIES
+            exp_annotations:
+              summary: Funded processing has a severe backlog
+              description: More than 1000 funded facts are pending and the oldest exceeds five minutes. Inspect processing errors and batch progress, including after market close. Do not skip retained facts.
+      - eval_time: 4m
+        alertname: ScannerPersistenceSeverelyDelayed
+        exp_alerts: []
+      - eval_time: 6m
+        alertname: ScannerPersistenceSeverelyDelayed
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              entity: quote
+            exp_annotations:
+              summary: Database persistence is severely delayed
+              description: The rolling persistence p95 gauge has remained above two seconds for five minutes. With a small or unchanged sample this can reflect one old slow write, not repeated slow writes; compare writes_total and last_latency before attributing ongoing latency. Inspect database locks, disk latency and overlapping app work.
+      - eval_time: 10m
+        alertname: ScannerPersistenceOverBudget
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              entity: quote
+            exp_annotations:
+              summary: Persistence p95 exceeds its operational target
+              description: The rolling bulk-write p95 gauge has remained above 500 ms for ten minutes. With a small or unchanged sample this can reflect one old slow write, not repeated slow writes; compare writes_total and last_latency before attributing ongoing latency. Inspect write latency by entity, database locks, disk latency and overlapping workloads.
+  - interval: 1m
+    input_series:
+      - series: 'scanner_paper_bot_funded_pending_facts{market_id="CA_TSX"}'
+        values: "500+0x8"
+      - series: 'scanner_paper_bot_funded_oldest_pending_fact_age_ms{market_id="CA_TSX"}'
+        values: "500000+0x8"
+      - series: 'scanner_persistence_p95_latency_ms{entity="quote"}'
+        values: "1500+0x8"
+    alert_rule_test:
+      - eval_time: 8m
+        alertname: FundedBacklogCritical
+        exp_alerts: []
+      - eval_time: 8m
+        alertname: ScannerPersistenceSeverelyDelayed
+        exp_alerts: []
+  - interval: 1m
+    input_series:
+      - series: 'scanner_backtest_automation_enabled{market_id="CA_TSX"}'
+        values: "1+0x40"
+      - series: 'scanner_backtest_automation_outstanding{market_id="CA_TSX"}'
+        values: "1+0x40"
+      - series: 'scanner_backtest_automation_oldest_outstanding_age_ms{market_id="CA_TSX"}'
+        values: "0+7200000x40"
+      - series: 'scanner_backtest_automation_failed_work{market_id="CA_TSX"}'
+        values: "0+0x40"
+      - series: 'scanner_backtest_automation_stage_failed{market_id="CA_TSX"}'
+        values: "0+0x40"
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: BacktestAutomationQueueStalled
+        exp_alerts: []
+      - eval_time: 40m
+        alertname: BacktestAutomationQueueStalled
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              market_id: CA_TSX
+            exp_annotations:
+              summary: Backtest automation queue appears stalled
+              description: Scheduled automation is enabled and an outstanding replay has not completed for over 24 hours. Inspect the worker lease, scanner runtime and retained-input coverage; a queued item is not evidence of progress.
+      - eval_time: 40m
+        alertname: BacktestAutomationWorkFailed
+        exp_alerts: []

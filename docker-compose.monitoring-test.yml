@@ -1,0 +1,28 @@
+# Ephemeral receiver harness for local Alertmanager delivery validation. It is test-only and is
+# intentionally separate from docker-compose.monitoring.yml so production never receives a fake
+# webhook sink by accident.
+services:
+  alert-receiver:
+    image: node:22.23.2-alpine
+    profiles: ["monitoring-test"]
+    command: ["node", "/receiver/alert-receiver.mjs"]
+    volumes:
+      - ./monitoring/alert-receiver.mjs:/receiver/alert-receiver.mjs:ro
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+  alertmanager:
+    depends_on:
+      alert-receiver:
+        condition: service_started
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+      - --cluster.listen-address=
+    volumes:
+      - ./monitoring/alertmanager.test.yml:/etc/alertmanager/alertmanager.yml:ro

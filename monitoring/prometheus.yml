@@ -1,0 +1,30 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+rule_files:
+  - /etc/prometheus/paper-bot-alerts.yml
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ["alertmanager:9093"]
+
+# The API is intentionally reached on the private Compose network. Do not publish Prometheus or
+# Alertmanager ports through this overlay; operators should expose them only through their own
+# authenticated monitoring plane. The US target returns 404 until its runtime is configured,
+# which is a deliberate fail-closed signal for multi-market commissioning.
+scrape_configs:
+  - job_name: paper-bot-ca
+    metrics_path: /metrics
+    params:
+      marketId: [CA_TSX]
+    static_configs:
+      - targets: ["api:3000"]
+
+  - job_name: paper-bot-us
+    metrics_path: /metrics
+    params:
+      marketId: [US_EQUITIES]
+    static_configs:
+      - targets: ["api:3000"]

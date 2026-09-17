@@ -1,0 +1,197 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main, staging]
+
+permissions:
+  contents: read
+
+jobs:
+
+
+  monitoring-rules:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.20.0
+      - name: Validate paper bot alert expressions and behavior
+        run: docker run --rm --entrypoint /bin/promtool --mount "type=bind,source=$PWD/monitoring,target=/rules,readonly" --workdir /rules prom/prometheus:v3.5.0 test rules paper-bot-alerts.test.yml paper-bot-critical.test.yml
+      - name: Validate monitoring service configuration
+        env:
+          ALERTMANAGER_WEBHOOK_URL: https://receiver.example.invalid/paper-bot
+        run: |
+          node scripts/render-alertmanager-config.mjs
+          docker run --rm --entrypoint /bin/promtool --mount "type=bind,source=$PWD/monitoring,target=/etc/prometheus,readonly" prom/prometheus:v3.5.0 check config /etc/prometheus/prometheus.yml
+          docker run --rm --entrypoint /bin/amtool --mount "type=bind,source=$PWD/monitoring,target=/etc/alertmanager,readonly" prom/alertmanager:v0.28.1 check-config /etc/alertmanager/alertmanager.generated.yml
+      - name: Validate local Alertmanager webhook delivery
+        run: |
+          set -eu
+          project=paper-bot-monitoring-ci
+          compose="docker compose -p $project -f docker-compose.yml -f docker-compose.monitoring.yml -f docker-compose.monitoring-test.yml --profile monitoring --profile monitoring-test"
+          cleanup() {
+            docker rm -f "$project-alertmanager-1" "$project-alert-receiver-1" >/dev/null 2>&1 || true
+            docker network rm "${project}_default" >/dev/null 2>&1 || true
+            docker volume rm "${project}_alertmanager_data" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+          $compose up -d alertmanager alert-receiver
+          docker run --rm --network "${project}_default" curlimages/curl:8.12.1 -fsS -X POST http://alertmanager:9093/api/v2/alerts -H 'content-type: application/json' --data '[{"labels":{"alertname":"ReceiverSmoke","severity":"warning"},"annotations":{"summary":"receiver smoke"},"startsAt":"2026-09-06T00:00:00Z"}]'
+          for i in {1..15}; do
+            if $compose logs --no-color alert-receiver | grep -q 'ALERT_RECEIVER_SMOKE'; then
+              echo "Alert successfully delivered to receiver"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "Alert was not delivered within timeout. Container logs:"
+          $compose logs --no-color
+          exit 1
+
+  node:
+    runs-on: ubuntu-24.04
+    env:
+      PERSISTENCE_TEST_DATABASE_URL: postgresql://tsx_scanner:ci_test_only@localhost:5432/tsx_scanner_test
+      AUDIT_TEST_DATABASE_URL: postgresql://tsx_scanner:ci_test_only@localhost:5432/tsx_scanner_test
+      REQUIRE_POSTGRES_INTEGRATION: "true"
+    services:
+      postgres:
+        image: timescale/timescaledb:2.29.2-pg17
+        env:
+          POSTGRES_DB: tsx_scanner_test
+          POSTGRES_USER: tsx_scanner
+          POSTGRES_PASSWORD: ci_test_only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U tsx_scanner -d tsx_scanner_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.12.4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.20.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm format:check
+      - run: pnpm lint
+      - run: pnpm typecheck
+      - run: pnpm run verify:market-boundaries
+      - run: pnpm build
+      # The Python suite (`pnpm test`'s other half) runs in the `python` job below, which is the
+      # only one with an interpreter and the scanner's dev extras installed. Running `pnpm test`
+      # here would shell out to pytest on a Python-less runner and fail after the Node tests pass.
+      # The API suite runs against one shared isolated PostgreSQL service, and several
+      # market-wide read models aggregate across all retained rows. Running files
+      # concurrently let other suites' `now()` rows contaminate those assertions, so the
+      # database suite follows the documented acceptance procedure and runs serially.
+      - run: pnpm --filter @tsx-scanner/contracts test
+      - run: pnpm --filter @tsx-scanner/api exec vitest run --no-file-parallelism
+      - run: pnpm --filter @tsx-scanner/web test
+      - run: pnpm audit --audit-level high
+      # W5: structural check that the default and remote Compose profiles keep Postgres/scanner/
+      # api off the host and that the remote profile's front door is where it should be. See
+      # scripts/verify-compose-trust-boundary.mjs.
+      - run: pnpm run verify:compose
+      # Paper-bot deployment preflight combines the Compose/runtime funded-account
+      # wiring, migration inventory, monitoring contract, and both repository guards.
+      - run: pnpm run verify:paper-bot
+
+  e2e:
+    # End-to-end acceptance against the real Compose stack on the mock market
+    # transport: the operator commissioning workflow (tests/e2e/
+    # commissioning.spec.ts) and the paper-trading bot's durable evidence
+    # lifecycle (tests/e2e/paper-bot.spec.ts). Kept in its own job because it
+    # builds container images and restarts the API twice, so a failure here is
+    # attributable on its own rather than inside the fast static/unit job.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.12.4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.20.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # pnpm 10 does not run dependency lifecycle scripts, so @playwright/test
+      # never downloads its browsers during install. Without this the suite
+      # fails at browser launch rather than on any real regression.
+      - run: pnpm exec playwright install --with-deps chromium
+      # Brings up docker-compose.yml (plus the debug-ports override the suite
+      # needs), seeds the fixtures, restarts the API to exercise the durable
+      # recovery path, and tears the stack down afterwards.
+      - run: pnpm test:e2e
+      - name: Upload Playwright report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7
+          if-no-files-found: ignore
+
+  python:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: 3.12.11
+          cache: pip
+          cache-dependency-path: services/scanner/pyproject.toml
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install -e "services/scanner[dev]"
+      - run: python -m ruff check services/scanner
+      - run: python -m mypy --config-file services/scanner/pyproject.toml services/scanner/app
+      - run: python -m pytest services/scanner/tests
+
+  container-scan:
+    # W5: container hardening acceptance -- "image vulnerability scan in CI". Trivy needs no
+    # account/token (unlike `docker scout`, which requires a Docker Hub login to run
+    # unauthenticated-rate-limit-free in CI), so it's the simpler of the two to wire up here.
+    # This is an enforced quality gate. New high/critical image vulnerabilities must be fixed or
+    # explicitly reviewed in a versioned Trivy policy before a change can merge.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build api image
+        run: docker build -f apps/api/Dockerfile -t tsx-scanner-api:ci .
+      - name: Build scanner image
+        run: docker build -f services/scanner/Dockerfile -t tsx-scanner-scanner:ci .
+      - name: Build web image
+        run: docker build -f apps/web/Dockerfile -t tsx-scanner-web:ci .
+      - name: Scan api image
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: tsx-scanner-api:ci
+          severity: CRITICAL,HIGH
+          exit-code: "1"
+      # Only this image needs the policy file: its `python:3.13-slim` base carries Debian packages
+      # with no fix available upstream. The api and web scans are deliberately left without it so
+      # a reviewed exception here can never mask a finding there. See .trivyignore.yaml.
+      - name: Scan scanner image
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: tsx-scanner-scanner:ci
+          severity: CRITICAL,HIGH
+          exit-code: "1"
+          trivyignores: .trivyignore.yaml
+      - name: Scan web image
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: tsx-scanner-web:ci
+          severity: CRITICAL,HIGH
+          exit-code: "1"

@@ -1,0 +1,13 @@
+title = "lvl2screener public release"
+minVersion = "8.25.0"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Questrade API hostname fixture is an endpoint, not a credential"
+targetRules = ["generic-api-key"]
+condition = "AND"
+regexTarget = "line"
+paths = ['''(?:^|[\\/])apps[\\/]api[\\/]tests[\\/]discovery-feed-probe\.test\.ts$''']
+regexes = ['''apiServer:\s*["']api01\.iq\.questrade\.com["']''']

@@ -1,0 +1,59 @@
+{
+  "name": "tsx-intraday-scanner",
+  "version": "1.0.0",
+  "private": true,
+  "packageManager": "pnpm@10.12.4",
+  "scripts": {
+    "benchmark:persistence": "node scripts/benchmark-persistence.mjs",
+    "monitoring:render": "node scripts/render-alertmanager-config.mjs",
+    "monitoring:render-email": "node scripts/render-alertmanager-email.mjs",
+    "build": "pnpm -r build && node scripts/write-research-runtime-identity.mjs",
+    "dev": "docker compose up --build",
+    "down": "docker compose down",
+    "format": "prettier --write \"**/*.{ts,tsx,mjs,css}\"",
+    "format:check": "prettier --check \"**/*.{ts,tsx,mjs,css}\"",
+    "lint": "eslint .",
+    "lint:python": "python -m ruff check services/scanner",
+    "typecheck:python": "python -m mypy --config-file services/scanner/pyproject.toml services/scanner/app",
+    "backup:db": "node scripts/backup-volume.mjs",
+    "backup:verify": "node scripts/verify-backup-volume.mjs",
+    "backup:test": "node scripts/tests/backup-volume.test.mjs",
+    "test:scripts": "node --test scripts/tests/command-resolution.test.mjs",
+    "phase0": "pnpm --filter @tsx-scanner/api phase0",
+    "phase4a": "pnpm --filter @tsx-scanner/api phase4a",
+    "test": "pnpm run test:node && pnpm run test:scanner",
+    "test:e2e": "node scripts/run-e2e.mjs",
+    "test:e2e:headed": "node scripts/run-e2e.mjs --headed",
+    "test:node": "pnpm -r --if-present test",
+    "test:scanner": "python -m pytest services/scanner/tests",
+    "typecheck": "pnpm -r --if-present typecheck",
+    "verify:docs": "node scripts/verify-docs.mjs",
+    "verify:market-boundaries": "node scripts/verify-market-boundaries.mjs",
+    "verify:compose": "node scripts/verify-compose-trust-boundary.mjs",
+    "verify:paper-bot": "node scripts/verify-paper-bot-deployment.mjs",
+    "visual:fixtures": "node scripts/visual/validate-fixtures.mjs",
+    "visual:screenshots": "node scripts/visual/screenshot.mjs"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.30.0",
+    "@playwright/test": "^1.62.1",
+    "@types/node": "^22.0.0",
+    "eslint": "^9.30.0",
+    "fastify-tsconfig": "^3.0.0",
+    "globals": "^16.3.0",
+    "prettier": "^3.9.6",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.0",
+    "typescript-eslint": "^8.35.0",
+    "vitest": "^3.2.0"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/lmvmtrinity/lvl2screener.git"
+  },
+  "bugs": {
+    "url": "https://github.com/lmvmtrinity/lvl2screener/issues"
+  },
+  "homepage": "https://github.com/lmvmtrinity/lvl2screener#readme"
+}

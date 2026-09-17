@@ -1,0 +1,3610 @@
+[
+  {
+    "input": {
+      "marketId": "CA_TSX",
+      "policyVersion": "ca-discovery-v1",
+      "providerCode": "EXAMPLE",
+      "providerExchange": "TSX",
+      "tradingDate": "2026-11-03",
+      "evaluationAt": "2026-11-03T14:40:15Z",
+      "completedBarEnd": "2026-11-03T14:40:00Z",
+      "identity": {
+        "marketId": "CA_TSX",
+        "symbolId": 123,
+        "symbol": "EXAMPLE.TO",
+        "exchange": "TSX",
+        "currency": "CAD",
+        "classification": "COMMON_STOCK_REVIEWED",
+        "observedAt": "2026-11-03T14:40:15Z",
+        "source": "FIXTURE"
+      },
+      "marketCap": {
+        "value": 2000000000.0,
+        "currency": "CAD",
+        "observedAt": "2026-11-03T14:40:15Z",
+        "source": "FIXTURE"
+      },
+      "quote": {
+        "price": 50.0,
+        "open": 49.0,
+        "priceAt": "2026-11-03T14:40:14Z",
+        "observedAt": "2026-11-03T14:40:15Z",
+        "delayed": false,
+        "halted": false,
+        "session": "REGULAR",
+        "source": "FIXTURE"
+      },
+      "calendar": {
+        "marketId": "CA_TSX",
+        "verified": true,
+        "revision": "synthetic-calendar-v1",
+        "source": "FIXTURE",
+        "observedAt": "2026-11-03T14:40:15Z",
+        "sessions": [
+          {
+            "tradingDate": "2026-06-29",
+            "open": "2026-06-29T13:30:00Z",
+            "close": "2026-06-29T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-06-30",
+            "open": "2026-06-30T13:30:00Z",
+            "close": "2026-06-30T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-07-01",
+            "open": "2026-07-01T13:30:00Z",
+            "close": "2026-07-01T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-07-02",
+            "open": "2026-07-02T13:30:00Z",
+            "close": "2026-07-02T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-07-03",
+            "open": "2026-07-03T13:30:00Z",
+            "close": "2026-07-03T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-07-06",
+            "open": "2026-07-06T13:30:00Z",
+            "close": "2026-07-06T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-07-07",
+            "open": "2026-07-07T13:30:00Z",
+            "close": "2026-07-07T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-07-08",
+            "open": "2026-07-08T13:30:00Z",
+            "close": "2026-07-08T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-07-09",
+            "open": "2026-07-09T13:30:00Z",
+            "close": "2026-07-09T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-07-10",
+            "open": "2026-07-10T13:30:00Z",
+            "close": "2026-07-10T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-07-13",
+            "open": "2026-07-13T13:30:00Z",
+            "close": "2026-07-13T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-07-14",
+            "open": "2026-07-14T13:30:00Z",
+            "close": "2026-07-14T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-07-15",
+            "open": "2026-07-15T13:30:00Z",
+            "close": "2026-07-15T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-07-16",
+            "open": "2026-07-16T13:30:00Z",
+            "close": "2026-07-16T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-07-17",
+            "open": "2026-07-17T13:30:00Z",
+            "close": "2026-07-17T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-07-20",
+            "open": "2026-07-20T13:30:00Z",
+            "close": "2026-07-20T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-07-21",
+            "open": "2026-07-21T13:30:00Z",
+            "close": "2026-07-21T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-07-22",
+            "open": "2026-07-22T13:30:00Z",
+            "close": "2026-07-22T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-07-23",
+            "open": "2026-07-23T13:30:00Z",
+            "close": "2026-07-23T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-07-24",
+            "open": "2026-07-24T13:30:00Z",
+            "close": "2026-07-24T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-07-27",
+            "open": "2026-07-27T13:30:00Z",
+            "close": "2026-07-27T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-07-28",
+            "open": "2026-07-28T13:30:00Z",
+            "close": "2026-07-28T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-07-29",
+            "open": "2026-07-29T13:30:00Z",
+            "close": "2026-07-29T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-07-30",
+            "open": "2026-07-30T13:30:00Z",
+            "close": "2026-07-30T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-07-31",
+            "open": "2026-07-31T13:30:00Z",
+            "close": "2026-07-31T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-08-03",
+            "open": "2026-08-03T13:30:00Z",
+            "close": "2026-08-03T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-08-04",
+            "open": "2026-08-04T13:30:00Z",
+            "close": "2026-08-04T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-08-05",
+            "open": "2026-08-05T13:30:00Z",
+            "close": "2026-08-05T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-08-06",
+            "open": "2026-08-06T13:30:00Z",
+            "close": "2026-08-06T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-08-07",
+            "open": "2026-08-07T13:30:00Z",
+            "close": "2026-08-07T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-08-10",
+            "open": "2026-08-10T13:30:00Z",
+            "close": "2026-08-10T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-08-11",
+            "open": "2026-08-11T13:30:00Z",
+            "close": "2026-08-11T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-08-12",
+            "open": "2026-08-12T13:30:00Z",
+            "close": "2026-08-12T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-08-13",
+            "open": "2026-08-13T13:30:00Z",
+            "close": "2026-08-13T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-08-14",
+            "open": "2026-08-14T13:30:00Z",
+            "close": "2026-08-14T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-08-17",
+            "open": "2026-08-17T13:30:00Z",
+            "close": "2026-08-17T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-08-18",
+            "open": "2026-08-18T13:30:00Z",
+            "close": "2026-08-18T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-08-19",
+            "open": "2026-08-19T13:30:00Z",
+            "close": "2026-08-19T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-08-20",
+            "open": "2026-08-20T13:30:00Z",
+            "close": "2026-08-20T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-08-21",
+            "open": "2026-08-21T13:30:00Z",
+            "close": "2026-08-21T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-08-24",
+            "open": "2026-08-24T13:30:00Z",
+            "close": "2026-08-24T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-08-25",
+            "open": "2026-08-25T13:30:00Z",
+            "close": "2026-08-25T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-08-26",
+            "open": "2026-08-26T13:30:00Z",
+            "close": "2026-08-26T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-08-27",
+            "open": "2026-08-27T13:30:00Z",
+            "close": "2026-08-27T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-08-28",
+            "open": "2026-08-28T13:30:00Z",
+            "close": "2026-08-28T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-08-31",
+            "open": "2026-08-31T13:30:00Z",
+            "close": "2026-08-31T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-09-01",
+            "open": "2026-09-01T13:30:00Z",
+            "close": "2026-09-01T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-09-02",
+            "open": "2026-09-02T13:30:00Z",
+            "close": "2026-09-02T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-09-03",
+            "open": "2026-09-03T13:30:00Z",
+            "close": "2026-09-03T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-09-04",
+            "open": "2026-09-04T13:30:00Z",
+            "close": "2026-09-04T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-09-07",
+            "open": "2026-09-07T13:30:00Z",
+            "close": "2026-09-07T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-09-08",
+            "open": "2026-09-08T13:30:00Z",
+            "close": "2026-09-08T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-09-09",
+            "open": "2026-09-09T13:30:00Z",
+            "close": "2026-09-09T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-09-10",
+            "open": "2026-09-10T13:30:00Z",
+            "close": "2026-09-10T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-09-11",
+            "open": "2026-09-11T13:30:00Z",
+            "close": "2026-09-11T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-09-14",
+            "open": "2026-09-14T13:30:00Z",
+            "close": "2026-09-14T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-09-15",
+            "open": "2026-09-15T13:30:00Z",
+            "close": "2026-09-15T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-09-16",
+            "open": "2026-09-16T13:30:00Z",
+            "close": "2026-09-16T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-09-17",
+            "open": "2026-09-17T13:30:00Z",
+            "close": "2026-09-17T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-09-18",
+            "open": "2026-09-18T13:30:00Z",
+            "close": "2026-09-18T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-09-21",
+            "open": "2026-09-21T13:30:00Z",
+            "close": "2026-09-21T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-09-22",
+            "open": "2026-09-22T13:30:00Z",
+            "close": "2026-09-22T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-09-23",
+            "open": "2026-09-23T13:30:00Z",
+            "close": "2026-09-23T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-09-24",
+            "open": "2026-09-24T13:30:00Z",
+            "close": "2026-09-24T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-09-25",
+            "open": "2026-09-25T13:30:00Z",
+            "close": "2026-09-25T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-09-28",
+            "open": "2026-09-28T13:30:00Z",
+            "close": "2026-09-28T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-09-29",
+            "open": "2026-09-29T13:30:00Z",
+            "close": "2026-09-29T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-09-30",
+            "open": "2026-09-30T13:30:00Z",
+            "close": "2026-09-30T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-10-01",
+            "open": "2026-10-01T13:30:00Z",
+            "close": "2026-10-01T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-10-02",
+            "open": "2026-10-02T13:30:00Z",
+            "close": "2026-10-02T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-10-05",
+            "open": "2026-10-05T13:30:00Z",
+            "close": "2026-10-05T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-10-06",
+            "open": "2026-10-06T13:30:00Z",
+            "close": "2026-10-06T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-10-07",
+            "open": "2026-10-07T13:30:00Z",
+            "close": "2026-10-07T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-10-08",
+            "open": "2026-10-08T13:30:00Z",
+            "close": "2026-10-08T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-10-09",
+            "open": "2026-10-09T13:30:00Z",
+            "close": "2026-10-09T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-10-12",
+            "open": "2026-10-12T13:30:00Z",
+            "close": "2026-10-12T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-10-13",
+            "open": "2026-10-13T13:30:00Z",
+            "close": "2026-10-13T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-10-14",
+            "open": "2026-10-14T13:30:00Z",
+            "close": "2026-10-14T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-10-15",
+            "open": "2026-10-15T13:30:00Z",
+            "close": "2026-10-15T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-10-16",
+            "open": "2026-10-16T13:30:00Z",
+            "close": "2026-10-16T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-10-19",
+            "open": "2026-10-19T13:30:00Z",
+            "close": "2026-10-19T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-10-20",
+            "open": "2026-10-20T13:30:00Z",
+            "close": "2026-10-20T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-10-21",
+            "open": "2026-10-21T13:30:00Z",
+            "close": "2026-10-21T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-10-22",
+            "open": "2026-10-22T13:30:00Z",
+            "close": "2026-10-22T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-10-23",
+            "open": "2026-10-23T13:30:00Z",
+            "close": "2026-10-23T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-10-26",
+            "open": "2026-10-26T13:30:00Z",
+            "close": "2026-10-26T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-10-27",
+            "open": "2026-10-27T13:30:00Z",
+            "close": "2026-10-27T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-10-28",
+            "open": "2026-10-28T13:30:00Z",
+            "close": "2026-10-28T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-10-29",
+            "open": "2026-10-29T13:30:00Z",
+            "close": "2026-10-29T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-10-30",
+            "open": "2026-10-30T13:30:00Z",
+            "close": "2026-10-30T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-11-02",
+            "open": "2026-11-02T14:30:00Z",
+            "close": "2026-11-02T21:00:00Z"
+          },
+          {
+            "tradingDate": "2026-11-03",
+            "open": "2026-11-03T14:30:00Z",
+            "close": "2026-11-03T21:00:00Z"
+          }
+        ]
+      },
+      "adjustment": {
+        "verified": true,
+        "revision": "fixture-split-revision-1",
+        "source": "FIXTURE",
+        "convention": "SPLIT_ADJUSTED",
+        "hasUnresolvedCorporateAction": false,
+        "observedAt": "2026-11-03T14:40:15Z"
+      },
+      "dailyBars": [
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-06-29T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-06-29"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-06-30T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-06-30"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-07-01T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-07-01"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-07-02T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-07-02"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-07-03T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-07-03"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-07-06T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-07-06"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-07-07T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-07-07"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-07-08T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-07-08"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-07-09T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-07-09"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-07-10T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-07-10"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-07-13T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-07-13"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-07-14T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-07-14"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-07-15T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-07-15"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-07-16T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-07-16"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-07-17T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-07-17"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-07-20T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-07-20"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-07-21T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-07-21"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-07-22T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-07-22"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-07-23T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-07-23"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-07-24T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-07-24"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-07-27T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-07-27"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-07-28T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-07-28"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-07-29T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-07-29"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-07-30T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-07-30"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-07-31T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-07-31"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-08-03T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-08-03"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-08-04T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-08-04"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-08-05T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-08-05"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-08-06T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-08-06"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-08-07T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-08-07"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-08-10T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-08-10"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-08-11T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-08-11"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-08-12T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-08-12"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-08-13T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-08-13"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-08-14T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-08-14"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-08-17T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-08-17"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-08-18T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-08-18"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-08-19T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-08-19"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-08-20T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-08-20"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-08-21T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-08-21"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-08-24T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-08-24"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-08-25T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-08-25"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-08-26T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-08-26"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-08-27T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-08-27"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-08-28T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-08-28"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-08-31T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-08-31"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-09-01T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-09-01"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-09-02T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-09-02"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-09-03T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-09-03"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-09-04T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-09-04"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-09-07T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-09-07"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-09-08T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-09-08"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-09-09T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-09-09"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-09-10T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-09-10"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-09-11T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-09-11"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-09-14T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-09-14"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-09-15T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-09-15"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-09-16T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-09-16"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-09-17T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-09-17"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-09-18T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-09-18"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-09-21T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-09-21"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-09-22T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-09-22"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-09-23T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-09-23"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-09-24T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-09-24"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-09-25T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-09-25"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-09-28T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-09-28"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-09-29T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-09-29"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-09-30T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-09-30"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-10-01T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-10-01"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-10-02T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-10-02"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-10-05T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-10-05"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-10-06T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-10-06"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-10-07T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-10-07"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-10-08T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-10-08"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-10-09T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-10-09"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-10-12T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-10-12"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-10-13T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-10-13"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-10-14T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-10-14"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-10-15T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-10-15"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-10-16T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-10-16"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-10-19T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-10-19"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-10-20T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-10-20"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-10-21T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-10-21"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-10-22T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-10-22"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-10-23T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-10-23"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-10-26T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-10-26"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-10-27T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-10-27"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-10-28T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-10-28"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-10-29T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-10-29"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-10-30T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-10-30"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-11-02T21:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-11-02"
+        }
+      ],
+      "slotBars": [
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 100000.0,
+          "observedAt": "2026-10-20T13:40:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "start": "2026-10-20T13:35:00Z",
+          "end": "2026-10-20T13:40:00Z"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 100000.0,
+          "observedAt": "2026-10-21T13:40:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "start": "2026-10-21T13:35:00Z",
+          "end": "2026-10-21T13:40:00Z"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 100000.0,
+          "observedAt": "2026-10-22T13:40:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "start": "2026-10-22T13:35:00Z",
+          "end": "2026-10-22T13:40:00Z"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 100000.0,
+          "observedAt": "2026-10-23T13:40:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "start": "2026-10-23T13:35:00Z",
+          "end": "2026-10-23T13:40:00Z"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 100000.0,
+          "observedAt": "2026-10-26T13:40:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "start": "2026-10-26T13:35:00Z",
+          "end": "2026-10-26T13:40:00Z"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 100000.0,
+          "observedAt": "2026-10-27T13:40:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "start": "2026-10-27T13:35:00Z",
+          "end": "2026-10-27T13:40:00Z"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 100000.0,
+          "observedAt": "2026-10-28T13:40:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "start": "2026-10-28T13:35:00Z",
+          "end": "2026-10-28T13:40:00Z"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 100000.0,
+          "observedAt": "2026-10-29T13:40:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "start": "2026-10-29T13:35:00Z",
+          "end": "2026-10-29T13:40:00Z"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 100000.0,
+          "observedAt": "2026-10-30T13:40:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "start": "2026-10-30T13:35:00Z",
+          "end": "2026-10-30T13:40:00Z"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 100000.0,
+          "observedAt": "2026-11-02T14:40:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "start": "2026-11-02T14:35:00Z",
+          "end": "2026-11-02T14:40:00Z"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 200000.0,
+          "observedAt": "2026-11-03T14:40:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "start": "2026-11-03T14:35:00Z",
+          "end": "2026-11-03T14:40:00Z"
+        }
+      ]
+    },
+    "result": {
+      "marketId": "CA_TSX",
+      "policyVersion": "ca-discovery-v1",
+      "providerCode": "EXAMPLE",
+      "providerExchange": "TSX",
+      "symbolId": 123,
+      "tradingDate": "2026-11-03",
+      "evaluationAt": "2026-11-03T14:40:15Z",
+      "computedAt": "2026-11-03T14:40:15Z",
+      "completedBarEnd": "2026-11-03T14:40:00Z",
+      "state": "PASS",
+      "reasons": [],
+      "metrics": {
+        "price": {
+          "value": 50.0,
+          "asOf": "2026-11-03T14:40:15Z"
+        },
+        "marketCap": {
+          "value": 2000000000.0,
+          "asOf": "2026-11-03T14:40:15Z"
+        },
+        "averageVolume90d": {
+          "value": 2000000.0,
+          "asOf": "2026-11-02T21:00:01Z"
+        },
+        "averageVolume30d": {
+          "value": 2000000.0,
+          "asOf": "2026-11-02T21:00:01Z"
+        },
+        "atr14": {
+          "value": 2.0,
+          "asOf": "2026-11-02T21:00:01Z"
+        },
+        "atrPct": {
+          "value": 4.0,
+          "asOf": "2026-11-03T14:40:15Z"
+        },
+        "relativeVolume": {
+          "value": 2.0,
+          "asOf": "2026-11-03T14:40:01Z"
+        },
+        "changeFromOpenPct": {
+          "value": 2.0408163265306123,
+          "asOf": "2026-11-03T14:40:15Z"
+        },
+        "dollarVolume30d": {
+          "value": 100000000.0,
+          "asOf": "2026-11-03T14:40:15Z"
+        }
+      }
+    }
+  },
+  {
+    "input": {
+      "marketId": "US_EQUITIES",
+      "policyVersion": "us-discovery-v1",
+      "providerCode": "EXAMPLE",
+      "providerExchange": "NASDAQ",
+      "tradingDate": "2026-11-03",
+      "evaluationAt": "2026-11-03T14:40:15Z",
+      "completedBarEnd": "2026-11-03T14:40:00Z",
+      "identity": {
+        "marketId": "US_EQUITIES",
+        "symbolId": 123,
+        "symbol": "EXAMPLE",
+        "exchange": "NASDAQ",
+        "currency": "USD",
+        "classification": "COMMON_STOCK_REVIEWED",
+        "observedAt": "2026-11-03T14:40:15Z",
+        "source": "FIXTURE"
+      },
+      "marketCap": {
+        "value": 2000000000.0,
+        "currency": "USD",
+        "observedAt": "2026-11-03T14:40:15Z",
+        "source": "FIXTURE"
+      },
+      "quote": {
+        "price": 50.0,
+        "open": 49.0,
+        "priceAt": "2026-11-03T14:40:14Z",
+        "observedAt": "2026-11-03T14:40:15Z",
+        "delayed": false,
+        "halted": false,
+        "session": "REGULAR",
+        "source": "FIXTURE"
+      },
+      "calendar": {
+        "marketId": "US_EQUITIES",
+        "verified": true,
+        "revision": "synthetic-calendar-v1",
+        "source": "FIXTURE",
+        "observedAt": "2026-11-03T14:40:15Z",
+        "sessions": [
+          {
+            "tradingDate": "2026-06-29",
+            "open": "2026-06-29T13:30:00Z",
+            "close": "2026-06-29T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-06-30",
+            "open": "2026-06-30T13:30:00Z",
+            "close": "2026-06-30T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-07-01",
+            "open": "2026-07-01T13:30:00Z",
+            "close": "2026-07-01T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-07-02",
+            "open": "2026-07-02T13:30:00Z",
+            "close": "2026-07-02T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-07-03",
+            "open": "2026-07-03T13:30:00Z",
+            "close": "2026-07-03T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-07-06",
+            "open": "2026-07-06T13:30:00Z",
+            "close": "2026-07-06T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-07-07",
+            "open": "2026-07-07T13:30:00Z",
+            "close": "2026-07-07T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-07-08",
+            "open": "2026-07-08T13:30:00Z",
+            "close": "2026-07-08T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-07-09",
+            "open": "2026-07-09T13:30:00Z",
+            "close": "2026-07-09T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-07-10",
+            "open": "2026-07-10T13:30:00Z",
+            "close": "2026-07-10T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-07-13",
+            "open": "2026-07-13T13:30:00Z",
+            "close": "2026-07-13T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-07-14",
+            "open": "2026-07-14T13:30:00Z",
+            "close": "2026-07-14T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-07-15",
+            "open": "2026-07-15T13:30:00Z",
+            "close": "2026-07-15T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-07-16",
+            "open": "2026-07-16T13:30:00Z",
+            "close": "2026-07-16T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-07-17",
+            "open": "2026-07-17T13:30:00Z",
+            "close": "2026-07-17T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-07-20",
+            "open": "2026-07-20T13:30:00Z",
+            "close": "2026-07-20T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-07-21",
+            "open": "2026-07-21T13:30:00Z",
+            "close": "2026-07-21T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-07-22",
+            "open": "2026-07-22T13:30:00Z",
+            "close": "2026-07-22T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-07-23",
+            "open": "2026-07-23T13:30:00Z",
+            "close": "2026-07-23T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-07-24",
+            "open": "2026-07-24T13:30:00Z",
+            "close": "2026-07-24T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-07-27",
+            "open": "2026-07-27T13:30:00Z",
+            "close": "2026-07-27T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-07-28",
+            "open": "2026-07-28T13:30:00Z",
+            "close": "2026-07-28T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-07-29",
+            "open": "2026-07-29T13:30:00Z",
+            "close": "2026-07-29T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-07-30",
+            "open": "2026-07-30T13:30:00Z",
+            "close": "2026-07-30T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-07-31",
+            "open": "2026-07-31T13:30:00Z",
+            "close": "2026-07-31T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-08-03",
+            "open": "2026-08-03T13:30:00Z",
+            "close": "2026-08-03T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-08-04",
+            "open": "2026-08-04T13:30:00Z",
+            "close": "2026-08-04T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-08-05",
+            "open": "2026-08-05T13:30:00Z",
+            "close": "2026-08-05T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-08-06",
+            "open": "2026-08-06T13:30:00Z",
+            "close": "2026-08-06T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-08-07",
+            "open": "2026-08-07T13:30:00Z",
+            "close": "2026-08-07T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-08-10",
+            "open": "2026-08-10T13:30:00Z",
+            "close": "2026-08-10T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-08-11",
+            "open": "2026-08-11T13:30:00Z",
+            "close": "2026-08-11T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-08-12",
+            "open": "2026-08-12T13:30:00Z",
+            "close": "2026-08-12T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-08-13",
+            "open": "2026-08-13T13:30:00Z",
+            "close": "2026-08-13T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-08-14",
+            "open": "2026-08-14T13:30:00Z",
+            "close": "2026-08-14T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-08-17",
+            "open": "2026-08-17T13:30:00Z",
+            "close": "2026-08-17T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-08-18",
+            "open": "2026-08-18T13:30:00Z",
+            "close": "2026-08-18T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-08-19",
+            "open": "2026-08-19T13:30:00Z",
+            "close": "2026-08-19T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-08-20",
+            "open": "2026-08-20T13:30:00Z",
+            "close": "2026-08-20T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-08-21",
+            "open": "2026-08-21T13:30:00Z",
+            "close": "2026-08-21T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-08-24",
+            "open": "2026-08-24T13:30:00Z",
+            "close": "2026-08-24T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-08-25",
+            "open": "2026-08-25T13:30:00Z",
+            "close": "2026-08-25T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-08-26",
+            "open": "2026-08-26T13:30:00Z",
+            "close": "2026-08-26T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-08-27",
+            "open": "2026-08-27T13:30:00Z",
+            "close": "2026-08-27T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-08-28",
+            "open": "2026-08-28T13:30:00Z",
+            "close": "2026-08-28T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-08-31",
+            "open": "2026-08-31T13:30:00Z",
+            "close": "2026-08-31T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-09-01",
+            "open": "2026-09-01T13:30:00Z",
+            "close": "2026-09-01T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-09-02",
+            "open": "2026-09-02T13:30:00Z",
+            "close": "2026-09-02T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-09-03",
+            "open": "2026-09-03T13:30:00Z",
+            "close": "2026-09-03T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-09-04",
+            "open": "2026-09-04T13:30:00Z",
+            "close": "2026-09-04T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-09-07",
+            "open": "2026-09-07T13:30:00Z",
+            "close": "2026-09-07T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-09-08",
+            "open": "2026-09-08T13:30:00Z",
+            "close": "2026-09-08T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-09-09",
+            "open": "2026-09-09T13:30:00Z",
+            "close": "2026-09-09T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-09-10",
+            "open": "2026-09-10T13:30:00Z",
+            "close": "2026-09-10T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-09-11",
+            "open": "2026-09-11T13:30:00Z",
+            "close": "2026-09-11T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-09-14",
+            "open": "2026-09-14T13:30:00Z",
+            "close": "2026-09-14T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-09-15",
+            "open": "2026-09-15T13:30:00Z",
+            "close": "2026-09-15T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-09-16",
+            "open": "2026-09-16T13:30:00Z",
+            "close": "2026-09-16T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-09-17",
+            "open": "2026-09-17T13:30:00Z",
+            "close": "2026-09-17T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-09-18",
+            "open": "2026-09-18T13:30:00Z",
+            "close": "2026-09-18T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-09-21",
+            "open": "2026-09-21T13:30:00Z",
+            "close": "2026-09-21T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-09-22",
+            "open": "2026-09-22T13:30:00Z",
+            "close": "2026-09-22T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-09-23",
+            "open": "2026-09-23T13:30:00Z",
+            "close": "2026-09-23T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-09-24",
+            "open": "2026-09-24T13:30:00Z",
+            "close": "2026-09-24T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-09-25",
+            "open": "2026-09-25T13:30:00Z",
+            "close": "2026-09-25T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-09-28",
+            "open": "2026-09-28T13:30:00Z",
+            "close": "2026-09-28T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-09-29",
+            "open": "2026-09-29T13:30:00Z",
+            "close": "2026-09-29T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-09-30",
+            "open": "2026-09-30T13:30:00Z",
+            "close": "2026-09-30T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-10-01",
+            "open": "2026-10-01T13:30:00Z",
+            "close": "2026-10-01T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-10-02",
+            "open": "2026-10-02T13:30:00Z",
+            "close": "2026-10-02T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-10-05",
+            "open": "2026-10-05T13:30:00Z",
+            "close": "2026-10-05T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-10-06",
+            "open": "2026-10-06T13:30:00Z",
+            "close": "2026-10-06T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-10-07",
+            "open": "2026-10-07T13:30:00Z",
+            "close": "2026-10-07T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-10-08",
+            "open": "2026-10-08T13:30:00Z",
+            "close": "2026-10-08T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-10-09",
+            "open": "2026-10-09T13:30:00Z",
+            "close": "2026-10-09T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-10-12",
+            "open": "2026-10-12T13:30:00Z",
+            "close": "2026-10-12T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-10-13",
+            "open": "2026-10-13T13:30:00Z",
+            "close": "2026-10-13T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-10-14",
+            "open": "2026-10-14T13:30:00Z",
+            "close": "2026-10-14T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-10-15",
+            "open": "2026-10-15T13:30:00Z",
+            "close": "2026-10-15T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-10-16",
+            "open": "2026-10-16T13:30:00Z",
+            "close": "2026-10-16T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-10-19",
+            "open": "2026-10-19T13:30:00Z",
+            "close": "2026-10-19T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-10-20",
+            "open": "2026-10-20T13:30:00Z",
+            "close": "2026-10-20T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-10-21",
+            "open": "2026-10-21T13:30:00Z",
+            "close": "2026-10-21T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-10-22",
+            "open": "2026-10-22T13:30:00Z",
+            "close": "2026-10-22T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-10-23",
+            "open": "2026-10-23T13:30:00Z",
+            "close": "2026-10-23T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-10-26",
+            "open": "2026-10-26T13:30:00Z",
+            "close": "2026-10-26T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-10-27",
+            "open": "2026-10-27T13:30:00Z",
+            "close": "2026-10-27T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-10-28",
+            "open": "2026-10-28T13:30:00Z",
+            "close": "2026-10-28T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-10-29",
+            "open": "2026-10-29T13:30:00Z",
+            "close": "2026-10-29T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-10-30",
+            "open": "2026-10-30T13:30:00Z",
+            "close": "2026-10-30T20:00:00Z"
+          },
+          {
+            "tradingDate": "2026-11-02",
+            "open": "2026-11-02T14:30:00Z",
+            "close": "2026-11-02T21:00:00Z"
+          },
+          {
+            "tradingDate": "2026-11-03",
+            "open": "2026-11-03T14:30:00Z",
+            "close": "2026-11-03T21:00:00Z"
+          }
+        ]
+      },
+      "adjustment": {
+        "verified": true,
+        "revision": "fixture-split-revision-1",
+        "source": "FIXTURE",
+        "convention": "SPLIT_ADJUSTED",
+        "hasUnresolvedCorporateAction": false,
+        "observedAt": "2026-11-03T14:40:15Z"
+      },
+      "dailyBars": [
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-06-29T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-06-29"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-06-30T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-06-30"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-07-01T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-07-01"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-07-02T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-07-02"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-07-03T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-07-03"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-07-06T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-07-06"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-07-07T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-07-07"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-07-08T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-07-08"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-07-09T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-07-09"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-07-10T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-07-10"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-07-13T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-07-13"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-07-14T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-07-14"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-07-15T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-07-15"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-07-16T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-07-16"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-07-17T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-07-17"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-07-20T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-07-20"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-07-21T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-07-21"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-07-22T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-07-22"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-07-23T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-07-23"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-07-24T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-07-24"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-07-27T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-07-27"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-07-28T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-07-28"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-07-29T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-07-29"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-07-30T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-07-30"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-07-31T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-07-31"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-08-03T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-08-03"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-08-04T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-08-04"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-08-05T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-08-05"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-08-06T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-08-06"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-08-07T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-08-07"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-08-10T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-08-10"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-08-11T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-08-11"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-08-12T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-08-12"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-08-13T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-08-13"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-08-14T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-08-14"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-08-17T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-08-17"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-08-18T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-08-18"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-08-19T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-08-19"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-08-20T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-08-20"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-08-21T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-08-21"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-08-24T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-08-24"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-08-25T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-08-25"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-08-26T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-08-26"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-08-27T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-08-27"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-08-28T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-08-28"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-08-31T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-08-31"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-09-01T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-09-01"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-09-02T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-09-02"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-09-03T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-09-03"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-09-04T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-09-04"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-09-07T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-09-07"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-09-08T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-09-08"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-09-09T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-09-09"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-09-10T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-09-10"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-09-11T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-09-11"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-09-14T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-09-14"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-09-15T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-09-15"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-09-16T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-09-16"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-09-17T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-09-17"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-09-18T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-09-18"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-09-21T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-09-21"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-09-22T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-09-22"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-09-23T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-09-23"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-09-24T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-09-24"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-09-25T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-09-25"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-09-28T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-09-28"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-09-29T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-09-29"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-09-30T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-09-30"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-10-01T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-10-01"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-10-02T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-10-02"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-10-05T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-10-05"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-10-06T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-10-06"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-10-07T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-10-07"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-10-08T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-10-08"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-10-09T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-10-09"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-10-12T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-10-12"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-10-13T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-10-13"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-10-14T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-10-14"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-10-15T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-10-15"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-10-16T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-10-16"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-10-19T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-10-19"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-10-20T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-10-20"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-10-21T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-10-21"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-10-22T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-10-22"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-10-23T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-10-23"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-10-26T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-10-26"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-10-27T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-10-27"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-10-28T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-10-28"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-10-29T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-10-29"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-10-30T20:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-10-30"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 2000000.0,
+          "observedAt": "2026-11-02T21:00:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "tradingDate": "2026-11-02"
+        }
+      ],
+      "slotBars": [
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 100000.0,
+          "observedAt": "2026-10-20T13:40:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "start": "2026-10-20T13:35:00Z",
+          "end": "2026-10-20T13:40:00Z"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 100000.0,
+          "observedAt": "2026-10-21T13:40:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "start": "2026-10-21T13:35:00Z",
+          "end": "2026-10-21T13:40:00Z"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 100000.0,
+          "observedAt": "2026-10-22T13:40:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "start": "2026-10-22T13:35:00Z",
+          "end": "2026-10-22T13:40:00Z"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 100000.0,
+          "observedAt": "2026-10-23T13:40:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "start": "2026-10-23T13:35:00Z",
+          "end": "2026-10-23T13:40:00Z"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 100000.0,
+          "observedAt": "2026-10-26T13:40:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "start": "2026-10-26T13:35:00Z",
+          "end": "2026-10-26T13:40:00Z"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 100000.0,
+          "observedAt": "2026-10-27T13:40:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "start": "2026-10-27T13:35:00Z",
+          "end": "2026-10-27T13:40:00Z"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 100000.0,
+          "observedAt": "2026-10-28T13:40:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "start": "2026-10-28T13:35:00Z",
+          "end": "2026-10-28T13:40:00Z"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 100000.0,
+          "observedAt": "2026-10-29T13:40:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "start": "2026-10-29T13:35:00Z",
+          "end": "2026-10-29T13:40:00Z"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 100000.0,
+          "observedAt": "2026-10-30T13:40:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "start": "2026-10-30T13:35:00Z",
+          "end": "2026-10-30T13:40:00Z"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 100000.0,
+          "observedAt": "2026-11-02T14:40:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "start": "2026-11-02T14:35:00Z",
+          "end": "2026-11-02T14:40:00Z"
+        },
+        {
+          "open": 50.0,
+          "high": 51.0,
+          "low": 49.0,
+          "close": 50.0,
+          "volume": 200000.0,
+          "observedAt": "2026-11-03T14:40:01Z",
+          "complete": true,
+          "source": "FIXTURE",
+          "adjustmentRevision": "fixture-split-revision-1",
+          "start": "2026-11-03T14:35:00Z",
+          "end": "2026-11-03T14:40:00Z"
+        }
+      ]
+    },
+    "result": {
+      "marketId": "US_EQUITIES",
+      "policyVersion": "us-discovery-v1",
+      "providerCode": "EXAMPLE",
+      "providerExchange": "NASDAQ",
+      "symbolId": 123,
+      "tradingDate": "2026-11-03",
+      "evaluationAt": "2026-11-03T14:40:15Z",
+      "computedAt": "2026-11-03T14:40:15Z",
+      "completedBarEnd": "2026-11-03T14:40:00Z",
+      "state": "PASS",
+      "reasons": [],
+      "metrics": {
+        "price": {
+          "value": 50.0,
+          "asOf": "2026-11-03T14:40:15Z"
+        },
+        "marketCap": {
+          "value": 2000000000.0,
+          "asOf": "2026-11-03T14:40:15Z"
+        },
+        "averageVolume90d": {
+          "value": 2000000.0,
+          "asOf": "2026-11-02T21:00:01Z"
+        },
+        "averageVolume30d": {
+          "value": 2000000.0,
+          "asOf": "2026-11-02T21:00:01Z"
+        },
+        "atr14": {
+          "value": 2.0,
+          "asOf": "2026-11-02T21:00:01Z"
+        },
+        "atrPct": {
+          "value": 4.0,
+          "asOf": "2026-11-03T14:40:15Z"
+        },
+        "relativeVolume": {
+          "value": 2.0,
+          "asOf": "2026-11-03T14:40:01Z"
+        },
+        "changeFromOpenPct": {
+          "value": 2.0408163265306123,
+          "asOf": "2026-11-03T14:40:15Z"
+        },
+        "dollarVolume30d": {
+          "value": 100000000.0,
+          "asOf": "2026-11-03T14:40:15Z"
+        }
+      }
+    }
+  }
+]

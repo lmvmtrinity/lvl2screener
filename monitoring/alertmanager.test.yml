@@ -1,0 +1,15 @@
+global:
+  resolve_timeout: 1m
+
+route:
+  receiver: local-test-receiver
+  group_by: [alertname]
+  group_wait: 1s
+  group_interval: 1s
+  repeat_interval: 1h
+
+receivers:
+  - name: local-test-receiver
+    webhook_configs:
+      - url: http://alert-receiver:8080/hook
+        send_resolved: true

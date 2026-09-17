@@ -1,0 +1,79 @@
+/* Warm terminal palette from the Enhance UI Design prototype. */
+
+:root {
+  color-scheme: dark;
+
+  /* Surfaces */
+  --bg: #111008;
+  --on-accent: #111008;
+  --surface: #1a1610;
+  --surface-raised: #201c14;
+  --surface-sunken: #0e0c06;
+  --surface-olive: #1a1204;
+  --surface-warn: #241706;
+  --surface-danger: #21100e;
+  --surface-danger-strong: #2a1211;
+
+  /* Lines */
+  --line-subtle: #1f1c12;
+  --line: #2e2618;
+  --line-bar: #2e2618;
+  --line-input: #3d3220;
+  --line-dim: #55462b;
+  --line-accent: #5c4510;
+  --line-accent-dim: #49370d;
+  --line-accent-mid: #695019;
+  --line-accent-strong: #7a5a14;
+  --line-accent-bright: #967019;
+  --line-warn: #67390c;
+  --line-warn-strong: #7d4410;
+  --line-danger: #58302d;
+  --line-danger-strong: #713a36;
+
+  /* Accent */
+  --accent: #f59e0b;
+  --accent-hover: #d97706;
+  --accent-tint: #f6d58b;
+
+  /* Status */
+  --warn: #fb923c;
+  --warn-soft: #fdba74;
+  --warn-dim: #c98955;
+  --danger: #f87171;
+  --danger-soft: #fb8b86;
+  --danger-bright: #ff6b6b;
+  --danger-tint: #ff8b86;
+  --danger-tint-soft: #fca5a5;
+  --danger-tint-pale: #fecaca;
+
+  /* Ink (text), brightest to dimmest */
+  --ink-50: #fff9e9;
+  --ink-100: #f0e6cc;
+  --ink-150: #e7d9ba;
+  --ink-200: #ddcea9;
+  --ink-250: #cfbd96;
+  --ink-300: #c1ad84;
+  --ink-350: #b39d74;
+  --ink-400: #a28b62;
+  --ink-450: #927a53;
+  --ink-500: #857048;
+  --ink-550: #7a6a44;
+  --ink-600: #6d5d3b;
+  --ink-650: #605132;
+  --ink-700: #55472b;
+  --ink-750: #4a3e24;
+
+  /* Type and shared geometry */
+  --mono:
+    "JetBrains Mono", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  --sans:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+    "Segoe UI", sans-serif;
+  --radius-card: 12px;
+  --radius-control: 8px;
+
+  font-family: var(--sans);
+  color: var(--ink-100);
+  background: var(--bg);
+  font-synthesis: none;
+}

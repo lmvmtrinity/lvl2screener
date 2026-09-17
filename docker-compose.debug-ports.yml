@@ -1,0 +1,20 @@
+# W5: local-development-only override that republishes the Postgres and scanner ports the
+# default profile intentionally keeps off the host (see docker-compose.yml). Never applied to a
+# production or remote deployment -- it exists so a developer (or the E2E harness in
+# scripts/run-e2e.mjs) can point psql/pgAdmin or an HTTP client straight at these services without
+# reintroducing that exposure in docker-compose.yml itself.
+#
+# Usage: docker compose -f docker-compose.yml -f docker-compose.debug-ports.yml up --build
+
+services:
+  postgres:
+    ports:
+      - "127.0.0.1:${POSTGRES_HOST_PORT:-5432}:5432"
+
+  scanner:
+    ports:
+      - "127.0.0.1:${SCANNER_HOST_PORT:-8000}:8000"
+
+  api:
+    ports:
+      - "127.0.0.1:${API_HOST_PORT:-3000}:3000"
