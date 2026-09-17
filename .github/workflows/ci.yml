@@ -98,12 +98,12 @@ jobs:
       - run: pnpm build
       # The Python suite (`pnpm test`'s other half) runs in the `python` job below. This job only
       # installs the scanner runtime so cross-language API fixtures can execute their evaluator.
-      # The API suite runs against one shared isolated PostgreSQL service, and several
-      # market-wide read models aggregate across all retained rows. Running files
-      # concurrently let other suites' `now()` rows contaminate those assertions, so the
-      # database suite follows the documented acceptance procedure and runs serially.
+      # Stateful acceptance files intentionally truncate or aggregate whole tables. The
+      # runner first executes the unit suite without PostgreSQL and then recreates the
+      # isolated test database before each PostgreSQL file, preventing order-dependent
+      # fixture contamination while keeping every database acceptance check mandatory.
       - run: pnpm --filter @tsx-scanner/contracts test
-      - run: pnpm --filter @tsx-scanner/api exec vitest run --no-file-parallelism
+      - run: node apps/api/run-ci-tests.mjs
       - run: pnpm --filter @tsx-scanner/web test
       - run: pnpm audit --audit-level high
       # W5: structural check that the default and remote Compose profiles keep Postgres/scanner/

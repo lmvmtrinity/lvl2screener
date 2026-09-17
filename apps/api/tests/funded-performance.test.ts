@@ -218,6 +218,12 @@ describe.skipIf(!databaseUrl)("funded persistence performance fixture", () => {
       expect(runLockP95Ms).toBeLessThan(5_000);
       expect(cycleP95Ms).toBeLessThan(5_000);
     } finally {
+      // Migration 131 binds causal ledger events to their exact source fact, so
+      // remove the fixture-owned dependent events before the immutable facts.
+      await databasePool.query(
+        "DELETE FROM paper_funded_event WHERE account_id=$1",
+        [accountId],
+      );
       // Processed facts are immutable; the fixture owns this disposable
       // database and disables the guard only for its own cleanup.
       await databasePool.query(
@@ -236,10 +242,6 @@ describe.skipIf(!databaseUrl)("funded persistence performance fixture", () => {
       await databasePool.query("DELETE FROM paper_funded_run WHERE run_id=$1", [
         runId,
       ]);
-      await databasePool.query(
-        "DELETE FROM paper_funded_event WHERE account_id=$1",
-        [accountId],
-      );
       await databasePool.query("DELETE FROM paper_funded_account WHERE id=$1", [
         accountId,
       ]);
