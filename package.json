@@ -1,6 +1,6 @@
 {
   "name": "tsx-intraday-scanner",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "private": true,
   "packageManager": "pnpm@10.12.4",
   "scripts": {
@@ -18,7 +18,7 @@
     "backup:db": "node scripts/backup-volume.mjs",
     "backup:verify": "node scripts/verify-backup-volume.mjs",
     "backup:test": "node scripts/tests/backup-volume.test.mjs",
-    "test:scripts": "node --test scripts/tests/command-resolution.test.mjs",
+    "test:scripts": "node --test scripts/tests/command-resolution.test.mjs scripts/tests/ci-workflow.unit.test.mjs",
     "phase0": "pnpm --filter @tsx-scanner/api phase0",
     "phase4a": "pnpm --filter @tsx-scanner/api phase4a",
     "test": "pnpm run test:node && pnpm run test:scanner",

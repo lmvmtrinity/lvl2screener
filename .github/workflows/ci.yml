@@ -80,15 +80,24 @@ jobs:
         with:
           node-version: 22.20.0
           cache: pnpm
+      # Some API acceptance fixtures execute the local scanner evaluator, so
+      # the PostgreSQL job needs the same Python runtime as the dedicated
+      # Python job even though it does not rerun that job's lint/type/test gate.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: 3.12.11
+          cache: pip
+          cache-dependency-path: services/scanner/pyproject.toml
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install -e "services/scanner[dev]"
       - run: pnpm install --frozen-lockfile
       - run: pnpm format:check
       - run: pnpm lint
       - run: pnpm typecheck
       - run: pnpm run verify:market-boundaries
       - run: pnpm build
-      # The Python suite (`pnpm test`'s other half) runs in the `python` job below, which is the
-      # only one with an interpreter and the scanner's dev extras installed. Running `pnpm test`
-      # here would shell out to pytest on a Python-less runner and fail after the Node tests pass.
+      # The Python suite (`pnpm test`'s other half) runs in the `python` job below. This job only
+      # installs the scanner runtime so cross-language API fixtures can execute their evaluator.
       # The API suite runs against one shared isolated PostgreSQL service, and several
       # market-wide read models aggregate across all retained rows. Running files
       # concurrently let other suites' `now()` rows contaminate those assertions, so the
