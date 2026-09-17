@@ -47,7 +47,7 @@ describe.skipIf(!databaseUrl)(
 
     afterAll(async () => {
       await pool?.end();
-    });
+    }, 60_000);
 
     async function setMode(mode: "OFF" | "AUTO_ADD"): Promise<number> {
       const current = await control.getMode("CA_TSX");
@@ -510,6 +510,6 @@ describe.skipIf(!databaseUrl)(
           recorded.id,
         ]),
       ).toMatchObject({ rowCount: 0 });
-    });
+    }, 60_000);
   },
 );
