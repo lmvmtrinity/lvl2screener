@@ -34,6 +34,11 @@ import {
 } from "./research-lineage-service.js";
 import { hashResearchSession } from "./research-session-input.js";
 import { replayInputCandidateCount } from "./replay-candidate-plan.js";
+import {
+  discloseArchiveEvidence,
+  discloseArchiveResult,
+  isArchiveRun,
+} from "../historical-archive/archive-disclosure.js";
 
 export class BacktestError extends DomainError {
   constructor(
@@ -106,6 +111,7 @@ export interface BacktestStore {
   ): Promise<ReplayInputSnapshot>;
   getCapturedHistoryAvailability(
     marketId?: MarketId,
+    options?: { source?: CreateBacktest["dataSource"] },
   ): Promise<CapturedHistoryAvailability>;
 }
 
@@ -144,8 +150,11 @@ export class BacktestService {
 
   async getCapturedHistoryAvailability(
     marketId: MarketId = "CA_TSX",
+    source: CreateBacktest["dataSource"] = "CAPTURED_QUOTES",
   ): Promise<CapturedHistoryAvailability> {
-    return this.store.getCapturedHistoryAvailability(marketId);
+    return source === "CAPTURED_QUOTES"
+      ? this.store.getCapturedHistoryAvailability(marketId)
+      : this.store.getCapturedHistoryAvailability(marketId, { source });
   }
 
   async createRun(
@@ -156,7 +165,10 @@ export class BacktestService {
     if (structural)
       throw new BacktestError(structural.code, structural.message);
     const capturedHistoryAvailability =
-      await this.getCapturedHistoryAvailability(input.marketId);
+      await this.getCapturedHistoryAvailability(
+        input.marketId,
+        input.dataSource,
+      );
     const ranged = checkBacktestRequest(input, capturedHistoryAvailability);
     if (ranged) throw new BacktestError(ranged.code, ranged.message);
     const replayInput = await this.store.resolveReplayInput(
@@ -204,6 +216,7 @@ export class BacktestService {
     };
     const availability = await this.getCapturedHistoryAvailability(
       input.marketId,
+      input.dataSource,
     );
     assertCapturedHistoryAvailable(input, availability);
     const replay = (await this.store.loadReplayData(
@@ -237,7 +250,8 @@ export class BacktestService {
         `Replay input market ${replayInput.marketId} does not match requested market ${input.marketId}.`,
       );
     const configVersion = versionFor(input.parameters);
-    if (this.lineage && !researchEvidence) {
+    const archive = isArchiveRun(input);
+    if (this.lineage && !researchEvidence && !archive) {
       preparedReplay ??= (await this.store.loadReplayData(
         input,
         replayInput,
@@ -303,7 +317,7 @@ export class BacktestService {
         run.id,
         configVersion,
         input,
-        undefined,
+        input.economics ? { economics: input.economics } : undefined,
         Boolean(researchEvidence),
       );
       if (replay.sessions.length === 0) {
@@ -319,11 +333,17 @@ export class BacktestService {
         });
         accumulator.ingestSession(session, signals);
       }
-      const output = accumulator.finish().output;
+      const finished = accumulator.finish().output;
+      const output = archive ? discloseArchiveResult(finished) : finished;
+      const evidence = buildBacktestEvidence(
+        output,
+        new Date(),
+        input.marketId,
+      );
       completed = await this.store.complete(
         run.id,
         output,
-        buildBacktestEvidence(output, new Date(), input.marketId),
+        archive ? discloseArchiveEvidence(evidence) : evidence,
       );
       strategyEvidence = buildStrategyBacktestEvidence(
         output,
@@ -341,6 +361,7 @@ export class BacktestService {
         run.id,
       );
     }
+    if (archive) return completed;
     if (source && this.profileEvidence?.replaceBacktestEvidence)
       await this.profileEvidence.replaceBacktestEvidence(
         source,

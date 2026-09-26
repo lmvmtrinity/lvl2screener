@@ -1,7 +1,13 @@
 # ADR-017: Discovery feed feasibility and valid-decision acceptance
 
-**Status:** Accepted design. The criteria below grant no provider-call, deployment
-or activation authority; operational actions require separate approval.
+> **Superseded for future work by
+> [ADR-018](018-pre-market-daily-seed-replaces-discovery-engine.md) on
+> September 24, 2026.** The discovery engine is frozen; the authorizations
+> below lapse unused and the 0.99 gate applies only if the engine is revived.
+
+**Status:** Superseded by ADR-018. The criteria below document the frozen design
+and grant no provider-call or activation authority.
+
 
 ## Context
 
@@ -59,6 +65,7 @@ preparation prototype or provider integration are authorized by this decision.
 empirical adjustment verification. It does not provide blanket authorization for
 a new capacity or replacement-provider protocol. Production pipeline implementation requires feed and feasibility evidence and
 separate authorization; a design proposal grants no operational authority.
+
 
 ## Decision 2: Adopt the 0.99 valid-decision gate prospectively
 

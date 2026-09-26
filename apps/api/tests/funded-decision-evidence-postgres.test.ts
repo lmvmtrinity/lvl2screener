@@ -1197,5 +1197,71 @@ describe.skipIf(!databaseUrl)(
       ).toBeDefined();
       expect(await repository().decisionGapCount(ctx.WORK_N.runId)).toBe(0);
     });
+
+    it("tracks a monotonic decision-work watermark per run", async () => {
+      const context = await seedContext({
+        role: "WM_O",
+        sessionDate: "2025-06-03",
+      });
+      const instance = repository();
+      const initial = await instance.decisionWorkWatermark(context.runId);
+      expect(initial).toEqual({
+        evidenceSequence: 0,
+        intentCount: 0,
+        refusalCount: 0,
+        signalAppliedSequence: 0,
+        eligibleObservationCount: 1,
+        outcomeTransitionRevision: 0,
+      });
+
+      await instance.ensureDecisionRefusal({
+        runId: context.runId,
+        observationId: context.observationId,
+        action: "DECLINE",
+        policyReason: "PRE_SUBMISSION_INVALIDATION",
+        decisionAt: "2025-06-03T14:30:00.000Z",
+      });
+      const withRefusal = await instance.decisionWorkWatermark(context.runId);
+      expect(withRefusal.refusalCount).toBe(1);
+      expect(withRefusal).not.toEqual(initial);
+
+      const secondObservationId = await insertSecondObservation(
+        context,
+        "2025-06-03T14:28:30.000Z",
+      );
+      await instance.recordDecisionIntent({
+        runId: context.runId,
+        observationId: secondObservationId,
+        action: "DECLINE",
+        policyReason: "PRE_SUBMISSION_INVALIDATION",
+        decisionAt: "2025-06-03T14:30:30.000Z",
+      });
+      const withIntent = await instance.decisionWorkWatermark(context.runId);
+      expect(withIntent.intentCount).toBe(1);
+      expect(withIntent.eligibleObservationCount).toBe(2);
+
+      const thirdObservationId = await insertSecondObservation(
+        context,
+        "2025-06-03T14:29:00.000Z",
+      );
+      await insertSignalFact(
+        context,
+        thirdObservationId,
+        "2025-06-03T14:31:00.000Z",
+        1_000,
+        100,
+        "APPLIED",
+      );
+      const withSignal = await instance.decisionWorkWatermark(context.runId);
+      expect(withSignal.signalAppliedSequence).toBeGreaterThan(
+        withIntent.signalAppliedSequence,
+      );
+
+      await instance.repairMissingDecisions(context.runId, 25);
+      const repaired = await instance.decisionWorkWatermark(context.runId);
+      expect(repaired.evidenceSequence).toBeGreaterThan(
+        withSignal.evidenceSequence,
+      );
+    });
   },
 );

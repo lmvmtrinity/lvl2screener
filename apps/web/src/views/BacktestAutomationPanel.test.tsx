@@ -7,7 +7,7 @@ import {
   within,
 } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { BacktestAutomationPanel } from "./BacktestAutomationPanel.js";
+import { BacktestView } from "./BacktestView.js";
 
 const now = "2026-09-10T21:00:00.000Z";
 
@@ -199,72 +199,89 @@ function stubFetch(
     const url = String(input);
     const custom = override?.(url, init);
     if (custom) return custom;
-    return new Response(
-      JSON.stringify(
-        url.includes("funded-historical-policies")
-          ? { policies: [policy] }
-          : status,
-      ),
-      { headers: { "content-type": "application/json" } },
-    );
+    const json = (value: unknown, code = 200) =>
+      new Response(JSON.stringify(value), {
+        status: code,
+        headers: { "content-type": "application/json" },
+      });
+    if (url.includes("/api/backtest-automation/status")) return json(status);
+    if (url.includes("funded-historical-policies"))
+      return json({ policies: [policy] });
+    return json({ error: "unavailable" }, 503);
   });
   vi.stubGlobal("fetch", fetch);
   return fetch;
 }
 
-describe("BacktestAutomationPanel", () => {
+function statusWith(overrides: Record<string, unknown>) {
+  return (url: string) =>
+    url.includes("/api/backtest-automation/status")
+      ? new Response(JSON.stringify({ ...status, ...overrides }), {
+          headers: { "content-type": "application/json" },
+        })
+      : undefined;
+}
+
+function renderPage(
+  marketId: "CA_TSX" | "US_EQUITIES" = "CA_TSX",
+  onOpenUniverse?: () => void,
+) {
+  return render(
+    <BacktestView
+      runs={[]}
+      updateRuns={() => undefined}
+      marketId={marketId}
+      onOpenUniverse={onOpenUniverse}
+    />,
+  );
+}
+
+function openMenuItem(label: string) {
+  fireEvent.click(screen.getByLabelText("More backtest tools"));
+  fireEvent.click(screen.getByRole("menuitem", { name: label }));
+}
+
+describe("Backtest automation sections", () => {
   afterEach(() => {
     cleanup();
     vi.unstubAllGlobals();
   });
 
-  it("shows the compact overview, live progress, grouped waiting and issues", async () => {
+  it("summarizes activity, the running replay, its queue and issues", async () => {
     const fetch = stubFetch();
-    render(<BacktestAutomationPanel marketId="CA_TSX" />);
+    renderPage();
 
     await waitFor(() =>
       expect(screen.getByRole("status")).toHaveTextContent(
-        "Running: ORB Standard 8/9 sessions",
+        "Automation on · 1 running, 1 queued, 6 waiting for capacity, 1 needs attention · next check",
       ),
     );
-    expect(screen.getByRole("status")).toHaveTextContent("CA market");
-    expect(
-      screen.getByText(
-        "1 running · 1 queued · 6 waiting for capacity · 1 needs action",
-      ),
-    ).toBeInTheDocument();
-    expect(screen.getByText(/Next automatic check/)).toBeInTheDocument();
-    expect(screen.getByText("Last completed replay")).toBeInTheDocument();
-    expect(screen.getByText(/ran in 26m 0s/)).toBeInTheDocument();
-    expect(screen.getByText(/evidence through 2026-09-10/)).toBeInTheDocument();
-    expect(
-      screen.getByText("captured history, not a live run"),
-    ).toBeInTheDocument();
-    expect(screen.getByText("ORB Standard")).toBeInTheDocument();
-    expect(screen.getByText("replaying captured sessions")).toBeInTheDocument();
-    expect(screen.getByText(/Session 8 of 9/)).toBeInTheDocument();
-    expect(screen.getByRole("progressbar")).toHaveAttribute(
+    const running = screen.getByRole("region", { name: "Now running" });
+    expect(within(running).getByText("ORB Standard")).toBeInTheDocument();
+    expect(within(running).getByText("8 of 9")).toBeInTheDocument();
+    expect(within(running).getByRole("progressbar")).toHaveAttribute(
       "aria-valuenow",
       "7",
     );
-    expect(screen.getByText(/Last progress/)).toBeInTheDocument();
-    expect(screen.getByText("Recent activity")).toBeInTheDocument();
-    expect(screen.getByText("ORB Standard started")).toBeInTheDocument();
+    expect(within(running).getByText(/Last progress/)).toBeInTheDocument();
+    expect(within(running).getByText("VWAP Hold")).toBeInTheDocument();
+    expect(within(running).getByText("+3 more")).toBeInTheDocument();
+
+    const evidence = screen.getByRole("region", {
+      name: "Automation evidence",
+    });
+    expect(within(evidence).getByText(/ran in 26m 0s/)).toBeInTheDocument();
+    expect(within(evidence).getByText("0 / 9")).toBeInTheDocument();
+    const issues = within(evidence).getByRole("list", {
+      name: "Needs attention",
+    });
+    expect(within(issues).getByText("Needs your action")).toBeInTheDocument();
     expect(
-      screen.getByText("US backtest slippageBps must be at least 10"),
+      within(issues).getByText("US backtest slippageBps must be at least 10"),
     ).toBeInTheDocument();
-    expect(screen.getByText("Needs your action")).toBeInTheDocument();
     expect(
-      screen.getByText("Portfolio simulation: 1 approved policy"),
+      within(issues).getByText("Profile configuration rejected"),
     ).toBeInTheDocument();
-    expect(screen.getByText("6 configurations")).toBeInTheDocument();
-    expect(screen.getAllByText(/oldest waiting/).length).toBeGreaterThan(0);
-    expect(screen.queryByText("Capacity Config 1")).not.toBeInTheDocument();
-    fireEvent.click(screen.getByText("View configurations"));
-    expect(screen.getByText("Capacity Config 1")).toBeInTheDocument();
-    expect(screen.getByText("Capacity Config 6")).toBeInTheDocument();
-    expect(screen.getByText("Follow-on stages (1)")).toBeInTheDocument();
-    expect(screen.getByText("Diagnostics")).toBeInTheDocument();
     expect(
       fetch.mock.calls.some((call) =>
         String(call[0]).includes(
@@ -274,36 +291,99 @@ describe("BacktestAutomationPanel", () => {
     ).toBe(true);
   });
 
-  it("leads with a plain-language paused headline and the next automatic action", async () => {
-    stubFetch((url) =>
-      url.includes("/api/backtest-automation/status")
-        ? new Response(
-            JSON.stringify({
-              ...status,
-              enabled: false,
-              nextCheckAt: null,
-              works: [],
-              stages: [],
-              blockerCounts: [],
-              lastCycle: null,
-              lastSuccessAt: null,
-              lastSuccessDurationMs: null,
-              lastSuccessEvaluatedThrough: null,
-            }),
-            { headers: { "content-type": "application/json" } },
-          )
-        : undefined,
+  it("summarizes each stage across strategies in one strip", async () => {
+    const second = {
+      ...stage,
+      workKey: "e".repeat(64),
+      configName: "VWAP Hold",
+    };
+    const study = {
+      stageKey: "STRATEGY_STUDY",
+      state: "NOT_ELIGIBLE",
+      authorizationScope: "AUTHORIZATION_REQUIRED",
+      reasonCodes: ["EXPLICIT_STUDY_AUTHORIZATION_REQUIRED"],
+    };
+    stubFetch(
+      statusWith({
+        stages: [
+          stage,
+          second,
+          { ...stage, ...study },
+          { ...second, ...study },
+          {
+            ...stage,
+            stageKey: "CALIBRATION",
+            state: "RETRY_SCHEDULED",
+            authorizationScope: "AUTHORIZATION_REQUIRED",
+            reasonCodes: ["RETRY_BACKOFF"],
+          },
+          {
+            ...second,
+            stageKey: "CALIBRATION",
+            state: "COMPLETED",
+            authorizationScope: "AUTHORIZATION_REQUIRED",
+            reasonCodes: [],
+            completedAt: now,
+          },
+        ],
+      }),
     );
-    render(<BacktestAutomationPanel marketId="CA_TSX" />);
+    renderPage();
+
+    const strip = await screen.findByRole("list", {
+      name: "Strategy pipeline",
+    });
+    const steps = within(strip).getAllByRole("listitem");
+    expect(
+      steps.map((item) => item.querySelector("strong")?.textContent),
+    ).toEqual([
+      "Replay",
+      "Coverage",
+      "Calibration",
+      "Training",
+      "Study",
+      "Funded replay",
+    ]);
+    expect(steps[1]).toHaveTextContent("Not evaluated yet");
+    expect(steps[2]).toHaveTextContent("Retrying after a failure (1 of 2)");
+    expect(steps[3]).toHaveTextContent("Waits for paper qualification");
+    expect(steps[4]).toHaveTextContent("Needs study authorization");
+    expect(steps[4]!.textContent).not.toMatch(/of 2/);
+
+    openMenuItem("Diagnostics");
+    const matrix = within(screen.getByRole("dialog")).getByRole("table", {
+      name: "Stages per strategy",
+    });
+    expect(within(matrix).getByText("Bull Flag")).toBeInTheDocument();
+    expect(within(matrix).getByText("VWAP Hold")).toBeInTheDocument();
+  });
+
+  it("collapses to one line and names the paused schedule when idle", async () => {
+    stubFetch(
+      statusWith({
+        enabled: false,
+        nextCheckAt: null,
+        works: [],
+        stages: [],
+        blockerCounts: [],
+        lastCycle: null,
+        lastSuccessAt: null,
+        lastSuccessDurationMs: null,
+        lastSuccessEvaluatedThrough: null,
+      }),
+    );
+    renderPage();
 
     await waitFor(() =>
-      expect(screen.getByRole("status")).toHaveTextContent("Automation paused"),
+      expect(screen.getByRole("status")).toHaveTextContent(
+        "Automation paused · no qualification work recorded yet · scheduled checks are off",
+      ),
     );
-    expect(screen.getByText(/Scheduled checks are off/)).toBeInTheDocument();
+    expect(screen.getByText(/Nothing is running\./)).toBeInTheDocument();
     expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
   });
 
-  it("explains NO_REPLAY_CANDIDATES and only offers the universe action when passed", async () => {
+  it("offers the universe action for NO_REPLAY_CANDIDATES only when passed", async () => {
     const quiet = work({
       workKey: "e".repeat(64),
       configId: "10000000-0000-4000-8000-000000000097",
@@ -315,30 +395,19 @@ describe("BacktestAutomationPanel", () => {
       runDurationMs: null,
       waitingSince: "2026-09-10T18:00:00.000Z",
     });
-    stubFetch((url) =>
-      url.includes("/api/backtest-automation/status")
-        ? new Response(
-            JSON.stringify({
-              ...status,
-              works: [quiet],
-              stages: [],
-              blockerCounts: [{ reason: "NO_REPLAY_CANDIDATES", count: 1 }],
-            }),
-            { headers: { "content-type": "application/json" } },
-          )
-        : undefined,
+    stubFetch(
+      statusWith({
+        works: [quiet],
+        stages: [],
+        blockerCounts: [{ reason: "NO_REPLAY_CANDIDATES", count: 1 }],
+      }),
     );
     const onOpenUniverse = vi.fn();
-    const { unmount } = render(
-      <BacktestAutomationPanel
-        marketId="CA_TSX"
-        onOpenUniverse={onOpenUniverse}
-      />,
-    );
+    const { unmount } = renderPage("CA_TSX", onOpenUniverse);
 
     await waitFor(() =>
       expect(screen.getByRole("status")).toHaveTextContent(
-        "Waiting for captured sessions",
+        "1 waiting for data",
       ),
     );
     expect(screen.getByText("No replay candidates yet")).toBeInTheDocument();
@@ -349,83 +418,13 @@ describe("BacktestAutomationPanel", () => {
     expect(onOpenUniverse).toHaveBeenCalledTimes(1);
 
     unmount();
-    render(<BacktestAutomationPanel marketId="CA_TSX" />);
+    renderPage();
     await waitFor(() =>
       expect(screen.getByText("No replay candidates yet")).toBeInTheDocument(),
     );
     expect(
       screen.queryByText("Open universe & daily list"),
     ).not.toBeInTheDocument();
-  });
-
-  it("summarizes stage progression in order with authorization-aware states", async () => {
-    stubFetch((url) =>
-      url.includes("/api/backtest-automation/status")
-        ? new Response(
-            JSON.stringify({
-              ...status,
-              stages: [
-                stage,
-                {
-                  ...stage,
-                  stageKey: "CALIBRATION",
-                  state: "RETRY_SCHEDULED",
-                  authorizationScope: "AUTHORIZATION_REQUIRED",
-                  reasonCodes: ["RETRY_BACKOFF"],
-                  nextAttemptAt: "2026-09-11T12:00:00.000Z",
-                },
-                {
-                  ...stage,
-                  stageKey: "STRATEGY_STUDY",
-                  state: "NOT_ELIGIBLE",
-                  authorizationScope: "AUTHORIZATION_REQUIRED",
-                  reasonCodes: ["EXPLICIT_STUDY_AUTHORIZATION_REQUIRED"],
-                },
-                {
-                  ...stage,
-                  stageKey: "COVERAGE",
-                  state: "COMPLETED",
-                  authorizationScope: "AUTOMATIC",
-                  reasonCodes: ["RESEARCH_EVIDENCE_VERIFIED"],
-                  completedAt: now,
-                },
-              ],
-            }),
-            { headers: { "content-type": "application/json" } },
-          )
-        : undefined,
-    );
-    render(<BacktestAutomationPanel marketId="CA_TSX" />);
-
-    await waitFor(() =>
-      expect(screen.getByText("Stage progression")).toBeInTheDocument(),
-    );
-    const progression = screen.getByLabelText("Stage progression");
-    expect(
-      within(progression)
-        .getAllByRole("listitem")
-        .map((item) => item.querySelector("strong")?.textContent),
-    ).toEqual([
-      "Coverage",
-      "Calibration",
-      "Training",
-      "Strategy study",
-      "Funded replay",
-    ]);
-    expect(
-      within(progression).getByText("qualification-owned"),
-    ).toBeInTheDocument();
-    expect(
-      within(progression).getByText(
-        /Waiting for the evidence this stage needs/,
-      ),
-    ).toBeInTheDocument();
-    expect(
-      within(progression).getByText(
-        /requires explicit authorization or an approved policy/,
-      ),
-    ).toBeInTheDocument();
-    expect(within(progression).getByText(/Next attempt/)).toBeInTheDocument();
   });
 
   it("checks for new work without forcing a rerun", async () => {
@@ -438,9 +437,9 @@ describe("BacktestAutomationPanel", () => {
         });
       return undefined;
     });
-    render(<BacktestAutomationPanel marketId="CA_TSX" />);
+    renderPage();
     await waitFor(() =>
-      expect(screen.getByText("Check for new work")).toBeInTheDocument(),
+      expect(screen.getByRole("status")).toHaveTextContent("Automation on"),
     );
     fireEvent.click(screen.getByText("Check for new work"));
     await waitFor(() =>
@@ -465,13 +464,13 @@ describe("BacktestAutomationPanel", () => {
         });
       return undefined;
     });
-    render(<BacktestAutomationPanel marketId="US_EQUITIES" />);
+    renderPage("US_EQUITIES");
     await waitFor(() =>
-      expect(screen.getByText("Automation settings")).toBeInTheDocument(),
+      expect(screen.getByRole("status")).toHaveTextContent("Automation on"),
     );
-    fireEvent.click(screen.getByText("Automation settings"));
-    expect(screen.getByRole("dialog")).toBeInTheDocument();
-    fireEvent.click(screen.getByText("FORCE RERUN NOW"));
+    openMenuItem("Automation settings");
+    const dialog = screen.getByRole("dialog", { name: "Automation settings" });
+    fireEvent.click(within(dialog).getByText("Force rerun now"));
     await waitFor(() =>
       expect(
         calls.some(
@@ -496,12 +495,15 @@ describe("BacktestAutomationPanel", () => {
       }
       return undefined;
     });
-    render(<BacktestAutomationPanel marketId="CA_TSX" />);
+    renderPage();
     await waitFor(() =>
-      expect(screen.getByText("Automation settings")).toBeInTheDocument(),
+      expect(screen.getByRole("status")).toHaveTextContent("Automation on"),
     );
-    fireEvent.click(screen.getByText("Automation settings"));
-    const dialog = screen.getByRole("dialog");
+    openMenuItem("Automation settings");
+    const dialog = screen.getByRole("dialog", { name: "Automation settings" });
+    expect(
+      await within(dialog).findByText("1 approved policy."),
+    ).toBeInTheDocument();
     expect(
       within(dialog).getByText("Funded replay policy"),
     ).toBeInTheDocument();

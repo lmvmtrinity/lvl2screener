@@ -55,4 +55,34 @@ describe("execution diagnostics automation", () => {
     expect(createStrictJob).toHaveBeenCalledTimes(1);
     expect(evidence.recordWithClient).toHaveBeenCalledTimes(1);
   });
+
+  it("bounds idle eligibility probes per market and retries failures immediately", async () => {
+    let now = Date.parse("2026-09-23T14:00:00.000Z");
+    const query = vi.fn(async () => ({ rows: [] }));
+    const automation = new ExecutionDiagnosticAutomation(
+      { query } as never,
+      { list: vi.fn() } as never,
+      { withClient: vi.fn() } as never,
+      () => new Date(now),
+      30_000,
+    );
+    expect(await automation.catchUp("US_EQUITIES")).toBe(0);
+    now += 29_999;
+    expect(await automation.catchUp("US_EQUITIES")).toBe(0);
+    expect(query).toHaveBeenCalledTimes(1);
+    // Markets back off independently.
+    expect(await automation.catchUp("CA_TSX")).toBe(0);
+    expect(query).toHaveBeenCalledTimes(2);
+    now += 1;
+    expect(await automation.catchUp("US_EQUITIES")).toBe(0);
+    expect(query).toHaveBeenCalledTimes(3);
+
+    query.mockRejectedValueOnce(new Error("probe failed"));
+    now += 30_000;
+    await expect(automation.catchUp("US_EQUITIES")).rejects.toThrow(
+      "probe failed",
+    );
+    expect(await automation.catchUp("US_EQUITIES")).toBe(0);
+    expect(query).toHaveBeenCalledTimes(5);
+  });
 });

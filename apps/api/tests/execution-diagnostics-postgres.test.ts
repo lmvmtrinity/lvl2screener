@@ -3,7 +3,10 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { migrate } from "../src/database/migrate.js";
 import { FundedReportingService } from "../src/paper-bot/funded-reporting-service.js";
 import { isolatedDatabaseUrl } from "./isolated-database.js";
-import { ExecutionDiagnosticAutomation } from "../src/paper-bot/execution-diagnostic-automation.js";
+import {
+  ELIGIBLE_SOURCES_SQL,
+  ExecutionDiagnosticAutomation,
+} from "../src/paper-bot/execution-diagnostic-automation.js";
 import { PostgresEvidenceAutomationRepository } from "../src/statistical-models/evidence-automation-repository.js";
 import { ResearchJobRepository } from "../src/research-jobs/research-job-repository.js";
 
@@ -389,6 +392,116 @@ describe.skipIf(!databaseUrl)(
         }),
       ).rejects.toThrow("EXECUTION_DIAGNOSTIC_MARKET_MISMATCH");
     });
+
+    it("probes processed-fact revisions by processing time without changing eligibility", async () => {
+      const probeRun = "10000000-0000-4000-8000-000000000905";
+      const probeAccount = "10000000-0000-4000-8000-000000000915";
+      const jobAt = "2026-09-11T12:00:00.000Z";
+      await pool.query(
+        `INSERT INTO paper_bot_run(id,source,session_date,scheduled_close_at,status,execution_model_version,assumptions,completed_at,market_id)
+         VALUES($1,'BACKTEST','2026-09-10',$2,'COMPLETED','paper-execution-v1',$3::jsonb,$2,'US_EQUITIES')`,
+        [probeRun, BOUNDARY, JSON.stringify(assumptions)],
+      );
+      await pool.query(
+        "INSERT INTO paper_funded_account(id,initial_state,state) VALUES($1,$2::jsonb,$2::jsonb)",
+        [probeAccount, JSON.stringify(ledger("USD"))],
+      );
+      await pool.query(
+        "INSERT INTO paper_funded_run(run_id,account_id,currency) VALUES($1,$2,'USD')",
+        [probeRun, probeAccount],
+      );
+      await pool.query(
+        `INSERT INTO paper_funded_run_snapshot(run_id,account_id,boundary_at,state,orders)
+         VALUES($1,$2,$3,$4::jsonb,'[]'::jsonb)`,
+        [probeRun, probeAccount, BOUNDARY, JSON.stringify(ledger("USD"))],
+      );
+      // A retained history processed before the newest diagnostics job.
+      await pool.query(
+        `INSERT INTO paper_funded_fact(run_id,fact_id,fact_at,priority,sort_key,fact,outcome,processed_at)
+         SELECT $1,'probe:'||lpad(n::text,6,'0'),
+                $2::timestamptz - (n||' ms')::interval,2,'',
+                '{"type":"QUOTE"}'::jsonb,'{"status":"APPLIED"}'::jsonb,
+                $2::timestamptz - (n||' ms')::interval + interval '5 ms'
+           FROM generate_series(1,20000) n`,
+        [probeRun, BOUNDARY],
+      );
+      await pool.query(
+        `INSERT INTO research_job(job_type,status,request_payload,created_at)
+         VALUES('EXECUTION_DIAGNOSTICS','SUCCEEDED',$1::jsonb,$2)`,
+        [
+          JSON.stringify({
+            runId: probeRun,
+            accountId: probeAccount,
+            marketId: "US_EQUITIES",
+            mode: "RUN_END",
+            reportVersion: "execution-diagnostics-v2",
+          }),
+          jobAt,
+        ],
+      );
+      await pool.query("ANALYZE paper_funded_fact");
+      const eligible = async () =>
+        (
+          await pool.query<{ runId: string }>(ELIGIBLE_SOURCES_SQL, [
+            "US_EQUITIES",
+            10_000,
+          ])
+        ).rows.some((row) => row.runId === probeRun);
+      const insertFact = (
+        id: string,
+        factAt: string,
+        processedAt: string | null,
+      ) =>
+        pool.query(
+          `INSERT INTO paper_funded_fact(run_id,fact_id,fact_at,priority,sort_key,fact,outcome,processed_at)
+           VALUES($1,$2,$3,2,'',$4::jsonb,$5::jsonb,$6)`,
+          [
+            probeRun,
+            id,
+            factAt,
+            JSON.stringify({ type: "QUOTE" }),
+            processedAt ? JSON.stringify({ status: "APPLIED" }) : null,
+            processedAt,
+          ],
+        );
+      expect(await eligible()).toBe(false);
+
+      const plan = await pool.query<{ "QUERY PLAN": unknown }>(
+        `EXPLAIN (FORMAT JSON) ${ELIGIBLE_SOURCES_SQL}`,
+        ["US_EQUITIES", 10_000],
+      );
+      const factScans: Array<Record<string, unknown>> = [];
+      const visit = (node: Record<string, unknown>) => {
+        if (node["Relation Name"] === "paper_funded_fact") factScans.push(node);
+        for (const child of (node.Plans as Array<
+          Record<string, unknown>
+        > | null) ?? [])
+          visit(child);
+      };
+      visit(
+        (
+          plan.rows[0]!["QUERY PLAN"] as Array<{
+            Plan: Record<string, unknown>;
+          }>
+        )[0]!.Plan,
+      );
+      expect(factScans.map((node) => node["Index Name"])).toEqual([
+        "paper_funded_fact_processed_revision_idx",
+      ]);
+      expect(String(factScans[0]!["Index Cond"])).toContain("processed_at >");
+
+      // Unprocessed facts and facts after the retained boundary never make a run eligible.
+      await insertFact("probe:pending", T1, null);
+      await insertFact(
+        "probe:after-boundary",
+        "2026-09-10T14:05:00.000Z",
+        "2026-09-11T13:00:00.000Z",
+      );
+      expect(await eligible()).toBe(false);
+      // A boundary fact processed after the newest job does.
+      await insertFact("probe:late", T1, "2026-09-11T13:00:00.000Z");
+      expect(await eligible()).toBe(true);
+    }, 60_000);
 
     it("dispatches an oversized retained history without a full jsonb aggregate", async () => {
       const oversizedRun = "10000000-0000-4000-8000-000000000904";

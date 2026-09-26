@@ -40,6 +40,21 @@ export type {
   FundedEvidenceQueryable,
 } from "./funded-decision-evidence.js";
 
+/**
+ * Cheap per-run fingerprint of every source the decision repair and projection
+ * candidate sets read. It only decides whether an in-memory skip is safe: the
+ * values are never persisted as evidence, and any read failure must fail open
+ * into a full pass.
+ */
+export interface FundedDecisionWorkWatermark {
+  readonly evidenceSequence: number;
+  readonly intentCount: number;
+  readonly refusalCount: number;
+  readonly signalAppliedSequence: number;
+  readonly eligibleObservationCount: number;
+  readonly outcomeTransitionRevision: number;
+}
+
 export interface OutcomeVersionDraft {
   readonly runId: string;
   readonly observationId: string;
@@ -431,13 +446,25 @@ const PROJECTION_WORK_BODY = `WITH decision AS (
     WHERE d.action='SUBMIT'
   ),
   ledger_event AS (
+    -- The orderId/positionId OR-join cannot use the account's expression
+    -- indexes, so it scanned the whole account event history per cycle
+    -- (~1.5M rows, ~0.9s). The UNION keeps the exact OR semantics (an event
+    -- matching both keys appears once) while letting each branch use
+    -- paper_funded_event_account_order_idx / _position_idx.
     SELECT d.run_id,d.observation_id,d.source_kind,d.observation_key,
            e.event->>'id' AS event_id,e.event->>'type' AS event_type
     FROM decision d
     JOIN paper_funded_run b ON b.run_id=d.run_id
     JOIN paper_funded_event e ON e.account_id=b.account_id
-      AND (e.event->>'orderId'=d.observation_key
-           OR e.event->>'positionId'=d.observation_key)
+      AND e.event->>'orderId'=d.observation_key
+    WHERE d.action='SUBMIT' AND e.event->>'type'='BUY'
+    UNION
+    SELECT d.run_id,d.observation_id,d.source_kind,d.observation_key,
+           e.event->>'id' AS event_id,e.event->>'type' AS event_type
+    FROM decision d
+    JOIN paper_funded_run b ON b.run_id=d.run_id
+    JOIN paper_funded_event e ON e.account_id=b.account_id
+      AND e.event->>'positionId'=d.observation_key
     WHERE d.action='SUBMIT' AND e.event->>'type'='BUY'
   ),
   final_sell AS (
@@ -1520,27 +1547,33 @@ export class FundedDecisionEvidenceRepository {
     const candidates = await this.listMissingDecisionCandidates(runId, limit);
     let repaired = 0;
     let failed = 0;
-    const client = await this.pool.connect();
-    try {
-      for (const candidate of candidates) {
-        try {
-          await client.query("BEGIN");
-          await this.captureMissingDecisionInTransaction(
-            client as unknown as FundedEvidenceQueryable,
-            runId,
-            candidate.observationId,
-          );
-          await client.query("COMMIT");
-          repaired += 1;
-        } catch {
-          await client.query("ROLLBACK").catch(() => {});
-          failed += 1;
+    if (candidates.length) {
+      const client = await this.pool.connect();
+      try {
+        for (const candidate of candidates) {
+          try {
+            await client.query("BEGIN");
+            await this.captureMissingDecisionInTransaction(
+              client as unknown as FundedEvidenceQueryable,
+              runId,
+              candidate.observationId,
+            );
+            await client.query("COMMIT");
+            repaired += 1;
+          } catch {
+            await client.query("ROLLBACK").catch(() => {});
+            failed += 1;
+          }
         }
+      } finally {
+        client.release();
       }
-    } finally {
-      client.release();
     }
-    const remaining = await this.decisionGapCount(runId);
+    // An uncapped candidate list is the complete set: every candidate was
+    // attempted, so only failures can remain. A capped list may hide further
+    // candidates and still needs the durable count.
+    const remaining =
+      candidates.length < limit ? failed : await this.decisionGapCount(runId);
     return { repaired, failed, remaining };
   }
 
@@ -1575,6 +1608,87 @@ export class FundedDecisionEvidenceRepository {
       [runId],
     );
     return Number(rows[0]?.count ?? 0);
+  }
+
+  /**
+   * Silent durable change marker for one run's decision work. Evidence, intent
+   * and refusal rows are immutable, so their counts never decrease; the
+   * evidence sequence and the processed SIGNAL fact sequence only move
+   * forward, and a changed eligible observation count catches newly eligible
+   * signals. The outcome transition revision combines terminal unfilled-order
+   * revisions with the newest run-owned BUY/SELL ledger sequence. A later
+   * non-exiting quote may revise a FILLED/OPEN order but does not move either
+   * component, while fills, closes and order-only terminal outcomes do.
+   */
+  async decisionWorkWatermark(
+    runId: string,
+  ): Promise<FundedDecisionWorkWatermark> {
+    const { rows } = await this.pool.query<{
+      evidence_sequence: string | number;
+      intent_count: string | number;
+      refusal_count: string | number;
+      signal_applied_sequence: string | number;
+      eligible_observation_count: string | number;
+      outcome_transition_revision: string | number;
+    }>(
+      `SELECT
+         COALESCE((SELECT max(sequence) FROM funded_decision_evidence
+                    WHERE run_id=$1),0)::bigint::text AS evidence_sequence,
+         (SELECT count(*) FROM funded_decision_intent
+           WHERE run_id=$1)::bigint::text AS intent_count,
+         (SELECT count(*) FROM funded_decision_refusal
+           WHERE run_id=$1)::bigint::text AS refusal_count,
+         COALESCE((SELECT max(applied_sequence) FROM paper_funded_fact
+                    WHERE run_id=$1 AND fact->>'type'='SIGNAL'
+                      AND outcome IS NOT NULL),0)::bigint::text
+           AS signal_applied_sequence,
+         (SELECT count(*) FROM paper_signal_observation
+           WHERE run_id=$1 AND eligibility_status='ELIGIBLE')::bigint::text
+           AS eligible_observation_count,
+         (
+           COALESCE((
+             SELECT sum(o.revision + 1)
+             FROM funded_decision_evidence d
+             JOIN paper_entry_order o
+               ON o.run_id=d.run_id AND o.order_id=d.observation_id::text
+             WHERE d.run_id=$1 AND d.action='SUBMIT'
+               AND o.state->>'status' IN ('CANCELLED','REJECTED')
+           ),0) +
+           COALESCE((
+             SELECT max(relevant.event_sequence)
+             FROM (
+               SELECT e.event_sequence
+               FROM funded_decision_evidence d
+               JOIN paper_funded_run b ON b.run_id=d.run_id
+               JOIN paper_funded_event e
+                 ON e.account_id=b.account_id
+                AND e.event->>'orderId'=d.observation_id::text
+               WHERE d.run_id=$1 AND d.action='SUBMIT'
+                 AND e.event->>'type' IN ('BUY','SELL')
+               UNION ALL
+               SELECT e.event_sequence
+               FROM funded_decision_evidence d
+               JOIN paper_funded_run b ON b.run_id=d.run_id
+               JOIN paper_funded_event e
+                 ON e.account_id=b.account_id
+                AND e.event->>'positionId'=d.observation_id::text
+               WHERE d.run_id=$1 AND d.action='SUBMIT'
+                 AND e.event->>'type' IN ('BUY','SELL')
+             ) relevant
+           ),0)
+         )::bigint::text AS outcome_transition_revision`,
+      [runId],
+    );
+    const row = rows[0];
+    if (!row) throw new Error("Funded decision work watermark is unavailable");
+    return {
+      evidenceSequence: Number(row.evidence_sequence),
+      intentCount: Number(row.intent_count),
+      refusalCount: Number(row.refusal_count),
+      signalAppliedSequence: Number(row.signal_applied_sequence),
+      eligibleObservationCount: Number(row.eligible_observation_count),
+      outcomeTransitionRevision: Number(row.outcome_transition_revision),
+    };
   }
 
   private async lockFundedRun(

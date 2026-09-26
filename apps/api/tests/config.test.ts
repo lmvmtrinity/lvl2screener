@@ -166,6 +166,25 @@ describe("API configuration", () => {
     expect(config.PAPER_COORDINATION_MAX_DAILY_LOSS_USD).toBe(100);
   });
 
+  it("keeps FP04 shadow observation disabled by default and bounded", () => {
+    const config = loadConfig({});
+    expect(config.FUNDED_SHADOW_OBSERVATION_ENABLED).toBe(false);
+    expect(config.FUNDED_SHADOW_MAX_PREDICTION_LAG_MS).toBe(30_000);
+    expect(
+      loadConfig({ FUNDED_SHADOW_OBSERVATION_ENABLED: "true" })
+        .FUNDED_SHADOW_OBSERVATION_ENABLED,
+    ).toBe(true);
+    expect(() =>
+      loadConfig({ FUNDED_SHADOW_OBSERVATION_ENABLED: "yes" }),
+    ).toThrow();
+    expect(() =>
+      loadConfig({ FUNDED_SHADOW_MAX_PREDICTION_LAG_MS: "60000" }),
+    ).toThrow();
+    expect(() =>
+      loadConfig({ FUNDED_SHADOW_MAX_PREDICTION_LAG_MS: "500" }),
+    ).toThrow();
+  });
+
   it("keeps US market data and paper execution disabled until explicitly commissioned", () => {
     const config = loadConfig({ ENABLED_MARKETS: "CA_TSX,US_EQUITIES" });
     const profiles = createMarketProfiles(config);

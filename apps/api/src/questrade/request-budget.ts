@@ -1,3 +1,5 @@
+/** database/init/151-questrade-budget-acquire.sql applies these limits in the
+ * database; tests/request-budget.test.ts keeps the two copies equal. */
 export const BROKER_BUDGET = Object.freeze({
   second: 20,
   hour: 15_000,

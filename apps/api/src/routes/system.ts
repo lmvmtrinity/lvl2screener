@@ -113,6 +113,12 @@ export function registerSystemRoutes(
               oldestUnresolvedCoordinatedAgeMs: number | null;
               unknownQuoteSizeUnits: number;
               overdueRuns: number;
+              priorClosePendingExecutions?: number;
+              oldestPriorClosePendingAgeMs?: number | null;
+              fundedCycleState?: "PROCESSED" | "WAITING" | "FAILED";
+              fundedBindingState?:
+                "UNBOUND" | "BOUND" | "WAITING_FOR_PRIOR_RUN" | "FAILED";
+              fundedBlockReason?: "PRIOR_RUN_ACTIVE" | null;
               lastSuccessfulProcessingAt?: string | null;
               fundedLastSuccessfulProcessingAt?: string | null;
               funded?: {
@@ -200,6 +206,18 @@ export function registerSystemRoutes(
           backtestAutomation = null;
         }
       }
+      let fundedShadow: ObservabilitySnapshot["fundedShadow"] = null;
+      if (options.fundedShadowStatusService) {
+        try {
+          fundedShadow = await options.fundedShadowStatusService.status(
+            marketId ?? "CA_TSX",
+          );
+        } catch {
+          // Funded shadow telemetry must never make the shared monitoring
+          // endpoint fail when its optional persistence dependency is missing.
+          fundedShadow = null;
+        }
+      }
       const marketOperational =
         marketId === undefined || !marketService?.getOperationalStatusInput
           ? status.operational
@@ -255,6 +273,13 @@ export function registerSystemRoutes(
                 paperBot.oldestUnresolvedCoordinatedAgeMs,
               unknownQuoteSizeUnits: paperBot.unknownQuoteSizeUnits,
               overdueRuns: paperBot.overdueRuns,
+              priorClosePendingExecutions:
+                paperBot.priorClosePendingExecutions ?? 0,
+              oldestPriorClosePendingAgeMs:
+                paperBot.oldestPriorClosePendingAgeMs ?? null,
+              fundedCycleState: paperBot.fundedCycleState,
+              fundedBindingState: paperBot.fundedBindingState,
+              fundedBlockReason: paperBot.fundedBlockReason ?? null,
               lastSuccessfulProcessingAt: paperBot.lastSuccessfulProcessingAt,
               fundedLastSuccessfulProcessingAt:
                 paperBot.fundedLastSuccessfulProcessingAt,
@@ -271,6 +296,7 @@ export function registerSystemRoutes(
         persistence: options.persistenceMetrics?.snapshot() ?? null,
         retention: (await options.retentionService?.getLatestRun()) ?? null,
         backtestAutomation,
+        fundedShadow,
       };
       return reply
         .header("content-type", "text/plain; version=0.0.4")

@@ -1,4 +1,5 @@
 import {
+  boundedSearchParameterBounds,
   type FrozenStudyPlan,
   strategyParametersSchema,
 } from "@tsx-scanner/contracts";
@@ -6,9 +7,12 @@ import type { Pool } from "pg";
 import { canonicalJson } from "./research-coverage.js";
 export type StudyProfileScope = {
   id: string;
+  profileId?: string;
   marketId: string;
   strategy: string;
+  strategyVersion?: string;
   parameters: unknown;
+  isCurrent?: boolean;
 };
 export function assertStudyProfileScope(
   plan: FrozenStudyPlan,
@@ -25,7 +29,8 @@ export function assertStudyProfileScope(
     DAILY_EMA: "dailyEmaFilterEnabled",
     RSI_SEQUENCE: null,
   } as const;
-  const toggle = switches[plan.variant];
+  const toggle =
+    plan.variant === "NUMERIC_PARAMETER" ? undefined : switches[plan.variant];
   const baseParameters = strategyParametersSchema.parse(baseline.parameters),
     challengeParameters = strategyParametersSchema.parse(challenger.parameters);
   const difference = new Set(
@@ -56,6 +61,35 @@ export function assertStudyProfileScope(
       !["ORB_RETEST", "VWAP_HOLD"].includes(baseline.strategy)
     )
       throw new Error("STUDY_VARIANT_MISMATCH");
+  } else if (plan.variant === "NUMERIC_PARAMETER") {
+    const candidate = plan.boundedRuleCandidate;
+    const change =
+      candidate?.changes.length === 1 ? candidate.changes[0] : null;
+    const parameter = change?.key as keyof typeof baseParameters | undefined;
+    if (
+      !candidate ||
+      !change ||
+      !parameter ||
+      boundedSearchParameterBounds[change.key].kind !== "numeric" ||
+      candidate.marketId !== plan.comparison.marketId ||
+      candidate.strategy !== baseline.strategy ||
+      baseline.strategy !== challenger.strategy ||
+      !baseline.profileId ||
+      baseline.profileId !== challenger.profileId ||
+      !baseline.strategyVersion ||
+      baseline.strategyVersion !== challenger.strategyVersion ||
+      challenger.isCurrent !== false ||
+      difference.size !== 1 ||
+      !difference.has(change.key) ||
+      baseParameters[parameter] !== change.from ||
+      challengeParameters[parameter] !== change.to ||
+      canonicalJson(candidate.parameters) !== canonicalJson(challengeParameters)
+    )
+      throw new Error(
+        challenger.isCurrent === true
+          ? "STUDY_NUMERIC_CHALLENGER_CONFIG_ACTIVE"
+          : "STUDY_VARIANT_MISMATCH",
+      );
   } else if (
     baseline.strategy !== "VWAP_RECLAIM" ||
     challenger.strategy !== "RSI_VWAP_RECLAIM" ||
@@ -96,20 +130,26 @@ export async function verifyStudyProfiles(
 ): Promise<void> {
   const result = await pool.query<{
     id: string;
+    profile_id: string;
     market_id: string;
     strategy_key: string;
+    strategy_version: string;
     parameters: unknown;
+    is_current: boolean;
   }>(
-    `SELECT c.id,c.market_id,d.strategy_key,c.parameters FROM scanner_profile_config c JOIN scanner_profile p ON p.id=c.profile_id JOIN strategy_definition d ON d.id=p.strategy_definition_id WHERE c.id=ANY($1::uuid[])`,
+    `SELECT c.id,c.profile_id,c.market_id,d.strategy_key,d.version strategy_version,c.parameters,(p.current_config_id=c.id) is_current FROM scanner_profile_config c JOIN scanner_profile p ON p.id=c.profile_id JOIN strategy_definition d ON d.id=p.strategy_definition_id WHERE c.id=ANY($1::uuid[])`,
     [[plan.baselineProfileConfigId, plan.challengerProfileConfigId]],
   );
   assertStudyProfileScope(
     plan,
     result.rows.map((r) => ({
       id: r.id,
+      profileId: r.profile_id,
       marketId: r.market_id,
       strategy: r.strategy_key,
+      strategyVersion: r.strategy_version,
       parameters: r.parameters,
+      isCurrent: r.is_current,
     })),
   );
 }

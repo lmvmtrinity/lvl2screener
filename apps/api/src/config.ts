@@ -143,6 +143,7 @@ const configSchema = z
         "postgresql://tsx_scanner:local_development_only@localhost:5432/tsx_scanner",
       ),
     SCANNER_URL: z.string().url().default("http://localhost:8000"),
+    RESEARCH_SCANNER_URL: z.string().url().optional(),
     MARKET_DATA_MODE: z.enum(["mock", "live"]).default("mock"),
     ENABLED_MARKETS: enabledMarkets,
     US_MARKET_DATA_ENABLED: z
@@ -161,6 +162,11 @@ const configSchema = z
     MASSIVE_API_KEY: optionalValue,
     QUESTRADE_REFRESH_TOKEN: optionalValue,
     MARKET_DATA_POLL_MS: z.coerce.number().int().min(250).default(2_000),
+    STRATEGY_PERSIST_HEARTBEAT_MS: z.coerce
+      .number()
+      .int()
+      .min(0)
+      .default(60_000),
     DISCOVERY_POLL_MS: z.coerce.number().int().min(250).default(15_000),
     DISCOVERY_LEASE_MS: z.coerce.number().int().min(120_000).default(600_000),
     DISCOVERY_WORKERS: z.coerce.number().int().min(1).max(32).default(4),
@@ -192,7 +198,7 @@ const configSchema = z
       .enum(["true", "false"])
       .default("false")
       .transform((value) => value === "true"),
-    QUOTE_BATCH_SIZE: z.coerce.number().int().positive().max(100).default(50),
+    QUOTE_BATCH_SIZE: z.coerce.number().int().positive().max(100).default(100),
     UNIVERSE_MINIMUM_SIZE: z.coerce
       .number()
       .int()
@@ -492,6 +498,68 @@ const configSchema = z
     // processing a single session; keep the lease longer so an active replay is not requeued.
     RESEARCH_JOB_LEASE_MS: z.coerce.number().int().min(5_000).default(720_000),
     RESEARCH_JOB_POLL_MS: z.coerce.number().int().min(250).default(2_000),
+    // Hold new research job claims during regular sessions (plus a short grace
+    // after the close) so replays do not compete with live collection and paper
+    // settlement for the database. Running jobs finish; queued jobs wait.
+    RESEARCH_PAUSE_DURING_SESSION: z
+      .enum(["true", "false"])
+      .default("true")
+      .transform((value) => value === "true"),
+    // Pre-market daily-list seed (daily-seed-v1). On session days at
+    // DAILY_LIST_SEED_TIME (market-local HH:MM) an empty daily list receives the
+    // top-ranked liquid stocks; a list that already has symbols is left alone.
+    DAILY_LIST_SEED_ENABLED: z
+      .enum(["true", "false"])
+      .default("false")
+      .transform((value) => value === "true"),
+    DAILY_LIST_SEED_TIME: z
+      .string()
+      .regex(/^([01]\d|2[0-3]):[0-5]\d$/)
+      .default("08:45"),
+    DAILY_LIST_SEED_CA_COUNT: z.coerce
+      .number()
+      .int()
+      .min(1)
+      .max(50)
+      .default(10),
+    DAILY_LIST_SEED_US_COUNT: z.coerce
+      .number()
+      .int()
+      .min(1)
+      .max(50)
+      .default(15),
+    // Early-session rescan (daily-seed-v2): shortly after the open, add the
+    // pool's strongest opening movers to a list the seed filled.
+    DAILY_LIST_RESCAN_ENABLED: z
+      .enum(["true", "false"])
+      .default("false")
+      .transform((value) => value === "true"),
+    DAILY_LIST_RESCAN_TIME: z
+      .string()
+      .regex(/^([01]\d|2[0-3]):[0-5]\d$/)
+      .default("09:55"),
+    DAILY_LIST_RESCAN_MARKETS: z
+      .string()
+      .default("CA_TSX")
+      .transform((value) =>
+        value
+          .split(",")
+          .map((entry) => entry.trim())
+          .filter(Boolean),
+      )
+      .pipe(z.array(z.enum(["CA_TSX", "US_EQUITIES"]))),
+    DAILY_LIST_RESCAN_MAX_ADDS: z.coerce
+      .number()
+      .int()
+      .min(1)
+      .max(20)
+      .default(5),
+    DAILY_LIST_RESCAN_MAX_CANDIDATES: z.coerce
+      .number()
+      .int()
+      .min(10)
+      .max(1000)
+      .default(150),
     PAPER_MODEL_TRAINING_ENABLED: z
       .enum(["true", "false"])
       .default("true")
@@ -508,6 +576,21 @@ const configSchema = z
       .min(0)
       .max(100)
       .default(2),
+    // FP04 prospective funded champion/challenger SHADOW observation. The gate
+    // defaults to false: even when true, no work occurs without a valid,
+    // non-revoked, market-scoped enrollment. Enabling this flag grants no
+    // funded authority and enrolls no challenger.
+    FUNDED_SHADOW_OBSERVATION_ENABLED: z
+      .enum(["true", "false"])
+      .default("false")
+      .transform((value) => value === "true"),
+    // The enrollment gate policy may never exceed this FP02 prediction lag.
+    FUNDED_SHADOW_MAX_PREDICTION_LAG_MS: z.coerce
+      .number()
+      .int()
+      .min(1_000)
+      .max(30_000)
+      .default(30_000),
     // Optional legacy interval override; otherwise use the daily Eastern close schedule.
     PAPER_MODEL_TRAINING_CHECK_MS: z.preprocess(
       (value) => (value === "" ? undefined : value),

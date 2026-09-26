@@ -66,6 +66,8 @@ describe("funded live retained quote catch-up", () => {
       pool: {
         query: async (text: string) => {
           queries.push(text);
+          if (text.includes("AS risk"))
+            return { rows: [{ risk: "3", late: "4" }] };
           return {
             rows: [
               {

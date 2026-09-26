@@ -31,6 +31,30 @@ export const backtestStatusSchema = z.enum([
  */
 export const AUTHORITATIVE_EXECUTION_MODEL_VERSION = "paper-execution-v7";
 
+/** Paper-bot entry economics applied to replay fills. Absent keeps the
+ * mandatory positive-target invariant only, as every earlier run did. */
+export const backtestEconomicsSchema = z
+  .object({
+    minNetRewardRisk: z.number().nonnegative().max(20),
+    minStopFrictionMultiple: z.number().nonnegative().max(100),
+    minTargetFrictionMultiple: z.number().nonnegative().max(100),
+    maxSpreadPct: z.number().positive().max(100),
+  })
+  .strict();
+export type BacktestEconomics = z.infer<typeof backtestEconomicsSchema>;
+
+/**
+ * Replay input source. `CAPTURED_QUOTES` replays retained Questrade quotes and
+ * candles. `HISTORICAL_ARCHIVE` replays imported provider history (ADR-019):
+ * Massive minute/daily bars with Databento minute-sampled bid/ask. Archive runs
+ * are exploratory and never carry captured spreads.
+ */
+export const backtestDataSourceSchema = z.enum([
+  "CAPTURED_QUOTES",
+  "HISTORICAL_ARCHIVE",
+]);
+export type BacktestDataSource = z.infer<typeof backtestDataSourceSchema>;
+
 export const createBacktestSchema = z.object({
   name: z.string().trim().min(1).max(120),
   marketId: marketIdSchema.default("CA_TSX"),
@@ -51,11 +75,12 @@ export const createBacktestSchema = z.object({
     )
     .max(500)
     .default([]),
-  dataSource: z.literal("CAPTURED_QUOTES").default("CAPTURED_QUOTES"),
+  dataSource: backtestDataSourceSchema.default("CAPTURED_QUOTES"),
   startingCapital: z.number().positive().max(1_000_000_000).default(100_000),
   positionSize: z.number().positive().max(100_000_000).default(10_000),
   slippageBps: z.number().nonnegative().max(1_000).default(2),
   feePerTrade: z.number().nonnegative().max(10_000).default(0),
+  economics: backtestEconomicsSchema.optional(),
   parameters: strategyParametersSchema.default({
     rvolAtTimeMin: 1.5,
     spreadHardMaxPct: 0.25,
@@ -90,6 +115,17 @@ export const createBacktestSchema = z.object({
     rsiDivergenceVolumeContractionMaxRatio: 0.8,
     rsiSetupTimeoutMinutes: 30,
     dailyEmaFilterEnabled: 0,
+    spreadConfirmQuotes: 1,
+    latestReadyTime: null,
+    maxVwapDistanceAtr: 0,
+    maxChangeFromOpenAtr: 0,
+    minSectorRelativeStrengthPct: 0,
+    spreadConfirmSeconds: 0,
+    spreadRecoveryPct: 100,
+    spreadMinTicks: 0,
+    stopMinAtrFraction: 0,
+    stopMinSpreads: 0,
+    targetMinR: 0,
   }),
 });
 export type CreateBacktest = z.infer<typeof createBacktestSchema>;
@@ -222,7 +258,8 @@ export const backtestDataQualitySchema = z.object({
   exclusionReasons: z.array(backtestQuoteExclusionSchema).optional(),
   candles: z.number().int().nonnegative(),
   sessions: z.number().int().nonnegative(),
-  spread: z.enum(["CAPTURED", "UNAVAILABLE"]),
+  /** `ARCHIVED` marks spreads from imported provider history (ADR-019). */
+  spread: z.enum(["CAPTURED", "ARCHIVED", "UNAVAILABLE"]),
   warnings: z.array(z.string()),
 });
 export type BacktestDataQuality = z.infer<typeof backtestDataQualitySchema>;
@@ -266,7 +303,8 @@ export type CapturedHistoryLimitation = z.infer<
   typeof capturedHistoryLimitationSchema
 >;
 export const capturedHistoryAvailabilitySchema = z.object({
-  source: z.literal("CAPTURED_QUOTES"),
+  /** For `HISTORICAL_ARCHIVE`, `tables` report archive quote/bar bounds. */
+  source: backtestDataSourceSchema,
   observedAt: z.string().datetime(),
   tables: z.object({
     quoteSnapshot: capturedHistoryTableAvailabilitySchema,
@@ -350,6 +388,18 @@ export const replayInputSnapshotSchema = z.object({
 });
 export type ReplayInputSnapshot = z.infer<typeof replayInputSnapshotSchema>;
 export const backtestReplayResultSchema = z.object({
+  entryFilterDiagnostics: z
+    .record(
+      z.string(),
+      z.record(
+        z.string(),
+        z.object({
+          blockedEvaluations: z.number().int().nonnegative(),
+          blockedInstances: z.number().int().nonnegative(),
+        }),
+      ),
+    )
+    .optional(),
   metrics: backtestMetricsSchema,
   analyses: z.array(backtestSliceSchema),
   trades: z.array(backtestTradeSchema),
@@ -427,7 +477,7 @@ export const backtestRunSchema = z.object({
   endDate: z.string().date(),
   strategies: z.array(setupStrategyNameSchema),
   symbols: z.array(z.string()),
-  dataSource: z.literal("CAPTURED_QUOTES"),
+  dataSource: backtestDataSourceSchema,
   strategyVersion: z.string(),
   configVersion: z.string(),
   executionModelVersion: z.string().nullable().default(null),

@@ -60,6 +60,22 @@ function sampleAudit(
 }
 
 describe("PostgresDiscoveryParityStore", () => {
+  it("summarizes recent overlap in SQL without loading audit payloads", async () => {
+    const query = vi.fn(async () => ({
+      rows: [{ audit_count: "3356", average_overlap_ratio: "0.8550" }],
+    }));
+    const store = new PostgresDiscoveryParityStore({ query } as any);
+    await expect(store.statusSummary("CA_TSX")).resolves.toEqual({
+      auditCount: 3356,
+      averageOverlapRatio: 0.855,
+    });
+    expect(query).toHaveBeenCalledTimes(1);
+    const [sql, params] = query.mock.calls[0] as unknown as [string, unknown[]];
+    expect(sql).toContain("LIMIT 20");
+    expect(sql).toContain("avg(overlap_ratio)");
+    expect(sql).not.toContain("overlap_symbols");
+    expect(params).toEqual(["CA_TSX"]);
+  });
   it("saves audit with JSON serialization of complex fields", async () => {
     const audit = sampleAudit();
     const query = vi.fn(async () => ({ rows: [] }));

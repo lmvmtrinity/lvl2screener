@@ -1,30 +1,30 @@
 # Data model
 
-Reviewed against migrations through `096-execution-diagnostics.sql`
-on September 10, 2026. This is a relationship and invariant guide, not an alternative
+
+This is a relationship and invariant guide, not an alternative
 DDL definition. Exact columns, constraints and indexes live in
 [database/init](../../database/init/); read subsequent ALTER statements as well as
 CREATE statements. Applied migrations are checksum-protected and must not be edited.
 
 ## Domain map
 
-| Domain                  | Principal tables                                                                                                                                                                                                           | Ownership and meaning                                                                               |
-| ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
-| Instruments and intake  | `instrument`, `universe_watchlist`, `universe_refresh_run`, `universe_membership`                                                                                                                                          | Market-resolved instruments, dated manual list, refresh decisions and coverage                      |
-| Broker auth             | `market_data_auth`                                                                                                                                                                                                         | Mode-specific encrypted rotating refresh token and concurrency version                              |
-| Market history          | `quote_snapshot`, `candle`, `feature_snapshot`                                                                                                                                                                             | Timestamped inputs and complete versioned feature payloads                                          |
-| Profiles                | `strategy_definition`, `scanner_profile`, `scanner_profile_config`                                                                                                                                                         | Registry definition, mutable operational metadata, immutable parameter versions                     |
-| Strategy evidence       | `strategy_evaluation`, `context_evaluation`, `strategy_signal`, `strategy_state_event`                                                                                                                                     | Shared feature identity, exact profile/config, setup lifecycle and context                          |
-| Alerts                  | `scanner_alert`, `scanner_alert_policy`                                                                                                                                                                                    | Deduplicated transitions and alert delivery policy                                                  |
-| Independent paper       | `paper_bot_run`, `paper_signal_observation`, `paper_execution`                                                                                                                                                             | Run assumptions, observed lifecycles, QUOTE/CANDLE execution states                                 |
-| Coordinated paper       | `paper_portfolio`, `paper_coordination_decision`, `paper_coordination_position`                                                                                                                                            | Durable market portfolio, selection evidence and separate positions                                 |
-| Funded paper            | `paper_entry_order`, `paper_funded_account`, `paper_funded_event`, `paper_funded_fact`                                                                                                                                     | Pending orders/reservations, simulated cash ledger, durable effect history and retry inbox          |
-| Temporal funded reports | `paper_funded_run_snapshot`, `paper_entry_order_history`                                                                                                                                                                   | Proven run-end/as-of boundaries and order history                                                   |
-| Backtests/calibration   | `backtest_run`, `backtest_trade`, `backtest_state_event`, `calibration_run`                                                                                                                                                | Captured replay lineage, outcomes and controlled research                                           |
-| Ranking                 | `ranking_formula`, `ranking_research_run`                                                                                                                                                                                  | Deterministic baseline and dormant research projections                                             |
-| Learning                | `statistical_training_dataset`, `statistical_model`, `paper_model_prediction_snapshot`, `learning_automation_run`, `challenger_experiment`, `challenger_experiment_transition`, `challenger_attempt`, `challenger_outcome` | Frozen source, artifact, active snapshots, prospective inactive observation and scheduler audit     |
-| Qualification           | `paper_profile_qualification`                                                                                                                                                                                              | Versioned derived qualification; never an overwrite of source evidence                              |
-| Operations              | `research_job`, `research_manifest`, `research_coverage_report`, `research_evidence_binding`, `research_evidence_work`, `research_evidence_work_receipt`, `retention_job_run`, `observability_retention_policy`            | Durable research jobs, immutable coverage/lineage, bounded automation receipts and retention policy |
+| Domain                  | Principal tables                                                                                                                                                                                                                                                       | Ownership and meaning                                                                                                        |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| Instruments and intake  | `instrument`, `universe_watchlist`, `universe_refresh_run`, `universe_membership`                                                                                                                                                                                      | Market-resolved instruments, dated manual list, refresh decisions and coverage                                               |
+| Broker auth             | `market_data_auth`                                                                                                                                                                                                                                                     | Mode-specific encrypted rotating refresh token and concurrency version                                                       |
+| Market history          | `quote_snapshot`, `candle`, `feature_snapshot`                                                                                                                                                                                                                         | Timestamped inputs and complete versioned feature payloads                                                                   |
+| Profiles                | `strategy_definition`, `scanner_profile`, `scanner_profile_config`                                                                                                                                                                                                     | Registry definition, mutable operational metadata, immutable parameter versions                                              |
+| Strategy evidence       | `strategy_evaluation`, `context_evaluation`, `strategy_signal`, `strategy_state_event`                                                                                                                                                                                 | Shared feature identity, exact profile/config, setup lifecycle and context                                                   |
+| Alerts                  | `scanner_alert`, `scanner_alert_policy`                                                                                                                                                                                                                                | Deduplicated transitions and alert delivery policy                                                                           |
+| Independent paper       | `paper_bot_run`, `paper_signal_observation`, `paper_execution`                                                                                                                                                                                                         | Run assumptions, observed lifecycles, QUOTE/CANDLE execution states                                                          |
+| Coordinated paper       | `paper_portfolio`, `paper_coordination_decision`, `paper_coordination_position`                                                                                                                                                                                        | Durable market portfolio, selection evidence and separate positions                                                          |
+| Funded paper            | `paper_entry_order`, `paper_funded_account`, `paper_funded_event`, `paper_funded_fact`                                                                                                                                                                                 | Pending orders/reservations, simulated cash ledger, durable effect history and retry inbox                                   |
+| Temporal funded reports | `paper_funded_run_snapshot`, `paper_entry_order_history`                                                                                                                                                                                                               | Proven run-end/as-of boundaries and order history                                                                            |
+| Backtests/calibration   | `backtest_run`, `backtest_trade`, `backtest_state_event`, `calibration_run`                                                                                                                                                                                            | Captured replay lineage, outcomes and controlled research                                                                    |
+| Ranking                 | `ranking_formula`, `ranking_research_run`                                                                                                                                                                                                                              | Deterministic baseline and dormant research projections                                                                      |
+| Learning                | `statistical_training_dataset_preparation`, `statistical_training_dataset`, `statistical_model`, `paper_model_prediction_snapshot`, `learning_automation_run`, `challenger_experiment`, `challenger_experiment_transition`, `challenger_attempt`, `challenger_outcome` | Immutable prospective input, frozen source, artifact, active snapshots, prospective inactive observation and scheduler audit |
+| Qualification           | `paper_profile_qualification`                                                                                                                                                                                                                                          | Versioned derived qualification; never an overwrite of source evidence                                                       |
+| Operations              | `research_job`, `research_manifest`, `research_coverage_report`, `research_evidence_binding`, `research_evidence_work`, `research_evidence_work_receipt`, `retention_job_run`, `observability_retention_policy`                                                        | Durable research jobs, immutable coverage/lineage, bounded automation receipts and retention policy                          |
 
 ## Identity and provenance
 
@@ -59,6 +59,14 @@ retries must reuse them exactly once. Snapshot compaction removes only duplicate
 snapshot history, not durable ledger events. See the funded invariants in
 [AGENTS.md](../../AGENTS.md).
 
+`paper_funded_fact` and `paper_funded_event` retain every run while drain lookups
+are scoped to one run or account. Migration 145 analyzes both after every 5,000
+changes instead of the default 10% of the table, so the current session's run
+stays in the planner's `run_id` statistics. Otherwise the new run is estimated at
+one row, and per-fact primary-key lookups scan the whole run through a
+run-prefixed index. The drain then slows as the run grows, until arrival
+outpaces it.
+
 ## Research and model storage
 
 `research_manifest` preserves the declared research input identity. The immutable
@@ -71,9 +79,18 @@ unchanged polling from creating duplicate work. CA_TSX and US_EQUITIES remain
 separate at every relation.
 
 A statistical artifact has one source: a completed captured-history backtest or
-frozen PAPER_EVIDENCE dataset. A dataset stores compatible cohort identity, cutoff,
-rows, digest and research qualification. Prediction snapshots record the model and
-inputs available at observation time; they do not rewrite deterministic evaluations.
+frozen PAPER_EVIDENCE dataset. For asynchronous PAPER_EVIDENCE coverage, migration
+138 adds `statistical_training_dataset_preparation`, an immutable market-scoped
+freeze of the compatible cohort, requested/effective cutoffs, source digest,
+exclusions, qualification and ordered qualified rows. Its unique source digest
+identifies the exact input to resume; it is an internal preparation boundary, not
+public manifest evidence or proof of coverage. A dataset stores compatible cohort
+identity, cutoff, rows, digest and research qualification. The canonical dataset
+path remains responsible for materialization and training eligibility; terminal
+UNKNOWN/INCOMPLETE coverage may leave the same dataset truthfully unproven or
+incomplete, and existing datasets are never rewritten or backfilled. Prediction
+snapshots record the model and inputs available at observation time; they do not
+rewrite deterministic evaluations.
 
 Migration 095 adds the separate inactive-challenger path. `challenger_experiment`
 is an immutable registration containing the model/artifact hash, market/currency,
@@ -116,6 +133,18 @@ all raw data needed to reconstruct the outcome. Verify effective policy values a
 job results in a deployment before making a coverage claim. See the
 [runbook](operations-runbook.md) for backup/retention operations.
 
+## Daily-list seed runs (155)
+
+Migration `155-daily-seed-run.sql` adds `daily_seed_run`: one row per recorded
+pre-market seed outcome (`APPLIED`, `SKIPPED_LIST_PRESENT`, `NO_PICKS`,
+`FAILED`) per market and trading date, with the trigger (`SCHEDULE` or
+`MANUAL`), the list symbols the run left or found, the ranked selection as JSON
+and any error. Previews are not stored. Early-session rescan outcomes use
+the same table with version `daily-seed-v2`; their `symbols` are the added
+movers and `selection` holds the rescan result. The table has no foreign keys and holds
+one small row per attempt; see the
+[operations runbook](operations-runbook.md#pre-market-daily-list-seed).
+
 ## Discovery provider foundation (084)
 
 `questrade_request_budget` and `questrade_request_grant` belong to a broker identity,
@@ -142,4 +171,8 @@ Migration `086-discovery-shadow-control.sql` adds PostgreSQL-owned
 generation. Scheduled shadow result writes and completion require the current
 lease; preview uses a separate shadow-only identity. The scheduler and read-only
 discovery views are implemented, but automatic membership, outbox delivery and
-exclusions remain WP5 work. Discovery is OFF by default.
+exclusions remain WP5 work. Discovery is OFF by default and frozen by
+[ADR-018](../adr/018-pre-market-daily-seed-replaces-discovery-engine.md); the
+pre-market daily seed reads `discovery_symbol_mapping` and the latest
+`discovery_catalog_snapshot` as its pool and writes only `universe_watchlist`
+through ordinary intake.

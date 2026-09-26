@@ -140,8 +140,32 @@ describe.skipIf(!databaseUrl)("strategy research PostgreSQL acceptance", () => {
           expect(baseline.length).toBeGreaterThan(0);
         }
         await migrate(pool);
-        if (baseline)
-          expect((await pool.query(profilesSql)).rows).toEqual(baseline);
+        if (baseline) {
+          // Later migrations keep every earlier configuration row intact.
+          // Migrations 153 and 154 add derived versions for each setup profile
+          // and make them current, so compare configurations without that pointer.
+          type ProfileRow = {
+            current_config_id: string;
+            config_version: string;
+            parameters: Record<string, unknown>;
+          };
+          const withoutPointer = (rows: ProfileRow[]) =>
+            rows.map(({ current_config_id: _current, ...row }) => row);
+          const after = (await pool.query<ProfileRow>(profilesSql)).rows;
+          const stable = after.filter((row) =>
+            row.config_version.includes("+spread-stable-v1"),
+          );
+          expect(
+            withoutPointer(after.filter((row) => !stable.includes(row))),
+          ).toEqual(withoutPointer(baseline as ProfileRow[]));
+          for (const row of stable)
+            expect(row.parameters).toMatchObject({
+              spreadConfirmQuotes: 3,
+              spreadConfirmSeconds: 5,
+              spreadRecoveryPct: 80,
+              spreadMinTicks: 3,
+            });
+        }
         expect((await migrate(pool)).applied).toEqual([]);
         const definitions = await pool.query(
           `SELECT strategy_key,parameter_schema FROM strategy_definition

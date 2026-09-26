@@ -63,9 +63,17 @@ export const createPaperEvidenceStatisticalModelSchema =
     sourceKind: z.literal("PAPER_EVIDENCE"),
     trainingDatasetId: z.string().uuid(),
   });
+export const createCapturedBacktestResearchStatisticalModelSchema =
+  statisticalModelTrainingOptionsSchema.extend({
+    sourceKind: z.literal("CAPTURED_BACKTEST_RESEARCH"),
+    backtestRunId: z.string().uuid(),
+    authorizationId: z.string().uuid(),
+    planHash: z.string().regex(/^[a-f0-9]{64}$/),
+  });
 export const createStatisticalModelSchema = z.union([
   createBacktestStatisticalModelSchema,
   createPaperEvidenceStatisticalModelSchema,
+  createCapturedBacktestResearchStatisticalModelSchema,
 ]);
 export type CreateStatisticalModel = z.infer<
   typeof createStatisticalModelSchema
@@ -77,7 +85,11 @@ export const statisticalModelSchema = z.object({
   status: statisticalModelStatusSchema,
   modelType: z.literal("LOGISTIC_SETUP_QUALITY"),
   modelVersion: z.string(),
-  sourceKind: z.enum(["BACKTEST_RUN", "PAPER_EVIDENCE"]),
+  sourceKind: z.enum([
+    "BACKTEST_RUN",
+    "PAPER_EVIDENCE",
+    "CAPTURED_BACKTEST_RESEARCH",
+  ]),
   backtestRunId: z.string().uuid().nullable(),
   trainingDatasetId: z.string().uuid().nullable(),
   strategy: setupStrategyNameSchema,

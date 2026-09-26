@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { ScannerProfile } from "@tsx-scanner/contracts";
+import type { BacktestEconomics, ScannerProfile } from "@tsx-scanner/contracts";
 import {
   BacktestAutomationService,
   type BacktestAutomationStageDefinition,
@@ -39,6 +39,7 @@ function setup(
     profiles?: ScannerProfile[];
     stageDefinitions?: readonly BacktestAutomationStageDefinition[];
     now?: Date;
+    economics?: BacktestEconomics;
   } = {},
 ) {
   let now = options.now ?? new Date("2026-09-10T21:00:00.000Z");
@@ -56,6 +57,7 @@ function setup(
     ...(options.stageDefinitions
       ? { stageDefinitions: options.stageDefinitions }
       : {}),
+    ...(options.economics ? { economics: options.economics } : {}),
   });
   return {
     service,
@@ -102,6 +104,28 @@ function finishJob(
 }
 
 describe("backtest automation work identity and dispatch", () => {
+  it("shares market availability and identical fingerprints within a cycle", async () => {
+    const { service, inputs } = setup({
+      profiles: [
+        profile(),
+        profile({
+          id: "10000000-0000-4000-8000-000000000089",
+          configId: "10000000-0000-4000-8000-000000000099",
+          name: "Bull Flag 2",
+        }),
+      ],
+    });
+    await service.configureMarket({
+      marketId: "CA_TSX",
+      enabled: true,
+      cadence: "DAILY_POST_SESSION",
+      maxOutstanding: 10,
+    });
+    await service.runCycle("CA_TSX", "SCHEDULED_CATCH_UP");
+    expect(inputs.availabilityCalls).toEqual(["CA_TSX"]);
+    expect(inputs.candidatePlanCalls).toHaveLength(1);
+    expect(inputs.fingerprintCalls).toEqual(["CA_TSX"]);
+  });
   it("queues one exact-configuration replay with a deterministic idempotency key", async () => {
     const { service, store, jobs } = setup();
     const result = await service.triggerProfile(profile(), "PROFILE_SAVE");
@@ -125,6 +149,23 @@ describe("backtest automation work identity and dispatch", () => {
     expect(work.state).toBe("QUEUED");
     expect(work.jobId).toBe(jobIdFor(1));
     expect(work.dispatchedFingerprint).toBe(work.inputFingerprint);
+  });
+
+  it("applies the paper-bot entry economics to qualification replays", async () => {
+    const economics = {
+      minNetRewardRisk: 1,
+      minStopFrictionMultiple: 2,
+      minTargetFrictionMultiple: 3,
+      maxSpreadPct: 0.5,
+    };
+    const gated = setup({ economics });
+    await gated.service.triggerProfile(profile(), "PROFILE_SAVE");
+    expect(gated.jobs.calls[0]!.payload).toEqual(
+      expect.objectContaining({ economics }),
+    );
+    const legacy = setup();
+    await legacy.service.triggerProfile(profile(), "PROFILE_SAVE");
+    expect(legacy.jobs.calls[0]!.payload).not.toHaveProperty("economics");
   });
 
   it("coalesces equivalent triggers onto the same durable job", async () => {

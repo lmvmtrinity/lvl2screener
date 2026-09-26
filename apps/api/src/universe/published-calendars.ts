@@ -157,6 +157,47 @@ export function publishedCalendarRevision(marketId: MarketId): string {
   return `exchange-published-${digest.slice(0, 16)}`;
 }
 
+/** Full content identity for consumers whose contract requires a SHA-256 hash. */
+export function publishedCalendarSourceHash(marketId: MarketId): string {
+  return publishedCalendarSourceHashFor(SOURCES[marketId]);
+}
+
+/** Full content identity for a retained source object. Object key order is not
+ * part of the evidence identity, while array order remains meaningful. */
+export function publishedCalendarSourceHashFor(
+  source: PublishedCalendarSource,
+): string {
+  return createHash("sha256")
+    .update(canonicalPublishedCalendarJson(source))
+    .digest("hex");
+}
+
+/** Latest retained source retrieval date. The source is date-granular, so callers
+ * must treat the whole date as unavailable until the following date. */
+export function publishedCalendarRetrievedAt(
+  marketId: MarketId,
+): string | null {
+  return publishedCalendarRetrievedAtFor(SOURCES[marketId]);
+}
+
+/** Return the latest retained retrieval date only when every source entry is
+ * present and valid. Partial metadata must remain unverified. */
+export function publishedCalendarRetrievedAtFor(
+  source: PublishedCalendarSource,
+): string | null {
+  if (
+    source.sources.length === 0 ||
+    source.sources.some((entry) => !isValidCalendarDate(entry.retrievedAt))
+  )
+    return null;
+  return (
+    source.sources
+      .map((entry) => entry.retrievedAt)
+      .sort()
+      .at(-1) ?? null
+  );
+}
+
 export function publishedCalendarCovers(
   marketId: MarketId,
   tradingDates: readonly string[],
@@ -165,4 +206,36 @@ export function publishedCalendarCovers(
     (tradingDate) =>
       publishedCalendarYear(marketId, Number(tradingDate.slice(0, 4))) !== null,
   );
+}
+
+function isValidCalendarDate(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const parsed = Date.parse(`${value}T00:00:00.000Z`);
+  return (
+    Number.isFinite(parsed) &&
+    new Date(parsed).toISOString().slice(0, 10) === value
+  );
+}
+
+function canonicalPublishedCalendarJson(value: unknown): string {
+  return JSON.stringify(canonicalPublishedCalendarValue(value));
+}
+
+function canonicalPublishedCalendarValue(value: unknown): unknown {
+  if (value === null || typeof value === "string" || typeof value === "boolean")
+    return value;
+  if (Array.isArray(value)) return value.map(canonicalPublishedCalendarValue);
+  if (typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    return Object.fromEntries(
+      Object.keys(record)
+        .sort()
+        .map((key) => {
+          if (record[key] === undefined)
+            throw new Error("UNSUPPORTED_CALENDAR_IDENTITY_VALUE");
+          return [key, canonicalPublishedCalendarValue(record[key])];
+        }),
+    );
+  }
+  throw new Error("UNSUPPORTED_CALENDAR_IDENTITY_VALUE");
 }

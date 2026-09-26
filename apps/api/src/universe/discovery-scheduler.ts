@@ -18,6 +18,7 @@ import {
 import type {
   CatalogClient,
   CatalogMember,
+  CatalogSnapshot,
   CatalogSnapshotStore,
 } from "./eodhd-catalog.js";
 import type {
@@ -123,6 +124,7 @@ const CATALOG_LAST_GOOD_MAX_AGE_MS = 96 * 60 * 60_000;
 const DEFAULT_LEASE_MS = 10 * 60_000;
 const DEFAULT_POLL_MS = 15_000;
 const DEFAULT_WORKERS = 4;
+const STATUS_CATALOG_CACHE_MS = 20_000;
 
 function memberKey(member: CatalogMember): string {
   return `${member.raw.Exchange}\u0000${member.providerCode}`;
@@ -291,6 +293,38 @@ export class DiscoveryScheduler {
   private readonly currentAcceleratedCodes = new Set<string>();
   private lastAttemptDiagnostics: DiscoveryAttemptDiagnosticsDraft | null =
     null;
+  private statusValidatedDigest?: string;
+  private statusCatalogCache?: {
+    expiresAt: number;
+    value: Omit<CatalogSnapshot, "members"> | null;
+  };
+
+  private async loadStatusCatalog(
+    now: number,
+  ): Promise<Omit<CatalogSnapshot, "members"> | null> {
+    if (this.statusCatalogCache && now < this.statusCatalogCache.expiresAt)
+      return this.statusCatalogCache.value;
+    let value = this.options.catalogStore.loadLatestHeader
+      ? await this.options.catalogStore.loadLatestHeader(this.options.marketId)
+      : await this.options.catalogStore.loadLatest(this.options.marketId);
+    // The header read skips member validation. Run the full digest check once
+    // for each catalog revision so status never reports an unverified catalog.
+    if (value && value.digest !== this.statusValidatedDigest) {
+      const full = await this.options.catalogStore.loadLatest(
+        this.options.marketId,
+      );
+      if (full) {
+        const { members: _members, ...header } = full;
+        value = header;
+      } else value = null;
+      this.statusValidatedDigest = full?.digest;
+    }
+    this.statusCatalogCache = {
+      expiresAt: now + STATUS_CATALOG_CACHE_MS,
+      value,
+    };
+    return value;
+  }
 
   getLastAttemptDiagnostics(): DiscoveryAttemptDiagnosticsDraft | null {
     return structuredClone(this.lastAttemptDiagnostics);
@@ -482,10 +516,8 @@ export class DiscoveryScheduler {
           limit: 1,
         })
       )[0] ?? null;
-    const snapshot = await this.options.catalogStore.loadLatest(
-      this.options.marketId,
-    );
     const now = this.clock().getTime();
+    const snapshot = await this.loadStatusCatalog(now);
     const timezone =
       this.options.marketId === "CA_TSX"
         ? "America/Toronto"

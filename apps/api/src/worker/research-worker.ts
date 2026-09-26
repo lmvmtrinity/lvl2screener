@@ -70,6 +70,8 @@ export interface ResearchWorkerOptions {
    * reconcile immediately (for example, completion-triggered automation drains).
    * Errors are logged and never fail the settled job. */
   onJobSettled?: (job: ClaimedResearchJob) => void | Promise<void>;
+  /** When true, no new job is claimed; running jobs finish and queued jobs wait. */
+  claimsPaused?: () => boolean;
 }
 
 const noopLogger: ResearchWorkerLogger = { info: () => {}, error: () => {} };
@@ -87,9 +89,12 @@ export class ResearchWorker {
   private readonly logger: ResearchWorkerLogger;
   private readonly onJobSettled:
     ((job: ClaimedResearchJob) => void | Promise<void>) | undefined;
+  private readonly claimsPaused: (() => boolean) | undefined;
+  private paused = false;
   private stopped = false;
   private loopPromise: Promise<void> | undefined;
   private reapTimer: ReturnType<typeof setInterval> | undefined;
+  private readonly pendingReaps = new Set<Promise<void>>();
 
   constructor(
     private readonly repository: ResearchJobRepository,
@@ -104,6 +109,7 @@ export class ResearchWorker {
     this.reapIntervalMs = options.reapIntervalMs ?? 30_000;
     this.logger = options.logger ?? noopLogger;
     this.onJobSettled = options.onJobSettled;
+    this.claimsPaused = options.claimsPaused;
   }
 
   /** Claims and runs at most one job. Returns true if a job was claimed (regardless of outcome),
@@ -111,6 +117,14 @@ export class ResearchWorker {
   async runOnce(): Promise<boolean> {
     const jobTypes = Object.keys(this.handlers) as ResearchJobType[];
     if (jobTypes.length === 0) return false;
+    const paused = this.claimsPaused?.() ?? false;
+    if (paused !== this.paused) {
+      this.paused = paused;
+      this.logger.info({
+        event: paused ? "RESEARCH_CLAIMS_PAUSED" : "RESEARCH_CLAIMS_RESUMED",
+      });
+    }
+    if (paused) return false;
     const job = await this.repository.claimNext(
       jobTypes,
       this.ownerId,
@@ -217,10 +231,25 @@ export class ResearchWorker {
     if (this.loopPromise !== undefined) return;
     this.stopped = false;
     this.reapTimer = setInterval(() => {
-      void this.repository.reapExpiredLeases().then((result) => {
-        if (result.requeued || result.interrupted)
-          this.logger.info({ event: "RESEARCH_JOB_LEASES_REAPED", ...result });
-      });
+      const reap = this.repository
+        .reapExpiredLeases()
+        .then((result) => {
+          if (result.requeued || result.interrupted)
+            this.logger.info({
+              event: "RESEARCH_JOB_LEASES_REAPED",
+              ...result,
+            });
+        })
+        .catch((error) => {
+          this.logger.error({
+            event: "RESEARCH_JOB_LEASE_REAP_FAILED",
+            error: error instanceof Error ? error.message : String(error),
+          });
+        })
+        .finally(() => {
+          this.pendingReaps.delete(reap);
+        });
+      this.pendingReaps.add(reap);
     }, this.reapIntervalMs);
     this.reapTimer.unref?.();
     this.loopPromise = this.loop();
@@ -246,6 +275,10 @@ export class ResearchWorker {
     if (this.reapTimer) clearInterval(this.reapTimer);
     await this.loopPromise;
     this.loopPromise = undefined;
+    // A lease sweep started before the timer was cleared still owns a pool
+    // client; wait for it so shutdown can close the pool afterwards.
+    while (this.pendingReaps.size > 0)
+      await Promise.allSettled([...this.pendingReaps]);
   }
 }
 

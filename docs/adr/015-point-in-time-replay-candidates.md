@@ -57,6 +57,7 @@ candidates is valid; zero candidates is missing input, not evidence.
 
 ## Validation
 
+
 Validate per-session membership, no look-ahead, and empty-candidate waiting
 without freshness credit. Frozen replay membership must remain unchanged when
 the live active list changes. Database acceptance uses an isolated disposable

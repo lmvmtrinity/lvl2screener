@@ -43,13 +43,32 @@ export class PaperEvidenceTrainingScheduler {
     let runError: string | null = null;
 
     try {
-      const cohorts = await this.evidence.listCohorts();
+      const listedCohorts = await this.evidence.listCohorts();
+      const pendingPreparations =
+        typeof this.evidence.pendingPreparations === "function"
+          ? await this.evidence.pendingPreparations()
+          : [];
+      const seenCohorts = new Set(listedCohorts.map(cohortIdentity));
+      const cohorts = [
+        ...listedCohorts,
+        ...pendingPreparations
+          .filter((preparation) => {
+            const key = cohortIdentity(preparation.cohort);
+            if (seenCohorts.has(key)) return false;
+            seenCohorts.add(key);
+            return true;
+          })
+          .map((preparation) => preparation.cohort),
+      ];
       if (cohorts.length === 0) {
         primaryNoopReason = "NO_COHORTS_AVAILABLE";
       }
 
       for (const cohort of cohorts) {
-        if (!this.qualifies(cohort)) {
+        const pendingPreparation =
+          typeof this.evidence.pendingPreparationFor === "function" &&
+          (await this.evidence.pendingPreparationFor(cohort));
+        if (!pendingPreparation && !this.qualifies(cohort)) {
           cohortsExamined.push({
             strategy: cohort.strategy,
             marketId: cohort.marketId,
@@ -65,10 +84,16 @@ export class PaperEvidenceTrainingScheduler {
           });
           continue;
         }
-        const previous = await this.evidence.latestDatasetFor(cohort);
+        const previous = pendingPreparation
+          ? undefined
+          : await this.evidence.latestDatasetFor(cohort);
+        const previousClosedQuoteCount =
+          previous?.cohort?.closedQuoteCount ??
+          previous?.sourceRowCount ??
+          cohort.closedQuoteCount;
         if (
           previous &&
-          cohort.closedQuoteCount - previous.sourceRowCount <
+          cohort.closedQuoteCount - previousClosedQuoteCount <
             PAPER_EVIDENCE_TRAINING_POLICY.minimumNewOutcomes
         ) {
           cohortsExamined.push({
@@ -78,13 +103,15 @@ export class PaperEvidenceTrainingScheduler {
             closedQuoteCount: cohort.closedQuoteCount,
             qualifies: true,
             status: "SKIPPED",
-            reason: `INSUFFICIENT_NEW_OUTCOMES (${cohort.closedQuoteCount - previous.sourceRowCount} < ${PAPER_EVIDENCE_TRAINING_POLICY.minimumNewOutcomes})`,
+            reason: `INSUFFICIENT_NEW_OUTCOMES (${cohort.closedQuoteCount - previousClosedQuoteCount} < ${PAPER_EVIDENCE_TRAINING_POLICY.minimumNewOutcomes})`,
           });
           continue;
         }
         const cutoff = this.now();
-        const qualification = await this.evidence.qualify(cohort, cutoff);
-        if (!qualification.qualification.qualified) {
+        const qualification = pendingPreparation
+          ? undefined
+          : await this.evidence.qualify(cohort, cutoff);
+        if (qualification && !qualification.qualification.qualified) {
           cohortsExamined.push({
             strategy: cohort.strategy,
             marketId: cohort.marketId,
@@ -96,7 +123,30 @@ export class PaperEvidenceTrainingScheduler {
           });
           continue;
         }
-        const dataset = await this.evidence.materialize(cohort, cutoff);
+        const prepared =
+          typeof this.evidence.prepareAndMaterialize === "function"
+            ? await this.evidence.prepareAndMaterialize(
+                cohort,
+                cutoff,
+                qualification,
+              )
+            : {
+                dataset: await this.evidence.materialize(cohort, cutoff),
+                pending: false,
+              };
+        if (prepared.pending || !prepared.dataset) {
+          cohortsExamined.push({
+            strategy: cohort.strategy,
+            marketId: cohort.marketId,
+            cohort,
+            closedQuoteCount: cohort.closedQuoteCount,
+            qualifies: true,
+            status: "WAITING",
+            reason: "COVERAGE_PENDING",
+          });
+          continue;
+        }
+        const dataset = prepared.dataset;
         if (!dataset.researchQualification?.qualified) {
           cohortsExamined.push({
             strategy: cohort.strategy,
@@ -109,16 +159,19 @@ export class PaperEvidenceTrainingScheduler {
           });
           continue;
         }
+        const datasetCohort = dataset.cohort ?? cohort;
+        const datasetMarketId = dataset.marketId ?? datasetCohort.marketId;
         createdDatasetId = dataset.id;
         const job = await this.jobs.createJob(
           "STATISTICAL_TRAINING",
           {
             sourceKind: "PAPER_EVIDENCE",
-            name: `Paper evidence challenger · ${cohort.strategy} · ${dataset.effectiveCutoff.slice(0, 10)}`,
+            name: `Paper evidence challenger · ${datasetCohort.strategy} · ${dataset.effectiveCutoff.slice(0, 10)}`,
             trainingDatasetId: dataset.id,
-            strategy: cohort.strategy,
-            marketId: cohort.marketId,
-            cohort,
+            sourceDigest: dataset.sourceDigest,
+            strategy: datasetCohort.strategy,
+            marketId: datasetMarketId,
+            cohort: datasetCohort,
             trainPct: PAPER_EVIDENCE_TRAINING_POLICY.trainPct,
             minimumSamples: PAPER_EVIDENCE_TRAINING_POLICY.minimumSamples,
             l2Penalty: PAPER_EVIDENCE_TRAINING_POLICY.l2Penalty,
@@ -208,4 +261,18 @@ export class PaperEvidenceTrainingScheduler {
     const base = leading.reason ?? "NO_QUALIFYING_NEW_DATA";
     return `${base} · leading ${leading.marketId}/${leading.strategy} · ${cohortsExamined.length} cohorts examined`;
   }
+}
+
+function cohortIdentity(cohort: PaperEvidenceCohort): string {
+  return JSON.stringify({
+    marketId: cohort.marketId,
+    strategy: cohort.strategy,
+    strategyVersion: cohort.strategyVersion,
+    profileConfigId: cohort.profileConfigId,
+    configVersion: cohort.configVersion,
+    executionModelVersion: cohort.executionModelVersion,
+    assumptions: cohort.assumptions,
+    signalSemanticsVersion: cohort.signalSemanticsVersion ?? "UNKNOWN",
+    replayScope: cohort.replayScope ?? "UNKNOWN",
+  });
 }

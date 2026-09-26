@@ -238,6 +238,27 @@ export class FundedFactAdapter {
               id: inflight.inflight_fact_id,
             }
           : undefined;
+      const existingFacts = await client.query<
+        Pick<FactRow, "fact" | "outcome" | "sort_key"> & {
+          fact_id: string;
+          economic_key: string;
+        }
+      >(
+        `SELECT fact_id,economic_key,fact,outcome,sort_key
+         FROM paper_funded_fact
+         WHERE run_id=$1 AND (
+           fact_id=ANY($2::text[]) OR economic_key=ANY($3::text[])
+         )`,
+        [
+          this.runId,
+          facts.map(({ id }) => id),
+          facts.map(({ fact }) => factEconomicKey(fact)),
+        ],
+      );
+      const byId = new Map(existingFacts.rows.map((row) => [row.fact_id, row]));
+      const byEconomicKey = new Map(
+        existingFacts.rows.map((row) => [row.economic_key, row]),
+      );
       for (const { id, fact } of facts) {
         if (!id || !Object.hasOwn(factPriority, fact.type))
           throw new Error("Invalid funded fact identity/type");
@@ -252,30 +273,24 @@ export class FundedFactAdapter {
         )
           throw new Error("Invalid comparison funded SIGNAL sort key");
         const expectedSortKey = comparisonSortKey ?? factKey(fact);
-        const prior = await client.query<FactRow>(
-          "SELECT fact,outcome,sort_key FROM paper_funded_fact WHERE run_id=$1 AND fact_id=$2",
-          [this.runId, id],
-        );
-        if (prior.rows[0]) {
+        const prior = byId.get(id);
+        if (prior) {
           // The persisted durable sort key is always compared with the expected
           // key, including an omitted comparison key on retry: a stored
           // comparison key can never silently fall back to the default fact key.
           if (
-            !isDeepStrictEqual(prior.rows[0].fact, fact) ||
-            prior.rows[0].sort_key !== expectedSortKey
+            !isDeepStrictEqual(prior.fact, fact) ||
+            prior.sort_key !== expectedSortKey
           )
             throw new Error("Conflicting funded fact retry");
           continue;
         }
         const economicKey = factEconomicKey(fact);
-        const equivalent = await client.query<FactRow>(
-          "SELECT fact,outcome,sort_key FROM paper_funded_fact WHERE run_id=$1 AND economic_key=$2",
-          [this.runId, economicKey],
-        );
-        if (equivalent.rows[0]) {
+        const equivalent = byEconomicKey.get(economicKey);
+        if (equivalent) {
           if (
-            !isDeepStrictEqual(equivalent.rows[0].fact, fact) ||
-            equivalent.rows[0].sort_key !== expectedSortKey
+            !isDeepStrictEqual(equivalent.fact, fact) ||
+            equivalent.sort_key !== expectedSortKey
           )
             throw new Error("Conflicting funded economic fact");
           continue;
@@ -451,6 +466,15 @@ export class FundedFactAdapter {
               outcome ? JSON.stringify(outcome) : null,
             ],
           );
+        const stored = {
+          fact_id: id,
+          economic_key: economicKey,
+          fact,
+          outcome,
+          sort_key: expectedSortKey,
+        };
+        byId.set(id, stored);
+        byEconomicKey.set(economicKey, stored);
       }
       if (options.refusalRequests?.length && options.repository)
         await options.repository.recordRefusalRequestsInTransaction(

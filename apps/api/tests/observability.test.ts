@@ -37,6 +37,11 @@ const baseSnapshot: ObservabilitySnapshot = {
     oldestUnresolvedCoordinatedAgeMs: 3_600_000,
     unknownQuoteSizeUnits: 0,
     overdueRuns: 1,
+    priorClosePendingExecutions: 1,
+    oldestPriorClosePendingAgeMs: 1_800_000,
+    fundedCycleState: "WAITING",
+    fundedBindingState: "WAITING_FOR_PRIOR_RUN",
+    fundedBlockReason: "PRIOR_RUN_ACTIVE",
     funded: {
       closePendingOrders: 2,
       oldestClosePendingAgeMs: 900_000,
@@ -229,6 +234,13 @@ describe("Phase 9 Prometheus metrics rendering", () => {
     expect(text).toContain(
       "scanner_paper_bot_unresolved_coordinated_positions 1",
     );
+    expect(text).toContain(
+      "scanner_paper_bot_prior_close_pending_executions 1",
+    );
+    expect(text).toContain(
+      "scanner_paper_bot_oldest_prior_close_pending_age_ms 1800000",
+    );
+    expect(text).toContain("scanner_paper_bot_funded_waiting_for_prior_run 1");
     expect(text).toContain("scanner_paper_bot_funded_close_pending_orders 2");
     expect(text).toContain(
       "scanner_paper_bot_funded_oldest_close_pending_age_ms 900000",

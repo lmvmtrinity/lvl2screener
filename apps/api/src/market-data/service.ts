@@ -36,7 +36,11 @@ import {
   MarketSessionManager,
   type MarketSessionSnapshot,
 } from "./session-manager.js";
-import type { UniverseManager } from "../universe/universe-service.js";
+import type {
+  ListEditResult,
+  UniverseManager,
+} from "../universe/universe-service.js";
+import type { DailySeedIntakeGuard } from "../universe/daily-seed-intake-guard.js";
 import type {
   BenchmarkManager,
   BenchmarkSnapshot,
@@ -80,7 +84,12 @@ import {
   type FundedInvalidation,
   type FundedOperationalSnapshot,
 } from "../paper-bot/funded-live-adapter.js";
+import { FundedPriorRunActiveError } from "../paper-bot/funded-order-service.js";
 import type { FundedPolicy } from "../paper-bot/funded-policy.js";
+
+type FundedCycleResult = "PROCESSED" | "WAITING" | "FAILED";
+type FundedBindingState =
+  "UNBOUND" | "BOUND" | "WAITING_FOR_PRIOR_RUN" | "FAILED";
 
 export type MarketDataServiceState =
   | "STARTING"
@@ -98,6 +107,7 @@ const AUTH_FAILURE_PAUSE_THRESHOLD = 2;
 
 /** How often the closed-market cycle re-checks for unfinished paper runs. */
 const CLOSED_MARKET_PAPER_SWEEP_MS = 60_000;
+const CLOSED_MARKET_FUNDED_CYCLE_MS = 60_000;
 
 /**
  * How many later sessions a still-unresolved session close may wait through.
@@ -168,6 +178,11 @@ export interface PaperBotSnapshot {
   lastError: string | null;
   lastSuccessfulProcessingAt?: string | null;
   fundedProcessing?: boolean;
+  fundedCycleState?: FundedCycleResult;
+  fundedBindingState?: FundedBindingState;
+  fundedBlockReason?: "PRIOR_RUN_ACTIVE" | null;
+  priorClosePendingExecutions?: number;
+  oldestPriorClosePendingAgeMs?: number | null;
   fundedLastSuccessfulProcessingAt?: string | null;
   funded?: FundedOperationalSnapshot;
 }
@@ -267,17 +282,23 @@ export class QuestradeDataService {
    *  running. Pause catch-up so the next durable market cycle gets priority. */
   private paperFundedCyclePending = false;
   private paperFundedLastError?: string;
+  private paperFundedCycleState: FundedCycleResult = "WAITING";
+  private paperFundedBindingState: FundedBindingState = "UNBOUND";
+  private paperFundedBlockReason: "PRIOR_RUN_ACTIVE" | null = null;
   private paperLastSuccessAt?: string;
   private fundedLastSuccessAt?: string;
   private paperBotSessionDate?: string;
   private paperBotScheduledCloseAt?: string;
   private paperBotRunId?: string;
   private paperBotLastSweepAt = 0;
+  private closedFundedLastCycleAt = 0;
   private paperBotOverdueRunCount = 0;
   private paperBotReconciliationBacklog?: number;
   private paperBotUnreconcilableCount = 0;
   private paperBotAbandonedThisSweep = 0;
   private paperBotHealth?: PaperRunHealth;
+  private paperPriorClosePendingExecutions = 0;
+  private paperOldestPriorClosePendingAgeMs: number | null = null;
   private paperCoordinationHealth?: CoordinationPortfolioHealth;
   private paperBotProcessingMs?: number;
   private paperBotLastError?: string;
@@ -343,6 +364,11 @@ export class QuestradeDataService {
     this.paperFundedConfig = funded;
     this.paperFundedOperational = undefined;
     this.paperFundedBound = false;
+    this.paperFundedCycleState = "WAITING";
+    this.paperFundedBindingState = "UNBOUND";
+    this.paperFundedBlockReason = null;
+    this.paperPriorClosePendingExecutions = 0;
+    this.paperOldestPriorClosePendingAgeMs = null;
     this.paperFundedCyclePending = false;
     this.paperFundedRecoveryAdapters.clear();
   }
@@ -417,6 +443,11 @@ export class QuestradeDataService {
       : undefined;
     this.paperFundedAdapter = fundedAdapter;
     this.paperFundedBound = false;
+    this.paperFundedCycleState = "WAITING";
+    this.paperFundedBindingState = "UNBOUND";
+    this.paperFundedBlockReason = null;
+    this.paperPriorClosePendingExecutions = 0;
+    this.paperOldestPriorClosePendingAgeMs = null;
     this.paperFundedOperational = undefined;
     if (fundedAdapter && fundedConfig) {
       try {
@@ -427,20 +458,29 @@ export class QuestradeDataService {
           fundedConfig.dailyLossLimit,
         );
         this.paperFundedBound = true;
+        this.paperFundedBindingState = "BOUND";
+        this.paperFundedBlockReason = null;
       } catch (error) {
         // An earlier funded session may still have close-pending orders. Keep
         // the live processor available and retry binding after each later
         // quote batch; abandoning the whole market-data initialization here
         // would prevent those quotes from ever reaching the prior run.
-        if (
-          !(error instanceof Error) ||
-          !error.message.includes("Funded account has")
-        )
+        if (!(error instanceof FundedPriorRunActiveError)) {
+          this.paperFundedBindingState = "FAILED";
+          this.paperFundedCycleState = "FAILED";
+          this.paperFundedLastError =
+            error instanceof Error
+              ? error.message
+              : "Unknown funded binding error";
           throw error;
-        this.logger.error({
-          event: "FUNDED_PAPER_BIND_DEFERRED",
+        }
+        this.paperFundedBindingState = "WAITING_FOR_PRIOR_RUN";
+        this.paperFundedBlockReason = "PRIOR_RUN_ACTIVE";
+        this.logger.info({
+          event: "FUNDED_PAPER_BIND_WAITING",
           runId: run.id,
-          error: error.message,
+          priorRunId: error.priorRunId,
+          reason: error.code,
         });
       }
     }
@@ -600,31 +640,46 @@ export class QuestradeDataService {
         const session = this.sessions.getSnapshot();
         if (session.marketStatus !== "OPEN") {
           this.state = "MARKET_CLOSED";
-          const instruments = await this.quoteCollectionInstruments();
           const closeAt = session.endTime.getTime();
           const now = this.clock().getTime();
+          const inCloseWindow = now >= closeAt && now - closeAt <= 5 * 60_000;
+          const closeCollectionDue =
+            !!this.paperBotProcessor &&
+            now >= closeAt &&
+            ((this.lastCollectedSessionClose !== closeAt &&
+              now - (this.lastCloseCollectionAt ?? 0) >= 60_000) ||
+              (inCloseWindow &&
+                now - (this.lastCloseCollectionAt ?? 0) >= 60_000));
+          const urgentFunded =
+            (this.paperFundedOperational?.pendingFacts ?? 0) > 0 ||
+            (this.paperFundedOperational?.closePendingOrders ?? 0) > 0;
+          const fundedDue =
+            !!this.paperFundedAdapter &&
+            (inCloseWindow ||
+              urgentFunded ||
+              now - this.closedFundedLastCycleAt >=
+                CLOSED_MARKET_FUNDED_CYCLE_MS);
+          const sweepDue =
+            !!this.paperBotStore &&
+            now - this.paperBotLastSweepAt >= CLOSED_MARKET_PAPER_SWEEP_MS;
+          if (!closeCollectionDue && !fundedDue && !sweepDue) return;
+          const instruments = await this.quoteCollectionInstruments();
           let closeQuotes: Quote[] = [];
           // Collect the final completed bars and a post-boundary book before
           // settlement. Retry briefly for provider publication lag, and allow
           // one catch-up collection on startup after the close. Never scan or
           // admit new signals on this path.
-          if (
-            this.paperBotProcessor &&
-            now >= closeAt &&
-            (this.lastCollectedSessionClose !== closeAt ||
-              (now - closeAt <= 5 * 60_000 &&
-                now - (this.lastCloseCollectionAt ?? 0) >= 60_000))
-          ) {
+          if (closeCollectionDue) {
             const scannerWasReady = this.featureEngineReady;
             try {
               closeQuotes = await this.quotes.collect(
                 instruments.map((instrument) => instrument.symbolId),
               );
-              await this.collectCandles(
+              const recoveryComplete = await this.collectCandles(
                 ["OneMinute", "FiveMinutes"],
                 scannerWasReady,
               );
-              this.lastCollectedSessionClose = closeAt;
+              if (recoveryComplete) this.lastCollectedSessionClose = closeAt;
               this.lastCloseCollectionAt = now;
             } catch (error) {
               // A collection outage must not suppress durable recovery or the
@@ -648,17 +703,16 @@ export class QuestradeDataService {
             closeQuotes,
             instruments,
           );
-          this.scheduleFundedPaperBot(closeFacts, []);
+          if (fundedDue || closeCollectionDue) {
+            this.closedFundedLastCycleAt = now;
+            this.scheduleFundedPaperBot(closeFacts, []);
+          }
           // A closed market still has to settle runs whose session close has passed:
           // one holding no unfinished execution becomes COMPLETED instead of
           // being stranded RUNNING until the next open session. Outside the
           // final collection window, recovery uses retained facts, so this
           // sweep is throttled well below the poll interval.
-          if (
-            this.paperBotStore &&
-            this.clock().getTime() - this.paperBotLastSweepAt >=
-              CLOSED_MARKET_PAPER_SWEEP_MS
-          ) {
+          if (sweepDue) {
             await this.settleOverduePaperBotRuns(closeFacts, false);
           }
           return;
@@ -677,16 +731,16 @@ export class QuestradeDataService {
         this.updateQuoteStatus(
           quotes.filter((value) => candidateIds.has(value.symbolId)),
         );
-        await this.updateFeatures(
-          quotes,
-          allInstruments,
-          collectionInstruments,
-        );
         const due = this.dueCandleIntervals(this.clock());
         if (due.length > 0) {
           await this.collectCandles(due);
           this.markCandleBuckets(this.clock(), due);
         }
+        await this.updateFeatures(
+          quotes,
+          allInstruments,
+          collectionInstruments,
+        );
         await this.requestPaperBotSessionCloseIfDue(
           quotes,
           collectionInstruments,
@@ -800,7 +854,16 @@ export class QuestradeDataService {
       lastError: this.paperBotLastError ?? this.paperFundedLastError ?? null,
       lastSuccessfulProcessingAt: this.paperLastSuccessAt ?? null,
       fundedProcessing: this.paperFundedWork !== undefined,
+      priorClosePendingExecutions: this.paperPriorClosePendingExecutions,
+      oldestPriorClosePendingAgeMs: this.paperOldestPriorClosePendingAgeMs,
       fundedLastSuccessfulProcessingAt: this.fundedLastSuccessAt ?? null,
+      ...(this.paperFundedAdapter
+        ? {
+            fundedCycleState: this.paperFundedCycleState,
+            fundedBindingState: this.paperFundedBindingState,
+            fundedBlockReason: this.paperFundedBlockReason,
+          }
+        : {}),
       ...(this.paperFundedOperational
         ? { funded: this.paperFundedOperational }
         : {}),
@@ -946,19 +1009,12 @@ export class QuestradeDataService {
     });
   }
 
-  /** Called only while the cycle mutex is held; deferred intake must reload
-   * membership before the engine can scan again. */
-  private async refreshUniverseWithinCycle(): Promise<PersistedInstrument[]> {
-    if (this.featureEngine) {
-      this.featureEngineReady = false;
-      this.scannerRecovery.assertAvailable(this.clock().getTime());
-    }
-    const instruments = await this.metadata.enrich();
-    this.instruments = instruments;
-    this.benchmarkSnapshot = await this.resolveBenchmarks();
-    const activeIds = new Set(instruments.map((value) => value.symbolId));
+  /** Drops cached candles, features and evaluations for instruments that
+   * are no longer active. */
+  private pruneInactiveState(): void {
+    const activeIds = new Set(this.instruments.map((value) => value.symbolId));
     const activeSymbols = new Set(
-      instruments.map((value) => value.symbol.toUpperCase()),
+      this.instruments.map((value) => value.symbol.toUpperCase()),
     );
     for (const id of this.fiveMinuteCandles.keys())
       if (!activeIds.has(id)) this.fiveMinuteCandles.delete(id);
@@ -973,6 +1029,118 @@ export class QuestradeDataService {
       if (!activeSymbols.has(evaluation.symbol.toUpperCase()))
         this.latestContexts.delete(key);
     }
+  }
+
+  /**
+   * Applies a daily-list edit. The universe evaluates only added symbols and
+   * the running scanner session retires removed candidates and warms added
+   * ones, so an edit costs broker requests only for the symbols it adds.
+   * Anything the incremental path cannot keep equivalent to a full refresh
+   * falls back to one.
+   */
+  private async applyUniverseListEdit(): Promise<PersistedInstrument[]> {
+    return this.cycleMutex.runExclusive(async () => {
+      try {
+        const edit = this.canEditIncrementally()
+          ? await this.metadata.applyListEdit?.()
+          : null;
+        if (!edit) {
+          this.universeRefreshPending = true;
+          return await this.refreshUniverseWithinCycle();
+        }
+        await this.synchronizeListEdit(edit);
+        return this.getInstruments();
+      } catch (error) {
+        this.recordScannerRecoveryFailure(error);
+        this.fail(error, "UNIVERSE_REFRESH_FAILED");
+        throw error;
+      }
+    });
+  }
+
+  private canEditIncrementally(): boolean {
+    if (this.universeRefreshPending || !this.metadata.applyListEdit)
+      return false;
+    if (!this.featureEngine) return true;
+    return (
+      this.featureEngineReady &&
+      this.engineSessionStart ===
+        this.sessions.getMarket().startTime.getTime() &&
+      Boolean(this.featureEngine.warmInstrument) &&
+      Boolean(this.featureEngine.retireInstruments)
+    );
+  }
+
+  /** Moves the running session to the edited membership. A scanner failure
+   * after the membership is recorded falls back to a full warm-up of the new
+   * set, the same recovery a full refresh uses. */
+  private async synchronizeListEdit(edit: ListEditResult): Promise<void> {
+    const previousIds = new Set(this.instruments.map((value) => value.id));
+    const nextIds = new Set(edit.instruments.map((value) => value.id));
+    const added = edit.instruments.filter(
+      (value) => !previousIds.has(value.id),
+    );
+    const retired = this.instruments.filter((value) => !nextIds.has(value.id));
+    this.instruments = edit.instruments;
+    this.pruneInactiveState();
+    const marketId = this.sessions.getSnapshot().marketId;
+    let warmupCandles = 0;
+    try {
+      if (retired.length && this.featureEngine?.retireInstruments)
+        await this.featureEngine.retireInstruments(retired, marketId);
+      if (added.length) {
+        const warmup = await this.collectWarmup(added);
+        warmupCandles = warmup.length;
+        if (this.featureEngine?.warmInstrument) {
+          for (const instrument of added) {
+            const readiness = await this.featureEngine.warmInstrument(
+              instrument,
+              warmup.filter(
+                (candle) => candle.symbolId === instrument.symbolId,
+              ),
+              marketId,
+            );
+            if (!readiness.ready)
+              this.logger.info({
+                event: "UNIVERSE_LIST_EDIT_WARMUP_INCOMPLETE",
+                symbol: instrument.symbol,
+                reasons: readiness.reasons,
+              });
+          }
+          this.rememberFeatureCandles(warmup);
+        }
+        if (warmup.length > 0) this.lastCandleAt = this.clock().toISOString();
+      }
+    } catch (error) {
+      this.logger.error({
+        event: "UNIVERSE_LIST_EDIT_SYNC_FAILED",
+        error: error instanceof Error ? error.message : String(error),
+      });
+      await this.synchronizeFeatureEngine();
+      this.markCandleBuckets(this.clock());
+    }
+    this.logger.info({
+      event: "UNIVERSE_LIST_EDIT_APPLIED",
+      instruments: this.instruments.length,
+      listedAdded: edit.added.length,
+      listedRemoved: edit.removed.length,
+      warmed: added.length,
+      retired: retired.length,
+      warmupCandles,
+    });
+  }
+
+  /** Called only while the cycle mutex is held; deferred intake must reload
+   * membership before the engine can scan again. */
+  private async refreshUniverseWithinCycle(): Promise<PersistedInstrument[]> {
+    if (this.featureEngine) {
+      this.featureEngineReady = false;
+      this.scannerRecovery.assertAvailable(this.clock().getTime());
+    }
+    const instruments = await this.metadata.enrich();
+    this.instruments = instruments;
+    this.benchmarkSnapshot = await this.resolveBenchmarks();
+    this.pruneInactiveState();
     if (this.featureEngine) {
       await this.synchronizeFeatureEngine();
       this.markCandleBuckets(this.clock());
@@ -1039,10 +1207,13 @@ export class QuestradeDataService {
     if (!this.metadata.replaceSymbols)
       throw new Error("This universe provider is not editable");
     await this.metadata.replaceSymbols(symbols);
-    return this.refreshUniverse();
+    return this.applyUniverseListEdit();
   }
 
-  async updateUniverseCandidates(input: UpdateCandidateIntake): Promise<{
+  async updateUniverseCandidates(
+    input: UpdateCandidateIntake,
+    guard?: DailySeedIntakeGuard,
+  ): Promise<{
     instruments: PersistedInstrument[];
     pasteReport: CandidatePasteReport;
     refreshError?: string;
@@ -1051,10 +1222,10 @@ export class QuestradeDataService {
       throw new Error(
         "This universe provider does not support candidate intake metadata",
       );
-    const pasteReport = await this.metadata.updateCandidates(input);
+    const pasteReport = await this.metadata.updateCandidates(input, guard);
     let instruments: PersistedInstrument[];
     try {
-      instruments = await this.refreshUniverse();
+      instruments = await this.applyUniverseListEdit();
     } catch (error) {
       const refreshError =
         error instanceof Error ? error.message : "Universe refresh failed";
@@ -1176,22 +1347,59 @@ export class QuestradeDataService {
   private async collectCandles(
     intervals: ("OneMinute" | "FiveMinutes")[],
     updateScanner = true,
-  ): Promise<void> {
-    const collected = await this.candles.collect(
-      this.allInstruments(),
-      this.sessions.getMarket(),
-      this.clock(),
+  ): Promise<boolean> {
+    const scannerInstruments = this.allInstruments();
+    const market = this.sessions.getMarket();
+    const now = this.clock();
+    const scannerCandles = await this.candles.collect(
+      scannerInstruments,
+      market,
+      now,
       intervals,
     );
-    // Closing paper facts remain useful while scanner recovery is paused.
-    // Do not turn a failed scanner upload into repeated closing broker reads.
-    if (updateScanner) await this.ingestFeatureCandles(collected);
-    else this.rememberFeatureCandles(collected);
-    if (collected.length > 0) this.lastCandleAt = this.clock().toISOString();
+    // Preserve closing facts even when the scanner upload fails.
+    let scannerError: unknown;
+    let scannerFailed = false;
+    try {
+      if (scannerCandles.length > 0) {
+        if (updateScanner) await this.ingestFeatureCandles(scannerCandles);
+        else this.rememberFeatureCandles(scannerCandles);
+        this.lastCandleAt = this.clock().toISOString();
+      }
+    } catch (error) {
+      this.candles.reset();
+      scannerFailed = true;
+      scannerError = error;
+    }
+    const collectionInstruments = await this.quoteCollectionInstruments();
+    const scannerIds = new Set(
+      scannerInstruments.map((instrument) => instrument.symbolId),
+    );
+    const collected = [...scannerCandles];
+    let recoveryComplete = true;
+    for (const instrument of collectionInstruments) {
+      if (scannerIds.has(instrument.symbolId)) continue;
+      try {
+        collected.push(
+          ...(await this.candles.collect([instrument], market, now, intervals)),
+        );
+      } catch (error) {
+        recoveryComplete = false;
+        this.logger.error({
+          event: "PAPER_BOT_RECOVERY_CANDLE_COLLECTION_FAILED",
+          marketId: this.sessions.getMarketId(),
+          instrumentId: instrument.id,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
     if (this.paperBotProcessor) {
       try {
-        await this.processPaperBotCandles(collected);
+        await this.processPaperBotCandles(collected, collectionInstruments);
       } catch (error) {
+        // Delivered bars are only redelivered after a reset; the next
+        // collection then re-reads the session so no candle exit is lost.
+        this.candles.reset();
         this.logger.error({
           event: "PAPER_BOT_CANDLE_CYCLE_FAILED",
           error:
@@ -1199,6 +1407,8 @@ export class QuestradeDataService {
         });
       }
     }
+    if (scannerFailed) throw scannerError;
+    return recoveryComplete;
   }
 
   /**
@@ -1210,14 +1420,17 @@ export class QuestradeDataService {
    * see no candidate this call, which is a harmless no-op
    * (private development record Phase 3 "detect the noon boundary").
    */
-  private async processPaperBotCandles(collected: Candle[]): Promise<void> {
+  private async processPaperBotCandles(
+    collected: Candle[],
+    collectionInstruments: readonly PersistedInstrument[],
+  ): Promise<void> {
     if (!this.paperBotProcessor) return;
     const oneMinute = collected.filter(
       (candle) => candle.interval === "OneMinute",
     );
     if (oneMinute.length === 0) return;
     const instrumentIdBySymbolId = new Map(
-      this.allInstruments().map((instrument) => [
+      collectionInstruments.map((instrument) => [
         instrument.symbolId,
         instrument.id,
       ]),
@@ -1259,11 +1472,13 @@ export class QuestradeDataService {
     }
   }
 
-  private async collectWarmup(): Promise<Candle[]> {
+  private async collectWarmup(
+    instruments: PersistedInstrument[] = this.allInstruments(),
+  ): Promise<Candle[]> {
     const market = this.sessions.getMarket();
     const now = this.clock();
     const intraday = await this.candles.collectRange(
-      this.allInstruments(),
+      instruments,
       {
         startTime: new Date(market.startTime.getTime() - 21 * 86_400_000),
         endTime: now,
@@ -1271,7 +1486,7 @@ export class QuestradeDataService {
       ["OneMinute", "FiveMinutes"],
     );
     const daily = await this.candles.collectRange(
-      this.allInstruments(),
+      instruments,
       {
         startTime: new Date(market.startTime.getTime() - 90 * 86_400_000),
         endTime: now,
@@ -1287,6 +1502,7 @@ export class QuestradeDataService {
    * of sync, and arms runCycle's existing recovery path for the next attempt.
    */
   private async synchronizeFeatureEngine(): Promise<void> {
+    this.candles.reset();
     this.scannerRecovery.beginWarmup(this.clock().getTime());
     if (!this.featureEngine) {
       const warmup = await this.collectWarmup();
@@ -1294,11 +1510,23 @@ export class QuestradeDataService {
       return;
     }
     this.featureEngineReady = false;
+    // One instrument snapshot drives warm-up, the session and candle ingestion.
+    // A universe refresh that replaces the list mid-warm-up (as at startup)
+    // otherwise sends candles for instruments the session no longer knows.
+    const candidates = this.instruments;
+    const instruments = this.allInstruments();
     try {
-      const warmup = await this.collectWarmup();
-      await this.initializeFeatureEngine();
-      await this.ingestFeatureCandles(warmup);
-      this.featureEngineReady = true;
+      const warmup = await this.collectWarmup(instruments);
+      await this.initializeFeatureEngine(candidates);
+      await this.ingestFeatureCandles(warmup, instruments);
+      const current = new Set(
+        this.allInstruments().map((value) => value.symbolId),
+      );
+      // A list that changed during warm-up leaves the engine out of sync, so
+      // the next cycle resynchronizes against the new list.
+      this.featureEngineReady =
+        current.size === instruments.length &&
+        instruments.every((value) => current.has(value.symbolId));
       if (warmup.length > 0) this.lastCandleAt = this.clock().toISOString();
     } catch (error) {
       this.featureEngineReady = false;
@@ -1306,12 +1534,14 @@ export class QuestradeDataService {
     }
   }
 
-  private async initializeFeatureEngine(): Promise<void> {
+  private async initializeFeatureEngine(
+    candidates: PersistedInstrument[] = this.instruments,
+  ): Promise<void> {
     if (!this.featureEngine) return;
     try {
       await this.featureEngine.startSession(
         this.sessions.getMarket(),
-        this.instruments,
+        candidates,
         this.sessions.getPolicy(),
         this.benchmarkSnapshot,
         this.benchmarkMaxStalenessSeconds,
@@ -1324,13 +1554,16 @@ export class QuestradeDataService {
     }
   }
 
-  private async ingestFeatureCandles(candles: Candle[]): Promise<void> {
+  private async ingestFeatureCandles(
+    candles: Candle[],
+    instruments: PersistedInstrument[] = this.allInstruments(),
+  ): Promise<void> {
     this.rememberFeatureCandles(candles);
     if (!this.featureEngine) return;
     try {
       await this.featureEngine.ingestCandles(
         candles,
-        this.allInstruments(),
+        instruments,
         this.sessions.getSnapshot().marketId,
       );
     } catch (error) {
@@ -1378,14 +1611,35 @@ export class QuestradeDataService {
         this.alertBuffer.list(),
         this.alertPolicy,
       );
-      await this.featureStore.saveFeatureSnapshots(result.snapshots);
+      const planned = this.strategyStore?.planPersistence?.(
+        result.evaluations,
+        result.events,
+        result.contexts,
+      );
+      const evaluationsToPersist = planned?.evaluations ?? result.evaluations;
+      const contextsToPersist = planned?.contexts ?? result.contexts;
+      const persistedFeatureKeys = new Set(
+        [...evaluationsToPersist, ...contextsToPersist].map(
+          (value) =>
+            `${value.marketId}:${value.instrumentId}:${value.featureSnapshot.timestamp}:${value.featureSnapshot.featureVersion}`,
+        ),
+      );
+      await this.featureStore.saveFeatureSnapshots(
+        planned
+          ? result.snapshots.filter((value) =>
+              persistedFeatureKeys.has(
+                `${value.marketId}:${value.instrumentId}:${value.timestamp}:${value.featureVersion}`,
+              ),
+            )
+          : result.snapshots,
+      );
       if (this.strategyStore) {
         await this.strategyStore.saveStrategyResults(
-          result.evaluations,
+          evaluationsToPersist,
           result.events,
-          result.contexts,
+          contextsToPersist,
         );
-        this.evaluationsWrittenTotal += result.evaluations.length;
+        this.evaluationsWrittenTotal += evaluationsToPersist.length;
       }
       const alerts = this.alertStore
         ? await this.alertStore.saveAlerts(generatedAlerts)
@@ -1473,6 +1727,7 @@ export class QuestradeDataService {
         this.paperBotRunId,
       );
     }
+    await this.refreshPriorPaperBacklogHealth();
     await this.refreshCoordinationHealth();
     this.scheduleFundedPaperBot(
       quotesByInstrumentId,
@@ -1493,10 +1748,15 @@ export class QuestradeDataService {
     // Quotes and observations are durable before scheduling. Skipped ticks are
     // recovered from retained inputs; never queue stale in-memory cycles.
     this.paperFundedWork = this.processFundedPaperBot(quotes, observations)
-      .then((succeeded) => {
-        if (succeeded) {
+      .then((result) => {
+        if (result === "PROCESSED") {
           this.paperFundedLastError = undefined;
           this.fundedLastSuccessAt = this.clock().toISOString();
+          this.scheduleFundedDrainCatchUp();
+        } else if (result === "WAITING") {
+          // Older funded facts remain safe to drain while the current account
+          // session waits for the prior paper run to complete. This is not a
+          // successful current-run funded cycle.
           this.scheduleFundedDrainCatchUp();
         }
       })
@@ -1505,6 +1765,7 @@ export class QuestradeDataService {
           error instanceof Error
             ? error.message
             : "Unknown funded worker error";
+        this.paperFundedCycleState = "FAILED";
         this.logger.error({
           event: "FUNDED_PAPER_BOT_CYCLE_FAILED",
           error: this.paperFundedLastError,
@@ -1533,6 +1794,7 @@ export class QuestradeDataService {
       this.paperFundedWork = this.drainFundedBacklog()
         .catch((error: unknown) => {
           this.paperFundedAdapter?.recordRecoveryFailure();
+          this.paperFundedCycleState = "FAILED";
           this.paperFundedLastError =
             error instanceof Error
               ? error.message
@@ -1577,6 +1839,7 @@ export class QuestradeDataService {
     const cycleAt = this.clock().toISOString();
     const budget = this.fundedDrainBudget();
     let processed = 0;
+    let processedCurrent = false;
     // Recovery adapters are inserted in the oldest-run order returned by
     // processFundedRecoveryRuns. Drain their already-enqueued facts first: an
     // older unresolved run can intentionally prevent the current run from
@@ -1586,12 +1849,14 @@ export class QuestradeDataService {
       processed = await adapter.drainEnqueued(budget);
       if (processed > 0) break;
     }
-    if (processed === 0 && this.paperFundedBound)
+    if (processed === 0 && this.paperFundedBound) {
       processed = await this.paperFundedAdapter.drainEnqueued(budget);
+      processedCurrent = processed > 0;
+    }
     if (processed === 0) return;
     this.paperFundedOperational =
       await this.paperFundedAdapter.operationalSnapshot(cycleAt);
-    this.fundedLastSuccessAt = this.clock().toISOString();
+    if (processedCurrent) this.fundedLastSuccessAt = this.clock().toISOString();
     if (
       !this.paperFundedCyclePending &&
       (this.paperFundedOperational.pendingFacts ?? 0) > 0
@@ -1607,21 +1872,40 @@ export class QuestradeDataService {
   private async processFundedPaperBot(
     quotesByInstrumentId: ReadonlyMap<string, QuoteFact>,
     fallbackObservations: readonly import("../paper-bot/paper-bot-repository.js").PaperSignalObservation[],
-  ): Promise<boolean> {
+  ): Promise<FundedCycleResult> {
     if (!this.paperFundedAdapter || !this.paperBotRunId || !this.paperBotStore)
-      return true;
+      return "PROCESSED";
     try {
       const cycleAt = this.clock().toISOString();
       await this.processFundedRecoveryRuns(quotesByInstrumentId, cycleAt);
       if (!this.paperFundedBound && this.paperFundedConfig) {
         const market = this.sessions.getMarket();
-        await this.paperFundedAdapter.bind(
-          this.paperBotSessionDate ?? "",
-          market.startTime.toISOString(),
-          this.paperFundedConfig.initialCash,
-          this.paperFundedConfig.dailyLossLimit,
-        );
-        this.paperFundedBound = true;
+        try {
+          await this.paperFundedAdapter.bind(
+            this.paperBotSessionDate ?? "",
+            market.startTime.toISOString(),
+            this.paperFundedConfig.initialCash,
+            this.paperFundedConfig.dailyLossLimit,
+          );
+          this.paperFundedBound = true;
+          this.paperFundedBindingState = "BOUND";
+          this.paperFundedBlockReason = null;
+        } catch (error) {
+          if (!(error instanceof FundedPriorRunActiveError)) throw error;
+          this.paperFundedCycleState = "WAITING";
+          this.paperFundedBindingState = "WAITING_FOR_PRIOR_RUN";
+          this.paperFundedBlockReason = "PRIOR_RUN_ACTIVE";
+          this.paperFundedLastError = undefined;
+          this.paperFundedOperational =
+            await this.paperFundedAdapter.operationalSnapshot(cycleAt);
+          this.logger.info({
+            event: "FUNDED_PAPER_BIND_WAITING",
+            runId: this.paperBotRunId,
+            priorRunId: error.priorRunId,
+            reason: error.code,
+          });
+          return "WAITING";
+        }
       }
       if (!this.paperFundedBound) {
         // Recovery may keep the new run unbound while an older run drains. The
@@ -1630,8 +1914,11 @@ export class QuestradeDataService {
         // path that returns without running a cycle.
         this.paperFundedOperational =
           await this.paperFundedAdapter.operationalSnapshot(cycleAt);
-        return true;
+        this.paperFundedCycleState = "WAITING";
+        return "WAITING";
       }
+      this.paperFundedBindingState = "BOUND";
+      this.paperFundedBlockReason = null;
       const observations =
         (await this.paperBotStore.findEligibleObservationsForFunding?.(
           this.paperBotRunId,
@@ -1691,7 +1978,8 @@ export class QuestradeDataService {
           count: result.coverageGaps,
         });
       }
-      return true;
+      this.paperFundedCycleState = "PROCESSED";
+      return "PROCESSED";
     } catch (error) {
       const recoveryFailuresTotal =
         this.paperFundedAdapter.recordRecoveryFailure();
@@ -1742,12 +2030,14 @@ export class QuestradeDataService {
         error instanceof Error
           ? error.message
           : "Unknown funded paper-bot error";
+      this.paperFundedCycleState = "FAILED";
+      if (!this.paperFundedBound) this.paperFundedBindingState = "FAILED";
       this.logger.error({
         event: "FUNDED_PAPER_BOT_CYCLE_FAILED",
         runId: this.paperBotRunId,
         error: this.paperFundedLastError,
       });
-      return false;
+      return "FAILED";
     }
   }
 
@@ -1867,6 +2157,32 @@ export class QuestradeDataService {
       await this.paperCoordinationStore.portfolioHealth(
         this.sessions.getMarketId(),
       );
+  }
+
+  private async refreshPriorPaperBacklogHealth(): Promise<void> {
+    if (!this.paperBotStore?.findPriorClosePendingHealth || !this.paperBotRunId)
+      return;
+    try {
+      const health = await this.paperBotStore.findPriorClosePendingHealth(
+        this.sessions.getMarketId(),
+        this.paperBotRunId,
+      );
+      this.paperPriorClosePendingExecutions = health.closePending;
+      const oldest = health.oldestClosePendingAt
+        ? Date.parse(health.oldestClosePendingAt)
+        : Number.NaN;
+      this.paperOldestPriorClosePendingAgeMs = Number.isFinite(oldest)
+        ? Math.max(0, this.clock().getTime() - oldest)
+        : null;
+    } catch (error) {
+      this.logger.error({
+        event: "PAPER_BOT_PRIOR_BACKLOG_HEALTH_READ_FAILED",
+        marketId: this.sessions.getMarketId(),
+        runId: this.paperBotRunId,
+        error:
+          error instanceof Error ? error.message : "Unknown paper-bot error",
+      });
+    }
   }
 
   /**
@@ -2033,6 +2349,7 @@ export class QuestradeDataService {
     }
     this.paperBotOverdueRunCount = overdue;
     this.paperBotAbandonedThisSweep = abandoned;
+    await this.refreshPriorPaperBacklogHealth();
     await this.refreshCoordinationHealth();
 
     // Only the startup and closed-market sweeps refresh the counts. The

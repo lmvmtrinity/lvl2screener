@@ -1,7 +1,35 @@
-import { describe, expect, it } from "vitest";
-import { isolatedDatabaseUrl } from "./isolated-database.js";
+import type { Pool } from "pg";
+import { describe, expect, it, vi } from "vitest";
+import {
+  isolatedDatabaseUrl,
+  pauseHistoricalFixtureMaintenance,
+} from "./isolated-database.js";
 
 describe("isolated integration database configuration", () => {
+  it("refuses maintenance changes outside a disposable database", async () => {
+    const query = vi
+      .fn()
+      .mockResolvedValue({ rows: [{ name: "tsx_scanner" }] });
+    await expect(
+      pauseHistoricalFixtureMaintenance({ query } as unknown as Pool),
+    ).rejects.toThrow("disposable test database");
+    expect(query).toHaveBeenCalledTimes(1);
+  });
+
+  it("waits for an already-started maintenance backend to exit", async () => {
+    const query = vi
+      .fn()
+      .mockResolvedValueOnce({ rows: [{ name: "tsx_scanner_test_fixture" }] })
+      .mockResolvedValueOnce({ rows: [{ job_id: 1001 }] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [{ pid: 123 }] })
+      .mockResolvedValueOnce({ rows: [] });
+    await pauseHistoricalFixtureMaintenance({ query } as unknown as Pool);
+    expect(query).toHaveBeenCalledTimes(5);
+    expect(query.mock.calls[3]?.[0]).toContain("pg_stat_activity");
+    expect(query.mock.calls[4]?.[0]).toContain("pg_stat_activity");
+  });
+
   const target = "postgresql://tester:secret@localhost:55439/tsx_scanner_test";
   it("does not fall back to application credentials", () => {
     expect(

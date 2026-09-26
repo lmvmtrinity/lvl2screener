@@ -55,15 +55,15 @@ the retained legacy CSS is small and justified at the end of this document.
 
 `apps/web/src/components/ui/` owns repeated visual patterns:
 
-| Component                                                  | Use                                                                                                                                                      |
-| ---------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `Button.tsx`                                               | Native button with `primary`/`secondary`/`segmented`/`tab`/`profile`/`nav`/`control`/`link` variants; defaults to `type="button"`, forwards refs/submits |
-| `Panel.tsx` (`PanelHeader`, `PanelMeta`)                   | Card surface, header layout, heading level, description/`descriptionClassName`, trailing actions; `tone`, `emphasis` and `divider` are explicit variants |
-| `StatusBadge.tsx`                                          | Label plus `ok`/`warn`/`danger`/`neutral`/`muted` tone; `size="header"` matches panel-header typography, `default` matches table badges                  |
-| `FactList.tsx` (`FactList`, `Fact`)                        | Two-column label/value lists used by card bodies                                                                                                         |
-| `Text.tsx`                                                 | Paragraph copy with `body`/`note`/`danger` variants                                                                                                      |
-| `Chip.tsx`                                                 | Small bordered status chip used by the automation strips                                                                                                 |
-| `FormField.tsx` (`FormField`, `FieldSelect`, `FieldInput`) | Filter/form label and control presentation                                                                                                               |
+| Component                                                  | Use                                                                                                                                                          |
+| ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `Button.tsx`                                               | Native button with `primary`/`secondary`/`segmented`/`tab`/`profile`/`sidebar`/`control`/`link` variants; defaults to `type="button"`, forwards refs/submits |
+| `Panel.tsx` (`PanelHeader`, `PanelMeta`)                   | Card surface, header layout, heading level, description/`descriptionClassName`, trailing actions; `tone`, `emphasis` and `divider` are explicit variants     |
+| `StatusBadge.tsx`                                          | Label plus `ok`/`warn`/`danger`/`neutral`/`muted` tone; `size="header"` matches panel-header typography, `default` matches table badges                      |
+| `FactList.tsx` (`FactList`, `Fact`)                        | Two-column label/value lists used by card bodies                                                                                                             |
+| `Text.tsx`                                                 | Paragraph copy with `body`/`note`/`danger` variants                                                                                                          |
+| `Chip.tsx`                                                 | Small bordered status chip used by the automation strips                                                                                                     |
+| `FormField.tsx` (`FormField`, `FieldSelect`, `FieldInput`) | Filter/form label and control presentation                                                                                                                   |
 
 Existing `ui.tsx` exports (`Tip`, `Popover`, `Drawer`, `CopyButton`) keep Floating UI
 and their interactions; their presentation now comes from utilities in the component.
@@ -90,11 +90,13 @@ transitions during capture, so two runs of the same state produce byte-identical
 The default matrix is `SCANNER`, `DETAIL`, `DAILY`, `DISCOVERY`, `BOT`, `PERFORMANCE`,
 `LEARNING`, `LAB`, `BACKTESTS`; add fixture-backed coverage or a reproducible manual
 check for surfaces and states it does not reach. `DETAIL` walks through the first
-Scanner row and back. `DAILY` expands a warm-up timeline and submits a paste report.
+Scanner row and back. `DAILY` expands a candidate row and submits a paste report.
 `SCANNER` can open the alert popover; `--with-toast` additionally captures the toast
-stack. `LAB` opens the editor and runs a comparison. `BACKTESTS` opens Results,
-History, a selected result, the manual replay drawer and the automation settings
-drawer. `BOT` opens Results and Diagnostics; `PERFORMANCE` switches projection.
+stack. `LAB` opens the editor and runs a comparison. `BACKTESTS` expands the first
+result, opens its full detail drawer, then the run history, manual replay and
+automation settings drawers. `LEARNING` expands the first strategy row, then
+opens the processes, models and coordination-decisions drawers. `BOT` opens
+Results and Diagnostics; `PERFORMANCE` switches projection.
 
 ## Migration status and retained CSS
 
@@ -121,8 +123,8 @@ Hard class-name contracts that must survive further refactors:
 `lib/captured-history.ts` queries `.backtest-form`, `.run-backtest`,
 `.backtest-metrics` and `.calibration-recommendation`; unit tests pin
 `tone-*`/`bot-glance`/`bot-dot`/`bot-cohort`/`bot-quality` classes; e2e specs pin
-`.system-pill`, `.error-banner`, `.nav-bot-status`, `.universe-health`,
-`.universe-run`, `.candidate-table .operator-row`, `.profile-row`, `.bot-dot`,
+`.system-pill`, `.error-banner`, `.nav-bot-status`, `.universe-history
+.universe-run`, `.candidate-table .operator-row`, `.profile-row`, `.bot-dot`,
 `.bot-cohort`, `.bot-quality`; data-testids and `aria-*` are behavior contracts.
 
 The migration was closed as a completed implementation package on September 15, 2026. Its acceptance criteria and dated verification live in

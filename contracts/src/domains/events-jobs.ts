@@ -48,6 +48,7 @@ export const researchJobTypeSchema = z.enum([
   "FUNDED_HISTORICAL_REPLAY",
   "FUNDED_EXECUTION_TRAINING",
   "FUNDED_COMPARISON",
+  "SIGNAL_MODEL_RESEARCH",
 ]);
 export type ResearchJobType = z.infer<typeof researchJobTypeSchema>;
 

@@ -53,6 +53,27 @@ feature warm-up, ATR and RVOL availability/minima before strategy-specific logic
 An enabled daily-EMA filter requires available bullish daily context. These are
 hard gates, unlike score contributions. Delayed/stale data cannot produce READY.
 
+The spread gate is evaluated per instrument and profile. It blocks a setup (to
+`INACTIVE`, or `INVALIDATED` for a `FORMING`/`READY` formation, with
+`SPREAD_TOO_WIDE`) once the spread has stayed above the limit for
+`spreadConfirmQuotes` consecutive quotes and `spreadConfirmSeconds` seconds. The
+limit is `spreadHardMaxPct`, raised to `spreadMinTicks` price ticks when that is
+wider. A wide quote that is not yet confirmed adds `SPREAD_WIDE_UNCONFIRMED` and
+cannot promote a setup to `READY` (`WAITING_FOR_SPREAD`). After a block the setup
+stays out (`SPREAD_RECOVERING`) until the spread is at or below
+`spreadRecoveryPct` percent of the limit. The parameter defaults (1 quote,
+0 seconds, 100%, 0 ticks) reproduce the original single-quote gate exactly.
+Profile configuration versions ending `+spread-stable-v1` (migration 153) use
+3 quotes, 5 seconds, 80% and 3 ticks.
+
+Trade references: the stop is the configured stop policy's level, widened to
+at least `stopMinAtrFraction` × daily ATR14 and `stopMinSpreads` × the quoted
+spread (`stopSelectionReason` `MINIMUM_DISTANCE`). The target is the nearest
+resistance above entry (or 2 R for strategies that fall back when none exists),
+raised to `targetMinR` × risk when closer. Defaults of 0 keep the structural stop
+and nearest-resistance target. Versions ending `+levels-v1` (migration 154) use
+0.15, 4 and 1.5.
+
 States are `INACTIVE`, `WATCH`, `FORMING`, `READY`, `INVALIDATED`, `EXPIRED`,
 `HALTED`, `DATA_STALE`. Transitions are persisted; a high score cannot cause READY.
 The engine applies market/profile entry windows after strategy evaluation. Before
@@ -60,6 +81,34 @@ scan start the state is inactive; READY before preferred start remains forming;
 after preferred end it may remain READY with an explanatory reason. Hard entry
 end expires eligibility. Defaults are scan 09:45–16:00, preferred 10:00–11:30,
 hard end 16:00 in the market timezone. Exit processing is separate.
+
+Opt-in research entry filters run after those gates and only prevent a transition
+into READY. They leave an already-READY evaluation and trade-reference computation
+alone. `latestReadyTime` is a market-local `HH:MM` cutoff (null disables it);
+new READY evaluations at or after it stay FORMING with `READY_WINDOW_CLOSED`.
+An enabled cutoff without session timezone context waits with
+`READY_WINDOW_UNAVAILABLE`.
+
+For `PRIOR_DAY_HIGH_BREAKOUT` and `HIGH_OF_DAY_BREAKOUT`, `maxVwapDistanceAtr`
+and `maxChangeFromOpenAtr` reject values strictly above their caps with
+`OVEREXTENDED_ENTRY`. Zero disables each cap. Missing or nonfinite enabled
+features wait with `ENTRY_EXTENSION_UNAVAILABLE`. For `VWAP_HOLD`,
+`minSectorRelativeStrengthPct` requires stock return since open minus sector
+benchmark return since open to meet the floor in percentage points; zero
+disables it. A below-floor observation reports
+`SECTOR_RELATIVE_STRENGTH_BELOW_MINIMUM`; unavailable, nonactionable, stale or
+future benchmark observations report `SECTOR_ENTRY_UNAVAILABLE`. This uses the
+current strategy context with no historical reconstruction. A blocked formation
+can become READY later if its data qualifies and the existing strategy still
+allows it.
+
+All four defaults preserve earlier strategy behavior. These controls are research
+capabilities; enabling them on existing profiles requires a new immutable
+configuration version and separately authorized rollout. No migration declares
+or enables them yet. Full backtest responses include `entryFilterDiagnostics`
+per strategy/reason: blocked evaluation count and distinct blocked formation
+count. These are attempted promotions, can overlap across reasons, and are not
+counts of removed trades. Live evaluation does not collect these counters.
 
 Manual intake does not apply every reference universe threshold as a hard strategy
 gate. In particular, the old universal +0.75% change-from-open and discovery ATR

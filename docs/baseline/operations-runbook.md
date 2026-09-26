@@ -251,6 +251,106 @@ Mock mode uses a deterministic mock-only encryption key when `APP_MASTER_KEY` is
 
 For live mode, `QUESTRADE_REFRESH_TOKEN` bootstraps the `questrade_live` database record once. Every redemption invalidates the prior token, and the replacement is stored atomically before requests resume. Do not delete the PostgreSQL volume or change `APP_MASTER_KEY` after successful commissioning. If either happens, generate a new manual token and recreate the live credential record. `TSX_UNIVERSE_SYMBOLS` is an optional initial watchlist seed, not a complete exchange catalog or an override of the persisted daily list.
 
+#### Pre-market daily-list seed
+
+The daily list resets to empty at each market-date rollover. With
+`DAILY_LIST_SEED_ENABLED=true`, the API fills an empty list on each session day
+at `DAILY_LIST_SEED_TIME` (market-local, default `08:45`) with the top
+`DAILY_LIST_SEED_CA_COUNT` (10) or `DAILY_LIST_SEED_US_COUNT` (15) stocks. The
+seed (`daily-seed-v1`) is separate from the ADR-017 discovery engine, which
+stays OFF, and uses previous-session data only:
+
+1. The pool is the quotable, tradable `Stock` listings already mapped to
+   Questrade symbol IDs in `discovery_symbol_mapping`, on the market's allowed
+   exchanges. ETF, fund, unit, warrant, right, preferred, note, CDR, depositary
+   and acquisition-company descriptions are excluded.
+2. One batched symbol-details request per 50 symbols screens previous close,
+   market cap, 3-month average volume and dollar volume against the market's
+   universe policy.
+3. Survivors get one daily-candle request each; ATR%, 90-day volume and dollar
+   volume must pass the policy with fresh history. Bars starting on the date
+   being seeded are ignored: Questrade ends its newest daily bar at the fetch
+   time, so a US pre-market bar would otherwise count as a finished session.
+4. The score weights previous-day relative volume against the prior 20 sessions
+   (40), ATR% above the policy floor (20), close location in the day's range
+   (25) and a close above the 20-day mean (15). Ties break by relative volume,
+   then symbol.
+
+Picks enter through ordinary candidate intake as `MANUAL` entries tagged
+`daily-seed-v1`. A list that already has symbols for the trading date is left
+unchanged. The automatic seed rechecks emptiness under the database mutation
+lock, so an operator edit that wins the race also wins over the seed. The explicit
+operator action to add ranked picks to an existing list remains available.
+An operator list pasted before the run time wins; symbols added
+later are merged as usual. A failed or empty selection retries every 15 minutes
+up to four times, and seeding stops 90 minutes before the close. Logs record
+`DAILY_SEED_APPLIED` (with every pick's metrics), `DAILY_SEED_SKIPPED_LIST_PRESENT`,
+`DAILY_SEED_NO_PICKS` and `DAILY_SEED_FAILED`.
+
+```text
+GET  /api/universe/daily-seed?marketId=ALL             # schedule, progress, today's result and ranking
+POST /api/universe/daily-seed/preview?marketId=US_EQUITIES   # read-only ranking (202, runs in background)
+POST /api/universe/daily-seed/run?marketId=US_EQUITIES       # apply now if empty (202, runs in background)
+POST /api/universe/daily-seed/add-top?marketId=US_EQUITIES&count=5  # add today's top picks to any list
+GET  /api/universe/daily-seed/history?marketId=US_EQUITIES   # one row per trading date with outcomes
+GET  /api/universe/daily-seed/legacy                   # frozen discovery engine facts and pool sizes
+```
+
+#### Early-session rescan (daily-seed-v2)
+
+The pre-market seed only sees the previous session, so it misses a stock that
+starts moving at the open; TSX names in particular have little pre-market
+trading. With `DAILY_LIST_RESCAN_ENABLED=true`, for each market in
+`DAILY_LIST_RESCAN_MARKETS` (default `CA_TSX`), the API rescans at
+`DAILY_LIST_RESCAN_TIME` (market-local, default `09:55`):
+
+1. It takes the seed pool through the same liquidity prefilter, drops symbols
+   already on the list and keeps the `DAILY_LIST_RESCAN_MAX_CANDIDATES` (150)
+   most liquid by previous close times 3-month average volume.
+2. One five-minute candle request per candidate measures, over completed bars
+   since the open, volume against the mean of the same minutes in the last 10
+   sessions (at least 5 required) and the move since the open.
+3. A symbol passes with at least the discovery policy's relative volume (CA
+   1.5, US 1.75) and move since the open (CA +0.75%, US +1%). Up to
+   `DAILY_LIST_RESCAN_MAX_ADDS` (5) passing symbols, strongest volume first,
+   are added as `MANUAL` candidates tagged `daily-seed-v2`.
+
+The rescan adds only to a nonempty list whose persisted candidates still carry
+that day's seed ownership tags; an operator replacement or unproven/empty list
+is left unchanged. The database checks ownership, market/date and the addition
+limit under the list mutation lock. Persisted rescan tags prevent a second batch
+after a restart even if its result receipt was lost. That case stays visibly
+`FAILED` with `DAILY_SEED_RESCAN_ALREADY_APPLIED` rather than inventing the missing
+measurement receipt. List mutation and result persistence remain separate.
+A complete candle-request outage is `FAILED`, while successfully fetched history
+with no qualifying candidates remains `NO_PICKS`.
+A failed rescan retries every 5 minutes, up to
+three attempts, within 35 minutes of its run time. Each outcome is recorded in
+`daily_seed_run` with version `daily-seed-v2`; the History tab shows its added
+symbols and their separate paper result. `POST /api/universe/daily-seed/rescan`
+starts one now under the same rule.
+
+
+The Discovery page shows the same data: today's seed card with the funnel and
+day timeline, the ranked picks with their score parts and scanner state, the
+History tab and the frozen engine under Legacy engine.
+
+A preview spends the same broker requests as a run.
+
+
+Preview and run return at once
+and report progress through the status read, so the web proxy's 60-second
+timeout does not apply. "Add top" uses today's latest ranking from a run or
+preview and adds to the list even when it already has symbols.
+
+Each applied, skipped, empty or failed run is recorded in `daily_seed_run`
+(migration 155) with its trigger, the list symbols and the ranking; previews are
+not recorded. After a restart the API restores today's outcome, so an applied or
+skipped day is not seeded again. History outcomes for a day, computed only after
+its close, count the recorded symbols that reached READY and sum the closed
+quote-model paper trades' R on them. Clearing the list during the day does not
+re-seed it until the next trading date or an explicit run.
+
 The Questrade personal app must authorize both account-information and market-data scopes. Account-information scope is needed for symbol lookup/detail calls even though this scanner does not retrieve account balances, positions, orders, or executions.
 
 ### Feature engine
@@ -289,6 +389,56 @@ Backtests are managed at `/api/backtests` and in the BACKTESTS dashboard tab. Ru
 
 Before accepting a parameter comparison, confirm the response from `/api/backtests/compare` is `comparable: true`. If not, control the listed date, universe, source, capital, sizing, slippage, or fee differences. Database backups must include `backtest_run`, `backtest_trade`, and `backtest_state_event`.
 
+### Historical archive import
+
+**Import progress** in the Backtests submenu refreshes every five seconds. It
+shows planning, chunk counts, rows, estimated cost, failures and stopped processes.
+Task records and compatibility logs live in the API container temporary directory;
+container recreation clears them, so missing records mean unavailable task status.
+Previously downloaded archive rows remain in PostgreSQL. Existing step 2/3 commands
+are observed through `/tmp/import-quotes.log` and `/tmp/import-bars.log`; legacy
+counts cover the available log entries.
+
+Archive backtests ([ADR-019](../adr/019-historical-archive-research-source.md))
+read only what `historical-import` stored. The command needs `MASSIVE_API_KEY`
+for bars and `DATABENTO_API_KEY` for bid/ask, both passed to the `api`
+container. Symbols must already be `US_EQUITIES` instruments; benchmarks are
+added unless `--no-benchmarks` is given.
+
+```bash
+docker compose exec api node apps/api/dist/historical-import.js --symbols COIN,OKTA --start 2026-06-01 --end 2026-08-31 --dry-run
+```
+
+The dry run prints the plan and the Databento cost. Rerun without `--dry-run` to
+download; the command stops before downloading when the estimate exceeds
+`--max-cost` (default 5 US dollars). Massive allows 5 requests per minute, so
+bars take about 12.5 seconds per request (one per symbol-month, plus one daily
+request per symbol). Covered ranges are skipped, so an interrupted import can be
+rerun. Failed chunks are listed in the summary and exit non-zero. The Massive
+free plan returns about two years of minute bars; `XNAS.BASIC` starts
+2024-07-01.
+
+### Research worker lifecycle
+
+The `worker` service runs durable research jobs and scheduled automation. Shutdown is graceful: SIGTERM stops new background passes, waits for the current research job and every tracked background pass (challenger observation, evidence catch-up, lineage/coverage automation, learning checks, lease sweeps), then closes the PostgreSQL pool and exits 0. A repeated signal is logged as `RESEARCH_WORKER_SHUTDOWN_IGNORED` and ignored while the drain completes. Give a worker a stop grace period longer than the research job lease instead of forcing SIGKILL; killing it abandons leased work until the lease expires. A controlled restart during an active job is expected to wait for that job before exiting.
+
+With `RESEARCH_PAUSE_DURING_SESSION=true` (the default) the worker claims no new
+research job while any enabled market is in its regular session or within
+10 minutes after its close; holidays and early closes follow the market
+calendar. A job already running finishes, queued jobs wait, and the worker logs
+`RESEARCH_CLAIMS_PAUSED` and `RESEARCH_CLAIMS_RESUMED` at the transitions. This
+keeps replays and coverage checks from competing with live collection and paper
+settlement for PostgreSQL. Evidence catch-up, challenger observation and other
+worker loops keep running. Set the variable to `false` and recreate the worker
+to run research during the session.
+
+Deploy after hours. A deployment during a session stops collection and leaves
+open paper positions unmanaged until the stack restarts.
+
+
+`node scripts/deployment/preflight.mjs` refuses weekday runs between 09:30 and
+16:10 America/New_York unless `--allow-market-hours` is passed.
+
 ### Scanner profiles and strategy lab
 
 - Confirm schema version 8 exists before starting the API on an upgraded database.
@@ -309,6 +459,7 @@ Before accepting a parameter comparison, confirm the response from `/api/backtes
 
 - The universe refreshes during API startup and when a new market session is detected. Use the UNIVERSE dashboard or `POST /api/universe/refresh` for an operator-triggered refresh.
 - Confirm the latest run is `COMPLETED`, `activatedCount` meets `UNIVERSE_MINIMUM_SIZE`, and the exclusion reasons match the configured `UNIVERSE_*` thresholds before the scan window.
+- Daily-list edits record a `LIST_EDIT` run (`universe_refresh_run.refresh_kind`, migration 147) with the full resulting membership. Only added symbols are newly evaluated (`evaluatedCount`); carried members keep their original `metricsAsOf`, and their eligibility is re-checked at the next full refresh (startup, new session or `POST /api/universe/refresh`). Point-in-time replay resolves `LIST_EDIT` runs like any completed run.
 - Refresh activation is one database transaction. A failed provider request, missing evidence, or implausibly small result records a failed run and retains the previous active instruments.
 - `GET /api/universe/runs` is the audit trail. Database backups must include `universe_refresh_run`, `universe_membership`, and the Phase 10 instrument metrics.
 - The mock catalog validates orchestration only. Final commissioning requires a licensed or official complete TSX catalog behind the existing provider boundary.
@@ -319,6 +470,14 @@ Use the Learning view for readiness and automation history. The worker checks at
 startup and daily at 17:00 America/New_York; unset/empty interval override selects
 this schedule. Verify effective named settings, scheduler logs, job state and
 materialized datasets rather than assuming “Auto enabled” proves a recent check.
+For asynchronous PAPER_EVIDENCE work, also inspect immutable pending
+preparations, coverage status and the dataset-lineage receipt: a restart or the
+next scheduled check resumes the exact prepared cohort, cutoff, rows and source
+digest. Migration `138-statistical-dataset-preparation.sql` must be applied by
+the authorized deployment before this recovery path is expected in production.
+UNKNOWN or INCOMPLETE coverage remains a truthful unproven result and does not
+authorize promotion; baseline inactive training continues to use the existing
+qualification and job gates.
 
 Paper training requires completed LIVE runs and fully qualified closed QUOTE
 outcomes. Backtest-source training uses a supported immutable captured run.
@@ -459,7 +618,9 @@ Failure to persist the new refresh token should prevent the old token state from
 4. Confirm data is real-time.
 5. Load market hours.
 6. Paste the morning TradingView candidates into **Daily List** and review all
-   five paste-report groups; resolve `unsupported` and `failed` inputs.
+   five paste-report groups; resolve `unsupported` and `failed` inputs. With
+   the pre-market seed enabled, an empty list is filled at 08:45; review the
+   `daily-seed-v1` picks instead or paste before then to use your own list.
 7. Confirm every submitted symbol remains visible as `WARMING`, `ANALYZABLE`,
    `FORMING`, `READY`, `INVALIDATED`, or `UNAVAILABLE`; review the displayed
    reason for anything unavailable.
@@ -519,6 +680,7 @@ a dedicated backup) before it ages out.
 per poll cycle, 180 days of retained history is roughly 13x a 14-day policy's target size. Size `quote_snapshot`/`candle` storage for the
 180-/365-day steady state.
 
+
 **Daily retention is scheduled by `029-schedule-retention.sql`.** `028` adds the corrected
 `prune_retention_history()` function, the TimescaleDB procedure, and the run-history table;
 `029` registers the daily Timescale job; migration 054 reduces strategy evaluation/signal retention to 14 days. The approved 180-day raw-quote and 365-day
@@ -544,15 +706,105 @@ the one-time backlog pass above, or to re-check after fixing a failure) and retu
 summary; it responds `207` if any table's delete raised an error so a failed run is visible in
 the HTTP response as well as in `retention_job_run` and the logs.
 
-**Compression is not configured by the repository migrations.** No migration
-sets Timescale compression options or registers a compression policy. The previous
-`add_compression_policy` examples omitted required hypertable setup and are not a
-ready-to-run procedure. Any future compression change needs a versioned migration,
-checks against the deployed Timescale version, foreign-key and query compatibility,
-and measured ingest/replay/retention and restore behavior on a disposable copy.
-Do not infer compression safety solely from the absence of incoming foreign keys.
+Migration 150 enables Timescale columnstore for `quote_snapshot` after three days
+and `candle` after seven days, segmented by instrument (and timeframe for candles).
+Timescale retention jobs drop their whole chunks after 180 and 365 days,
+respectively. `prune_retention_history()` continues to manage evaluation, feature,
+state-event and signal rows and no longer reports quote/candle row deletions. Keep
+both Timescale jobs and the retention run visible when reviewing data age.
+`feature_snapshot` remains in row storage: conversion on TimescaleDB 2.29.2 fails
+while strategy and context evaluations reference its chunks through foreign keys.
+
+**Migration `148-drop-strategy-signal-snapshot-json.sql` removes the redundant
+`strategy_signal.feature_snapshot_json` column.** The canonical snapshot
+is `feature_snapshot.snapshot_json`, reached through `feature_snapshot_id`; the
+signal row's copy was redundant and had no reader in api/worker/web/scanner.
+Dropping the column is metadata-only. Reclaiming physical storage with
+`VACUUM (FULL, ANALYZE) strategy_signal` requires a verified backup, API and worker
+stopped, and the market closed. It rewrites the table and requires enough free
+disk for the replacement relation and WAL.
+
+
+Migration 149 stores immutable `research_coverage_payload` rows once per hash and
+keeps the report/date/hash membership in `research_coverage_session`. Its table swap
+preserves each report identity; review the pre/post row and hash counts after it
+runs. Do not edit or delete retained coverage to make a verification pass.
+
+`scripts/prune-backups.mjs` previews old backup candidates while retaining the
+newest two checksum-matched dumps with their manifests and the newest rollback image
+tarball. It leaves incomplete or unmatched dumps alone. To review the candidates:
+
+```powershell
+node scripts/prune-backups.mjs --keep-dumps=2 --keep-images=1
+```
+
+The operator may then run the same command with `--apply` after reviewing the
+named files. A checksum match checks archive integrity; use `pnpm backup:verify`
+for a restore verification of any backup intended for rollback.
 
 Do not rely solely on container-local storage.
+
+### 11.1a PostgreSQL container guardrails and query attribution
+
+`docker-compose.yml` pins the postgres service's operational guardrails as
+command-line settings so the image's TimescaleDB tuning cannot drift back to the
+defaults:
+
+- `shm_size: 1g` -- Docker's default 64MB `/dev/shm` makes parallel hash joins and
+  sorts fail with `could not resize shared memory segment ... No space left on
+device`.
+- `max_wal_size=16GB` -- the 1GB default triggered WAL-driven checkpoints too
+  frequently under the scanner's write volume. PostgreSQL treats this as a soft
+  limit: fewer, larger checkpoints at the cost of disk and crash-recovery time.
+  `checkpoint_completion_target` stays at `0.9`.
+- `shared_preload_libraries=timescaledb,pg_stat_statements` -- TimescaleDB remains
+  loaded and query attribution becomes available. `log_temp_files=10240` reports
+  spills above 10 MB, `wal_compression=zstd` reduces WAL volume, and
+  `track_io_timing=on` attributes read and write latency.
+
+The extension is created per database after the library is preloaded:
+
+```sql
+CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
+```
+
+Rank statements by total execution time, calls/mean, temporary blocks and shared
+blocks; the views disagree, and the expensive statement is not always the frequent
+one:
+
+```sql
+SELECT queryid, calls,
+       round(total_exec_time::numeric, 0) AS total_ms,
+       round(mean_exec_time::numeric, 2) AS mean_ms,
+       temp_blks_written, shared_blks_read + shared_blks_written AS blks_rw,
+       left(regexp_replace(query, '\s+', ' ', 'g'), 120) AS q
+FROM pg_stat_statements
+ORDER BY total_exec_time DESC
+LIMIT 20;
+```
+
+`log_temp_files=0` prints one `temporary file: path ... size ...` line per temp
+file to the postgres container log. Repeated sequential scans of small tables (for
+example `scanner_profile`, `questrade_request_grant`) are usually cheaper than
+forcing an index; confirm their total execution time and row counts before changing
+access paths.
+
+The funded decision-evidence projection uses a `UNION` of index-friendly
+`orderId` and `positionId` joins with identical set semantics. Investigate
+`MISSING_DECISION_WORK` and execution-diagnostics queries with the same four
+rankings before changing SQL.
+
+
+Migration
+`146-funded-fact-processed-revision-index.sql` adds a partial
+`(run_id, processed_at) INCLUDE (fact_at)` index. The boundary predicate is
+written as `(fact_at <= boundary_at) IS TRUE` so the planner cannot fall back to
+the older index. An idle market is re-probed at most every 30 seconds.
+Eligibility is unchanged.
+
+
+Re-check
+`pg_stat_statements` after deployment.
 
 ### 11.1b Backup contents, snapshot consistency and verified restore
 
@@ -580,6 +832,7 @@ mutate the verification target; the job configuration itself is still compared
 against the manifest. A `schemaVersion: 1` manifest predates the Timescale
 metadata and is rejected with an explicit diagnostic. Retained archives and
 manifests must not be overwritten or repaired in place.
+
 
 Run the repeatable isolated regression harness before changing this pipeline:
 

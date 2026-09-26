@@ -131,6 +131,24 @@ describe.skipIf(!databaseUrl)(
       return input;
     }
 
+    it("persists one mark for an idle quote and retains the exact retry", async () => {
+      const value = await setup();
+      await value.service.quote(instrumentId, quote(at), 1, 0);
+      await value.service.quote(instrumentId, quote(at), 1, 0);
+      const result = await pool.query<{ event_id: string }>(
+        `SELECT event_id FROM paper_funded_event
+         WHERE account_id=$1 AND event_id LIKE ANY($2::text[])
+         ORDER BY event_id`,
+        [
+          value.accountId,
+          [`mark:${value.run.id}:%`, `post-fill-mark:${value.run.id}:%`],
+        ],
+      );
+      expect(result.rows.map((row) => row.event_id)).toEqual([
+        `mark:${value.run.id}:${instrumentId}:${at}`,
+      ]);
+    });
+
     it("executes custom and legacy policy quotes without adding legacy controls", async () => {
       const { portfolio: _portfolio, ...legacy } = fundedPolicy();
       for (const policy of [

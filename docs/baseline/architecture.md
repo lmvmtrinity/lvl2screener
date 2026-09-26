@@ -1,6 +1,5 @@
 # System architecture
 
-Reviewed against source on September 8, 2026.
 
 ## Services and ownership
 
@@ -30,7 +29,9 @@ Questrade → shared credential manager / priority limiter
 
 Captured inputs → durable research job → worker → Python signal replay
                 → TypeScript authoritative execution → persisted research result
-Completed LIVE closed QUOTE evidence → qualified frozen dataset
+Completed LIVE closed QUOTE evidence → qualified evidence
+                                      → immutable preparation → async coverage/reconciliation
+                                      → same-source-digest frozen dataset
                                     → inactive statistical challenger
 ```
 
@@ -70,7 +71,10 @@ versioned separately; see [paper execution](paper-execution.md).
 `apps/api/src/index.ts` loads validated configuration, applies checksum-verified
 migrations, composes repositories/services, and starts market collection and HTTP.
 `worker.ts` executes queued research work and checks paper learning at startup and
-17:00 Eastern daily. An explicit legacy interval setting overrides that schedule.
+17:00 Eastern daily. The learning scheduler freezes qualified paper-evidence
+inputs in the immutable preparation boundary before asynchronous coverage and
+resumes that exact preparation on the next check; an explicit legacy interval
+setting overrides that schedule.
 The worker must not start live funded processing.
 
 Jobs are durable and asynchronous: creation routes return HTTP 202; clients poll
@@ -83,10 +87,13 @@ Automated discovery has a separate stateless Python evaluator in `app/discovery.
 and an internal authenticated endpoint. TypeScript owns provider access and durable
 catalog/policy/run/input/result storage through `PostgresDiscoveryEvidenceStore`.
 This follows the existing Python analytics boundary and does not mutate strategy
-sessions, profiles or paper execution. The scheduled shadow pipeline and durable
-daily-list intake are implemented, with automatic intake disabled in composition.
-Verified live calendar/adjustment provenance and commissioning remain open. See the
-active plan.
+sessions, profiles or paper execution. The engine is frozen with mode `OFF`
+([ADR-018](../adr/018-pre-market-daily-seed-replaces-discovery-engine.md); archived
+plan). The primary automatic
+candidate source is the API-owned pre-market daily seed
+(`universe/daily-list-seeder.ts`), which fills an empty daily list through
+ordinary candidate intake; see the
+[operations runbook](operations-runbook.md#pre-market-daily-list-seed).
 
 | Path                                                                                  | Contents                                                                |
 | ------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |

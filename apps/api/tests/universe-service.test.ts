@@ -33,12 +33,14 @@ class MemoryUniverseStore implements UniverseStore {
     provider: string,
     policy: UniversePolicy,
     startedAt: Date,
+    refreshKind: UniverseRefreshRun["refreshKind"] = "FULL",
   ): Promise<UniverseRefreshRun> {
     const run: UniverseRefreshRun = {
       id: randomUUID(),
       marketId: policy.marketId,
       provider,
       policyVersion: policy.version,
+      refreshKind,
       status: "RUNNING",
       discoveredCount: 0,
       evaluatedCount: 0,
@@ -59,14 +61,18 @@ class MemoryUniverseStore implements UniverseStore {
     warnings: string[],
     completedAt: Date,
     minimumSize: number,
+    evaluatedCount = evaluations.length,
   ) {
     const eligible = evaluations.filter(
       (value) => value.member.eligible && value.instrument,
     );
     if (eligible.length < minimumSize) throw new Error("minimum safe size");
+    // Like the instrument upsert, a symbol keeps its id across runs.
     const members: UniverseMember[] = evaluations.map((value) => ({
       ...value.member,
-      instrumentId: value.instrument ? randomUUID() : null,
+      instrumentId: value.instrument
+        ? (value.member.instrumentId ?? randomUUID())
+        : null,
     }));
     const instruments: PersistedInstrument[] = eligible.map((value) => ({
       ...value.instrument!,
@@ -78,7 +84,7 @@ class MemoryUniverseStore implements UniverseStore {
     Object.assign(run, {
       status: "COMPLETED",
       discoveredCount: evaluations.length,
-      evaluatedCount: evaluations.length,
+      evaluatedCount,
       eligibleCount: eligible.length,
       activatedCount: instruments.length,
       warnings,
@@ -492,5 +498,123 @@ describe("Phase 10 universe automation", () => {
     expect(
       candidates.find((c) => c.normalizedSymbol === "JHX")?.requestedExchange,
     ).toBe("NYSE");
+  });
+});
+
+describe("incremental daily-list edits", () => {
+  async function editableFixture(symbols: string[]) {
+    const now = new Date("2026-08-24T13:25:00.000Z");
+    const clock = () => new Date(now);
+    const transport = new MockQuestradeTransport();
+    const tokenManager = new QuestradeTokenManager(
+      transport,
+      new InMemoryRefreshTokenStore("mock-refresh-token-0"),
+      clock,
+      0,
+    );
+    const adapter = new QuestradeAdapter(tokenManager, transport, clock);
+    await adapter.initialize();
+    const provider = new ConfiguredTsxUniverseProvider(
+      symbols,
+      undefined,
+      clock,
+    );
+    const store = new MemoryUniverseStore();
+    const service = new AutomatedUniverseService(
+      provider,
+      adapter,
+      store,
+      DEFAULT_UNIVERSE_POLICY,
+      1,
+      clock,
+    );
+    return { adapter, provider, store, service };
+  }
+
+  it("evaluates only added symbols and carries unchanged members forward", async () => {
+    const { adapter, provider, store, service } = await editableFixture([
+      "BTO.TO",
+      "BAM.TO",
+    ]);
+    await service.enrich();
+    const carried = service
+      .getAutomation()
+      .members.find((member) => member.symbol === "BTO.TO")!;
+    const search = vi.spyOn(adapter, "searchSymbols");
+    const candles = vi.spyOn(adapter, "getCandles");
+
+    await provider.replaceSymbols(["BTO.TO", "QBR.B.TO"]);
+    const edit = await service.applyListEdit();
+
+    expect(edit).toMatchObject({ added: ["QBR.B.TO"], removed: ["BAM.TO"] });
+    expect(search.mock.calls.map(([symbol]) => symbol)).toEqual(["QBR.B.TO"]);
+    expect(candles).toHaveBeenCalledTimes(1);
+    expect(edit!.instruments.map((value) => value.symbol).sort()).toEqual([
+      "BTO.TO",
+      "QBR.B.TO",
+    ]);
+    expect(store.runs[0]).toMatchObject({
+      refreshKind: "LIST_EDIT",
+      status: "COMPLETED",
+      discoveredCount: 2,
+      evaluatedCount: 1,
+    });
+    // The carried member keeps its original evaluation time and identity.
+    expect(
+      service
+        .getAutomation()
+        .members.find((member) => member.symbol === "BTO.TO"),
+    ).toEqual(carried);
+  });
+
+  it("removes symbols without any broker request and still records membership", async () => {
+    const { adapter, provider, store, service } = await editableFixture([
+      "BTO.TO",
+      "BAM.TO",
+    ]);
+    await service.enrich();
+    const search = vi.spyOn(adapter, "searchSymbols");
+    const candles = vi.spyOn(adapter, "getCandles");
+    const quotes = vi.spyOn(adapter, "getQuotes");
+
+    await provider.replaceSymbols(["BTO.TO"]);
+    const edit = await service.applyListEdit();
+
+    expect(edit).toMatchObject({ added: [], removed: ["BAM.TO"] });
+    expect(search).not.toHaveBeenCalled();
+    expect(candles).not.toHaveBeenCalled();
+    expect(quotes).not.toHaveBeenCalled();
+    expect(store.runs[0]).toMatchObject({
+      refreshKind: "LIST_EDIT",
+      discoveredCount: 1,
+      evaluatedCount: 0,
+    });
+    expect(
+      service.getAutomation().members.map((value) => value.symbol),
+    ).toEqual(["BTO.TO"]);
+  });
+
+  it("records no run when the listed symbols did not change", async () => {
+    const { adapter, provider, store, service } = await editableFixture([
+      "BTO.TO",
+    ]);
+    await service.enrich();
+    const runs = store.runs.length;
+    const search = vi.spyOn(adapter, "searchSymbols");
+
+    await provider.replaceSymbols(["BTO.TO"]);
+    const edit = await service.applyListEdit();
+
+    expect(edit).toMatchObject({ added: [], removed: [] });
+    expect(edit!.instruments.map((value) => value.symbol)).toEqual(["BTO.TO"]);
+    expect(store.runs).toHaveLength(runs);
+    expect(search).not.toHaveBeenCalled();
+  });
+
+  it("asks for a full refresh when no evaluated membership is held in memory", async () => {
+    const { store, service } = await editableFixture(["BTO.TO"]);
+
+    expect(await service.applyListEdit()).toBeNull();
+    expect(store.runs).toHaveLength(0);
   });
 });

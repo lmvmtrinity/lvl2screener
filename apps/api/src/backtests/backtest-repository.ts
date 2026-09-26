@@ -7,6 +7,7 @@ import {
   type BacktestRun,
   type CapturedHistoryAvailability,
   type CapturedHistoryLimitation,
+  type BacktestDataSource,
   type CreateBacktest,
   type ReplayInputInstrument,
   type ReplayInputSnapshot,
@@ -20,7 +21,12 @@ import {
   authoritativeExecutionAssumptions,
   marketSessionTimezone,
 } from "./execution-provenance.js";
-import { getRecentRegularSessions } from "../universe/market-calendar.js";
+import {
+  calendarSessionBoundaryFor,
+  getRecentRegularSessions,
+  publishedCalendarAuthoritativeAt,
+} from "../universe/market-calendar.js";
+import { publishedCalendarCovers } from "../universe/published-calendars.js";
 import type { StudyExecutionFence } from "./strategy-study-service.js";
 import { PostgresResearchEvidenceStore } from "./research-evidence-repository.js";
 import { contentHash } from "./research-coverage.js";
@@ -28,6 +34,25 @@ import {
   replayCandidatePlanDigest,
   type ReplayCandidatePlan,
 } from "./replay-candidate-plan.js";
+import type { CalendarSessionBoundary } from "../universe/market-calendar.js";
+import type { BacktestOpportunityCaptureInput } from "./authoritative-backtest-executor.js";
+import { PostgresHistoricalArchiveStore } from "../historical-archive/archive-repository.js";
+import {
+  archiveCandles,
+  synthesizeArchiveQuotes,
+} from "../historical-archive/archive-session.js";
+
+function retainReplayDateAtCutoff(
+  marketId: MarketId,
+  date: string,
+  inputCutoff: string,
+): boolean {
+  // Keep uncovered years and pre-publication scopes so downstream coverage can
+  // report UNKNOWN instead of silently changing the historical input.
+  if (!publishedCalendarCovers(marketId, [date])) return true;
+  if (!publishedCalendarAuthoritativeAt(marketId, inputCutoff)) return true;
+  return calendarSessionBoundaryFor(marketId, date) !== null;
+}
 
 export interface ReplaySessionPolicy {
   /** Omitted only by legacy TSX callers during the compatibility window. */
@@ -92,7 +117,7 @@ interface MembershipRow {
   symbol: string;
   sector: string | null;
 }
-interface QuoteRow {
+export interface QuoteRow {
   instrument_id: string;
   symbol: string;
   session_date: string;
@@ -111,7 +136,7 @@ interface QuoteRow {
   is_halted: boolean;
   delay_seconds: number | null;
 }
-interface CandleRow {
+export interface CandleRow {
   instrument_id: string;
   symbol: string;
   local_date: string;
@@ -129,6 +154,10 @@ interface CandleRow {
 const runColumns = `id,market_id,name,status,start_date,end_date,strategies,symbols,data_source,strategy_version,config_version,
   execution_model_version,execution_assumptions,supersedes_backtest_run_id,
   starting_capital,position_size,slippage_bps,fee_per_trade,parameters,metrics,analyses,data_quality,captured_history_availability,replay_input,evidence,research_evidence,error,created_at,started_at,completed_at`;
+const runListColumns = runColumns.replace(
+  "replay_input,",
+  "NULL::jsonb AS replay_input,",
+);
 
 /** Bounded lookback for the interior no-quote assessment. Older intervals are
  * outside the evaluated window and must not be presented as assessed. */
@@ -141,16 +170,37 @@ const CAPTURED_HISTORY_GAP_CACHE_MS = 5 * 60_000;
 const CAPTURED_HISTORY_GAP_LIMIT = 25;
 
 export class PostgresBacktestStore {
+  private readonly verifiedReplaySessionCache = new Map<
+    string,
+    { payloadHash: string; payload: Record<string, unknown> }
+  >();
+  private readonly fingerprintCycleCache = new WeakMap<
+    object,
+    {
+      key: string;
+      watermark: Array<{
+        sessionDate: string;
+        quoteCount: number;
+        latestQuoteAt: string | null;
+        candleCount: number;
+        latestCandleAt: string | null;
+      }>;
+    }
+  >();
   private readonly capturedHistoryGapCache = new Map<
     string,
     { computedAt: number; limitations: CapturedHistoryLimitation[] }
   >();
 
+  private readonly archive: PostgresHistoricalArchiveStore;
+
   constructor(
     private readonly pool: Pool,
     private readonly fence?: StudyExecutionFence,
     private readonly authorityCheck?: (client: PoolClient) => Promise<void>,
-  ) {}
+  ) {
+    this.archive = new PostgresHistoricalArchiveStore(pool);
+  }
 
   /** Create a study-scoped adapter. Derived runs must share the study job's lease fence. */
   withFence(
@@ -171,8 +221,9 @@ export class PostgresBacktestStore {
       market_id: MarketId;
       verified_at: string;
     }>(
-      `SELECT s.session_date::text,s.payload,s.payload_hash,r.report->'sessionPayloadHashes'->>s.session_date::text AS expected_hash,r.market_id,r.report->>'verifiedAt' AS verified_at
-       FROM research_coverage_session s JOIN research_coverage_report r ON r.hash=s.report_hash
+      `SELECT s.session_date::text,p.payload,s.payload_hash,r.report->'sessionPayloadHashes'->>s.session_date::text AS expected_hash,r.market_id,r.report->>'verifiedAt' AS verified_at
+       FROM research_coverage_session s JOIN research_coverage_payload p ON p.payload_hash=s.payload_hash
+       JOIN research_coverage_report r ON r.hash=s.report_hash
        WHERE s.report_hash=$1 AND r.status='VERIFIED' ORDER BY s.session_date`,
       [reportHash],
     );
@@ -286,13 +337,38 @@ export class PostgresBacktestStore {
     reportHash: string,
     date: string,
   ): Promise<Record<string, unknown>> {
+    const key = `${reportHash}:${date}`;
+    const cached = this.verifiedReplaySessionCache.get(key);
+    if (cached) {
+      const current = await this.pool.query<{
+        payload_hash: string;
+        expected_hash: string;
+      }>(
+        `SELECT s.payload_hash,r.report->'sessionPayloadHashes'->>$2 AS expected_hash
+         FROM research_coverage_session s JOIN research_coverage_report r ON r.hash=s.report_hash
+         WHERE s.report_hash=$1 AND s.session_date=$2::date AND r.status='VERIFIED'`,
+        [reportHash, date],
+      );
+      const hash = current.rows[0];
+      if (
+        !hash ||
+        hash.payload_hash !== hash.expected_hash ||
+        hash.payload_hash !== cached.payloadHash ||
+        contentHash({ date, payload: cached.payload }) !== hash.expected_hash
+      )
+        throw new Error("VERIFIED_REPLAY_SESSION_UNAVAILABLE");
+      this.verifiedReplaySessionCache.delete(key);
+      this.verifiedReplaySessionCache.set(key, cached);
+      return structuredClone(cached.payload);
+    }
     const result = await this.pool.query<{
       payload: Record<string, unknown>;
       payload_hash: string;
       expected_hash: string;
     }>(
-      `SELECT s.payload,s.payload_hash,r.report->'sessionPayloadHashes'->>$2 AS expected_hash
-       FROM research_coverage_session s JOIN research_coverage_report r ON r.hash=s.report_hash
+      `SELECT p.payload,s.payload_hash,r.report->'sessionPayloadHashes'->>$2 AS expected_hash
+       FROM research_coverage_session s JOIN research_coverage_payload p ON p.payload_hash=s.payload_hash
+       JOIN research_coverage_report r ON r.hash=s.report_hash
        WHERE s.report_hash=$1 AND s.session_date=$2::date AND r.status='VERIFIED'`,
       [reportHash, date],
     );
@@ -303,6 +379,14 @@ export class PostgresBacktestStore {
       contentHash({ date, payload: row.payload }) !== row.expected_hash
     )
       throw new Error("VERIFIED_REPLAY_SESSION_UNAVAILABLE");
+    this.verifiedReplaySessionCache.set(key, {
+      payloadHash: row.payload_hash,
+      payload: structuredClone(row.payload),
+    });
+    if (this.verifiedReplaySessionCache.size > 4)
+      this.verifiedReplaySessionCache.delete(
+        this.verifiedReplaySessionCache.keys().next().value!,
+      );
     return row.payload;
   }
 
@@ -391,6 +475,7 @@ export class PostgresBacktestStore {
     id: string,
     output: BacktestReplayResult,
     evidence: BacktestEvidenceReport,
+    opportunityCaptures: readonly BacktestOpportunityCaptureInput[] = [],
   ): Promise<BacktestRun> {
     const client = await this.pool.connect();
     try {
@@ -426,6 +511,154 @@ export class PostgresBacktestStore {
             event.setupInstanceId,
           ],
         );
+      {
+        const lineage = await client.query<{ verified: boolean }>(
+          `SELECT EXISTS (
+             SELECT 1 FROM research_evidence_binding b
+             JOIN research_coverage_report r
+               ON r.hash=b.coverage_report_hash AND r.market_id=b.market_id AND r.status='VERIFIED'
+             JOIN backtest_run source ON source.id=b.owner_id
+             WHERE b.owner_kind='BACKTEST' AND b.owner_id=$1
+               AND b.market_id=source.market_id
+               AND b.input_hash=source.research_evidence->>'inputHash'
+           ) AS verified`,
+          [id],
+        );
+        if (lineage.rows[0]?.verified) {
+          const identity = await client.query<{
+            market_id: MarketId;
+            strategy_version: string;
+            config_version: string;
+            execution_model_version: string | null;
+            execution_assumptions: unknown;
+          }>(
+            `SELECT market_id,strategy_version,config_version,execution_model_version,execution_assumptions
+               FROM backtest_run WHERE id=$1`,
+            [id],
+          );
+          const source = identity.rows[0];
+          if (!source)
+            throw new Error("BACKTEST_OPPORTUNITY_CAPTURE_RUN_MISSING");
+          if (opportunityCaptures.length !== output.metrics.observations)
+            throw new Error("BACKTEST_OPPORTUNITY_CAPTURE_PARTIAL");
+          const orderedCaptures = [...opportunityCaptures].sort(
+            (left, right) =>
+              left.sessionDate.localeCompare(right.sessionDate) ||
+              left.decisionTimestamp.localeCompare(right.decisionTimestamp) ||
+              left.strategy.localeCompare(right.strategy) ||
+              left.profileId.localeCompare(right.profileId) ||
+              left.opportunityId.localeCompare(right.opportunityId),
+          );
+          const seenOpportunities = new Set<string>();
+          const seenEvidence = new Set<string>();
+          const expectedAssumptionsHash = contentHash(
+            source.execution_assumptions,
+          );
+          for (const capture of opportunityCaptures) {
+            if (
+              capture.replayId !== id ||
+              capture.marketId !== source.market_id ||
+              capture.strategyVersion !== source.strategy_version ||
+              capture.configVersion !== source.config_version ||
+              capture.executionModelVersion !==
+                source.execution_model_version ||
+              capture.executionAssumptionsHash !== expectedAssumptionsHash
+            )
+              throw new Error("BACKTEST_OPPORTUNITY_CAPTURE_SCOPE_MISMATCH");
+            const key = `${capture.strategy}:${capture.opportunityId}`;
+            if (
+              seenOpportunities.has(key) ||
+              seenEvidence.has(capture.evidenceId)
+            )
+              throw new Error("BACKTEST_OPPORTUNITY_CAPTURE_DUPLICATE");
+            seenOpportunities.add(key);
+            seenEvidence.add(capture.evidenceId);
+          }
+          const membershipHash = contentHash(
+            orderedCaptures.map((capture) => ({
+              opportunityId: capture.opportunityId,
+              evidenceId: capture.evidenceId,
+              captureHash: contentHash(captureIdentity(id, capture)),
+            })),
+          );
+          await client.query(
+            `INSERT INTO backtest_opportunity_capture_receipt
+             (source_run_id,market_id,expected_count,membership_hash,execution_model_version,execution_assumptions_hash)
+             VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT DO NOTHING`,
+            [
+              id,
+              source.market_id,
+              opportunityCaptures.length,
+              membershipHash,
+              source.execution_model_version,
+              expectedAssumptionsHash,
+            ],
+          );
+          const receipt = await client.query<{
+            expected_count: number;
+            membership_hash: string;
+          }>(
+            `SELECT expected_count,membership_hash FROM backtest_opportunity_capture_receipt
+              WHERE source_run_id=$1 AND market_id=$2`,
+            [id, source.market_id],
+          );
+          if (
+            receipt.rows[0]?.expected_count !== opportunityCaptures.length ||
+            receipt.rows[0]?.membership_hash !== membershipHash
+          )
+            throw new Error("BACKTEST_OPPORTUNITY_CAPTURE_RECEIPT_CONFLICT");
+          for (const [captureOrdinal, capture] of orderedCaptures.entries()) {
+            const identity = captureIdentity(id, capture);
+            const captureHash = contentHash(identity);
+            const inserted = await client.query(
+              `INSERT INTO backtest_opportunity_capture
+               (source_run_id,market_id,strategy_name,strategy_version,config_version,
+                profile_id,profile_name,execution_model_version,execution_assumptions_hash,
+                signal_semantics_version,
+                replay_id,evidence_id,opportunity_id,session_date,decision_timestamp,
+                symbol,instrument_id,baseline_selected,score,prediction_features,outcome,capture_hash,label_available_at,capture_ordinal)
+               VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14::date,$15::timestamptz,
+                      $16,$17,$18,$19,$20::jsonb,$21::jsonb,$22,$23::timestamptz,$24)
+               ON CONFLICT DO NOTHING`,
+              [
+                id,
+                capture.marketId,
+                capture.strategy,
+                capture.strategyVersion,
+                capture.configVersion,
+                capture.profileId,
+                capture.profileName,
+                capture.executionModelVersion,
+                capture.executionAssumptionsHash,
+                capture.signalSemanticsVersion,
+                capture.replayId,
+                capture.evidenceId,
+                capture.opportunityId,
+                capture.sessionDate,
+                capture.decisionTimestamp,
+                capture.symbol,
+                capture.instrumentId,
+                capture.baselineSelected,
+                capture.score,
+                JSON.stringify(capture.features),
+                JSON.stringify(capture.outcome),
+                captureHash,
+                capture.labelAvailableAt,
+                captureOrdinal,
+              ],
+            );
+            if (inserted.rowCount === 0) {
+              const existing = await client.query<{ capture_hash: string }>(
+                `SELECT capture_hash FROM backtest_opportunity_capture
+                  WHERE source_run_id=$1 AND strategy_name=$2 AND opportunity_id=$3`,
+                [id, capture.strategy, capture.opportunityId],
+              );
+              if (existing.rows[0]?.capture_hash !== captureHash)
+                throw new Error("BACKTEST_OPPORTUNITY_CAPTURE_RETRY_CONFLICT");
+            }
+          }
+        }
+      }
       await client.query("COMMIT");
     } catch (error) {
       await client.query("ROLLBACK");
@@ -471,7 +704,7 @@ export class PostgresBacktestStore {
 
   async list(limit = 100): Promise<BacktestRun[]> {
     const result = await this.pool.query<RunRow>(
-      `SELECT ${runColumns} FROM backtest_run ORDER BY created_at DESC LIMIT $1`,
+      `SELECT ${runListColumns} FROM backtest_run ORDER BY created_at DESC LIMIT $1`,
       [limit],
     );
     return result.rows.map((row) => mapRun(row));
@@ -539,11 +772,20 @@ export class PostgresBacktestStore {
     input: CreateBacktest,
     capturedHistoryAvailability: CapturedHistoryAvailability,
   ): Promise<ReplayInputSnapshot> {
+    // The frozen availability decides which tables replay reads, so it must
+    // come from the requested source; a mismatch would mix inputs (ADR-019).
+    const source = input.dataSource ?? "CAPTURED_QUOTES";
+    if (capturedHistoryAvailability.source !== source)
+      throw new Error(
+        `Replay input requires ${source} availability, received ${capturedHistoryAvailability.source}.`,
+      );
     const requestedSymbols = [
       ...new Set(input.symbols.map((value) => value.trim()).filter(Boolean)),
     ].sort();
     const [plan, benchmarks] = await Promise.all([
-      this.resolveReplayCandidatePlan(input),
+      input.dataSource === "HISTORICAL_ARCHIVE"
+        ? this.archiveCohortPlan(input.marketId, requestedSymbols)
+        : this.resolveReplayCandidatePlan(input),
       this.pool.query<InstrumentRow>(
         `SELECT id,symbol,industry_sector,benchmark_kind,benchmark_sector FROM instrument
          WHERE market_id=$1 AND benchmark_kind IS NOT NULL
@@ -595,6 +837,38 @@ export class PostgresBacktestStore {
     );
   }
 
+  /**
+   * Archive replays (ADR-019) use the caller's explicit symbols. There is no
+   * retained point-in-time membership for imported history, so an empty list
+   * resolves no candidates instead of reusing today's universe.
+   */
+  private async archiveCohortPlan(
+    marketId: MarketId,
+    requestedSymbols: string[],
+  ): Promise<ReplayCandidatePlan> {
+    const note =
+      "Historical archive replay (ADR-019): candidates are the requested symbols, not point-in-time membership; results are exploratory.";
+    if (marketId !== "US_EQUITIES" || !requestedSymbols.length) {
+      const reason =
+        marketId !== "US_EQUITIES"
+          ? "The historical archive only covers US_EQUITIES."
+          : "Historical archive replays require explicit symbols.";
+      return {
+        provenance: "EXPLICIT_CAPTURED_COHORT",
+        sessions: [],
+        candidateInstruments: [],
+        universeRefreshRunId: null,
+        warnings: [reason],
+        digest: replayCandidatePlanDigest("EXPLICIT_CAPTURED_COHORT", [], []),
+      };
+    }
+    const plan = await this.explicitCapturedCohortPlan(
+      marketId,
+      requestedSymbols,
+    );
+    return { ...plan, warnings: [note, ...plan.warnings] };
+  }
+
   private async explicitCapturedCohortPlan(
     marketId: MarketId,
     requestedSymbols: string[],
@@ -642,6 +916,7 @@ export class PostgresBacktestStore {
       marketId,
       startDate,
       endDate,
+      `${endDate}T23:59:59.999Z`,
     );
     if (!dates.length)
       return this.historicalMembershipResult(marketId, dates, []);
@@ -810,17 +1085,21 @@ export class PostgresBacktestStore {
     marketId: MarketId,
     startDate: string,
     endDate: string,
+    inputCutoff: string,
   ): Promise<string[]> {
     const timezone = marketSessionTimezone(marketId);
     const result = await this.pool.query<{ session_date: string }>(
       `SELECT DISTINCT (q.timestamp AT TIME ZONE $2)::date::text AS session_date
          FROM quote_snapshot q JOIN instrument i ON i.id=q.instrument_id
         WHERE i.market_id=$1
-          AND (q.timestamp AT TIME ZONE $2)::date BETWEEN $3::date AND $4::date
+          AND q.timestamp >= ($3::date::timestamp AT TIME ZONE $2)
+          AND q.timestamp < (($4::date + 1)::timestamp AT TIME ZONE $2)
         ORDER BY 1`,
       [marketId, timezone, startDate, endDate],
     );
-    return result.rows.map((row) => row.session_date);
+    return result.rows
+      .map((row) => row.session_date)
+      .filter((date) => retainReplayDateAtCutoff(marketId, date, inputCutoff));
   }
 
   /** Merges candidate and benchmark instruments into one lookup list, as replay sessions need
@@ -865,6 +1144,19 @@ export class PostgresBacktestStore {
       (value) => value.instrumentId,
     );
     if (!ids.length) return [];
+    if (
+      replayInput.capturedHistoryAvailability.source === "HISTORICAL_ARCHIVE"
+    ) {
+      const dates = await this.archive.sessionDates(
+        replayInput.candidateInstruments.map((value) => value.instrumentId),
+        input.startDate,
+        input.endDate,
+        policy.timezone,
+      );
+      return dates.filter(
+        (date) => calendarSessionBoundaryFor(input.marketId, date) !== null,
+      );
+    }
     const result = await this.pool.query<{ session_date: string }>(
       `SELECT DISTINCT (${sessionDateExpression("q.timestamp", policy.timezone)})::date::text AS session_date
        FROM quote_snapshot q
@@ -872,7 +1164,15 @@ export class PostgresBacktestStore {
        ORDER BY 1`,
       [ids, input.startDate, input.endDate],
     );
-    const dates = result.rows.map((row) => row.session_date);
+    const dates = result.rows
+      .map((row) => row.session_date)
+      .filter((date) =>
+        retainReplayDateAtCutoff(
+          input.marketId,
+          date,
+          `${input.endDate}T23:59:59.999Z`,
+        ),
+      );
     // Historical plans replay only sessions that resolved candidates. Proven
     // empty membership and missing membership evidence are reported on the
     // input, never replayed as benchmark-only sessions.
@@ -895,6 +1195,14 @@ export class PostgresBacktestStore {
   ): Promise<Record<string, unknown>> {
     const instruments = this.mergedInstruments(replayInput, date);
     const ids = instruments.map((value) => value.instrumentId);
+    if (replayInput.capturedHistoryAvailability.source === "HISTORICAL_ARCHIVE")
+      return this.loadArchiveSession(
+        replayInput.marketId,
+        instruments,
+        ids,
+        policy,
+        date,
+      );
     const quotes = ids.length
       ? await this.pool.query<QuoteRow>(
           `SELECT q.instrument_id,''::text AS symbol,(${sessionDateExpression("q.timestamp", policy.timezone)})::date::text session_date,
@@ -926,6 +1234,44 @@ export class PostgresBacktestStore {
     );
   }
 
+  /**
+   * Archive session (ADR-019): synthesized minute quotes and archived candles
+   * shaped by the same payload builder as captured replay. The published
+   * calendar sets the session bounds so early closes end the session.
+   */
+  private async loadArchiveSession(
+    marketId: MarketId,
+    instruments: MergedInstrument[],
+    ids: string[],
+    policy: ReplaySessionPolicy,
+    date: string,
+  ): Promise<Record<string, unknown>> {
+    const boundary = calendarSessionBoundaryFor(marketId, date);
+    if (!boundary)
+      throw new Error(`${date} is not a ${marketId} trading session.`);
+    const { bars, samples } = await this.archive.loadSession(
+      ids,
+      date,
+      policy.timezone,
+    );
+    const window = {
+      date,
+      open: new Date(boundary.open),
+      close: new Date(boundary.close),
+      dayStart: zonedBoundary(date, "00:00", policy.timezone),
+    };
+    const localDate = (value: Date) =>
+      dateInMarket(value.toISOString(), marketId) ?? date;
+    return buildSessionPayload(
+      date,
+      instruments,
+      synthesizeArchiveQuotes(window, bars, samples),
+      archiveCandles(window, bars, localDate),
+      policy,
+      boundary,
+    );
+  }
+
   /** Legacy bulk entry point kept for the still-supported synchronous fallback path (see W8's
    * PR-11 rollback note: retain the synchronous path until the chunked worker path has proven
    * byte-equivalent). Implemented on top of the same session-cursor queries as
@@ -945,9 +1291,23 @@ export class PostgresBacktestStore {
 
   async getCapturedHistoryAvailability(
     marketId: MarketId = "CA_TSX",
-    options: { now?: Date } = {},
+    options: { now?: Date; source?: BacktestDataSource } = {},
   ): Promise<CapturedHistoryAvailability> {
     const observedAt = options.now ?? new Date();
+    if (options.source === "HISTORICAL_ARCHIVE") {
+      const bounds = await this.archive.bounds(marketId);
+      // Interior limitations are not assessed for the archive; leaving the
+      // field absent records that, rather than claiming gap-free history.
+      return {
+        source: "HISTORICAL_ARCHIVE",
+        observedAt: observedAt.toISOString(),
+        tables: { quoteSnapshot: bounds.quote, candle: bounds.bar },
+        replay: {
+          earliestDate: dateInMarket(bounds.quote.earliest, marketId),
+          latestDate: dateInMarket(bounds.quote.latest, marketId),
+        },
+      };
+    }
     const result = await this.pool.query<{
       source: "quoteSnapshot" | "candle";
       earliest: Date | null;
@@ -1120,7 +1480,15 @@ export class PostgresBacktestStore {
     marketId: MarketId = "CA_TSX",
     now: Date = new Date(),
     membership?: string,
+    cycleToken?: object,
   ): Promise<string> {
+    const cycleKey = `${marketId}:${now.toISOString()}`;
+    const cached = cycleToken && this.fingerprintCycleCache.get(cycleToken);
+    if (cached?.key === cycleKey)
+      return contentHash({
+        watermark: cached.watermark,
+        membership: membership ?? null,
+      });
     const timezone = marketSessionTimezone(marketId);
     // The closed-session gate: include a row when the current market-local time
     // is at/after the session boundary, or when the row belongs to an earlier date.
@@ -1132,14 +1500,28 @@ export class PostgresBacktestStore {
       (col AT TIME ZONE $2)::time >= '09:30'
       AND (col AT TIME ZONE $2)::time < '16:00'
     )`;
-    const result = await this.pool.query<{
+    const rows: Array<{
       session_date: string;
       quote_count: string;
       latest_quote_at: Date | null;
       candle_count: string;
       latest_candle_at: Date | null;
-    }>(
-      `SELECT u.session_date,
+    }> = [];
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      // The aggregate scans the retained quote/candle history at session
+      // boundaries. A scoped work_mem keeps it in memory: the shared 10MB
+      // setting spilled roughly 200MB per pass at production volume.
+      await client.query("SET LOCAL work_mem = '256MB'");
+      const result = await client.query<{
+        session_date: string;
+        quote_count: string;
+        latest_quote_at: Date | null;
+        candle_count: string;
+        latest_candle_at: Date | null;
+      }>(
+        `SELECT u.session_date,
               sum(u.quote_count)::bigint::text AS quote_count,
               max(u.latest_quote_at) AS latest_quote_at,
               sum(u.candle_count)::bigint::text AS candle_count,
@@ -1166,16 +1548,27 @@ export class PostgresBacktestStore {
          ) u
         GROUP BY u.session_date
         ORDER BY u.session_date`,
-      [marketId, timezone, now.toISOString()],
-    );
+        [marketId, timezone, now.toISOString()],
+      );
+      rows.push(...result.rows);
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => undefined);
+      throw error;
+    } finally {
+      client.release();
+    }
+    const watermark = rows.map((row) => ({
+      sessionDate: row.session_date,
+      quoteCount: Number(row.quote_count),
+      latestQuoteAt: row.latest_quote_at?.toISOString() ?? null,
+      candleCount: Number(row.candle_count),
+      latestCandleAt: row.latest_candle_at?.toISOString() ?? null,
+    }));
+    if (cycleToken)
+      this.fingerprintCycleCache.set(cycleToken, { key: cycleKey, watermark });
     return contentHash({
-      watermark: result.rows.map((row) => ({
-        sessionDate: row.session_date,
-        quoteCount: Number(row.quote_count),
-        latestQuoteAt: row.latest_quote_at?.toISOString() ?? null,
-        candleCount: Number(row.candle_count),
-        latestCandleAt: row.latest_candle_at?.toISOString() ?? null,
-      })),
+      watermark,
       membership: membership ?? null,
     });
   }
@@ -1266,7 +1659,7 @@ function mapCandle(value: CandleRow) {
   };
 }
 
-interface MergedInstrument {
+export interface MergedInstrument {
   instrumentId: string;
   symbol: string;
   sector: string | null;
@@ -1284,9 +1677,14 @@ export function buildSessionPayload(
   quoteRows: readonly QuoteRow[],
   candleRows: readonly CandleRow[],
   policy: ReplaySessionPolicy,
+  sessionBoundary?: CalendarSessionBoundary | null,
 ): Record<string, unknown> {
-  const start = zonedBoundary(date, "09:30", policy.timezone);
-  const end = zonedBoundary(date, "16:00", policy.timezone);
+  const start = sessionBoundary
+    ? new Date(sessionBoundary.open)
+    : zonedBoundary(date, "09:30", policy.timezone);
+  const end = sessionBoundary
+    ? new Date(sessionBoundary.close)
+    : zonedBoundary(date, "16:00", policy.timezone);
   const sessionQuotes = quoteRows.filter(
     (value) => value.session_date === date,
   );
@@ -1299,7 +1697,8 @@ export function buildSessionPayload(
       : value.timeframe === "OneMinute"
         ? value.end_time <= end &&
           value.end_time >= new Date(start.getTime() - 20 * 86_400_000)
-        : value.local_date === date,
+        : value.local_date === date &&
+          (!sessionBoundary || value.end_time <= end),
   );
   return {
     session: {
@@ -1491,6 +1890,18 @@ function dateOnly(value: string | Date): string {
     ? value.slice(0, 10)
     : value.toISOString().slice(0, 10);
 }
+function captureIdentity(
+  runId: string,
+  capture: BacktestOpportunityCaptureInput,
+): Record<string, unknown> {
+  const { signalSemanticsVersion, ...legacyFields } = capture;
+  return {
+    runId,
+    ...legacyFields,
+    ...(signalSemanticsVersion ? { signalSemanticsVersion } : {}),
+  };
+}
+
 function iso(value: unknown): string {
   return value instanceof Date ? value.toISOString() : String(value);
 }

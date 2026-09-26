@@ -35,7 +35,12 @@ import type {
   QuoteFact,
   SignalFact,
 } from "../paper-bot/types.js";
-import { marketSessionTimezone } from "./execution-provenance.js";
+import {
+  AUTHORITATIVE_EXECUTION_MODEL_VERSION,
+  authoritativeExecutionAssumptions,
+  marketSessionTimezone,
+} from "./execution-provenance.js";
+import { contentHash } from "./research-coverage.js";
 
 interface ReplayInstrument {
   readonly instrumentId: string;
@@ -68,7 +73,44 @@ export interface HistoricalExecutionRecord {
 export interface AuthoritativeBacktestResult {
   readonly output: BacktestReplayResult;
   readonly executions: readonly HistoricalExecutionRecord[];
+  readonly opportunityCaptures: readonly BacktestOpportunityCaptureInput[];
 }
+
+export type BacktestOpportunityCaptureInput = {
+  marketId: CreateBacktest["marketId"];
+  strategy: StrategyStateEvent["strategy"];
+  strategyVersion: string;
+  configVersion: string;
+  profileId: string;
+  profileName: string;
+  executionModelVersion: string;
+  executionAssumptionsHash: string;
+  signalSemanticsVersion: string | null;
+  replayId: string;
+  evidenceId: string;
+  opportunityId: string;
+  sessionDate: string;
+  symbol: string;
+  instrumentId: string;
+  baselineSelected: boolean;
+  decisionTimestamp: string;
+  score: number;
+  features: StrategyStateEvent["featureSnapshot"];
+  outcome:
+    | {
+        status: "CLOSED";
+        entryTime: string;
+        exitTime: string;
+        entryPrice: number;
+        exitPrice: number;
+        shares: number;
+        netPnl: number;
+        rMultiple: number;
+      }
+    | { status: "NO_FILL"; reason: string }
+    | { status: "INVALID"; reason: string };
+  labelAvailableAt: string | null;
+};
 
 export interface AuthoritativeBacktestInput {
   readonly runId: string;
@@ -378,6 +420,9 @@ function buildAuthoritativeResult(
   }
   return {
     executions,
+    opportunityCaptures: executions.map((record) =>
+      captureOpportunity(record, runId, configVersion, request),
+    ),
     output: {
       metrics,
       analyses: analysesFor(trades),
@@ -400,6 +445,66 @@ function buildAuthoritativeResult(
         warnings,
       },
     },
+  };
+}
+
+function captureOpportunity(
+  record: HistoricalExecutionRecord,
+  replayId: string,
+  configVersion: string,
+  request: CreateBacktest,
+): BacktestOpportunityCaptureInput {
+  const { event, quote } = record;
+  const assumptions = authoritativeExecutionAssumptions(request);
+  const outcome: BacktestOpportunityCaptureInput["outcome"] = !record.eligible
+    ? { status: "INVALID", reason: "BASELINE_NOT_SELECTED" }
+    : quote?.status === "CLOSED"
+      ? {
+          status: "CLOSED",
+          entryTime: quote.position.entryTime,
+          exitTime: quote.exit.exitTime,
+          entryPrice: quote.position.entryPrice,
+          exitPrice: quote.exit.financials.exitPrice,
+          shares: quote.position.shares,
+          netPnl: quote.exit.financials.netPnl,
+          rMultiple: quote.exit.financials.rMultiple,
+        }
+      : quote?.status === "NO_FILL"
+        ? { status: "NO_FILL", reason: quote.noFillReason }
+        : quote?.status === "REJECTED_ECONOMICS"
+          ? { status: "INVALID", reason: quote.economicsReason }
+          : { status: "INVALID", reason: "OUTCOME_UNRESOLVED" };
+  const labelAvailableAt =
+    quote?.status === "CLOSED"
+      ? quote.exit.exitTime
+      : quote?.status === "CLOSE_PENDING" || quote?.status === "OPEN"
+        ? null
+        : event.timestamp;
+  return {
+    marketId: event.marketId,
+    strategy: event.strategy,
+    strategyVersion: event.strategyVersion,
+    configVersion,
+    profileId: event.profileId,
+    profileName: event.profileName,
+    executionModelVersion: AUTHORITATIVE_EXECUTION_MODEL_VERSION,
+    executionAssumptionsHash: contentHash(assumptions),
+    signalSemanticsVersion: event.signalSemanticsVersion ?? null,
+    replayId,
+    evidenceId: event.eventId,
+    opportunityId: event.setupInstanceId ?? event.eventId,
+    sessionDate: localDate(
+      event.timestamp,
+      marketSessionTimezone(event.marketId),
+    ),
+    symbol: event.symbol,
+    instrumentId: event.instrumentId,
+    baselineSelected: record.eligible,
+    decisionTimestamp: event.timestamp,
+    score: event.score,
+    features: event.featureSnapshot,
+    outcome,
+    labelAvailableAt,
   };
 }
 

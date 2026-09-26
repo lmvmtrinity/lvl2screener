@@ -5,6 +5,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { LearningView } from "./LearningView.js";
@@ -135,6 +136,26 @@ const report = {
   coveredNoOpportunitySessions: 0,
   excludedPausedSessions: 0,
   closedQuoteOutcomes: 1,
+  prospectiveEconomics: {
+    unit: "CAD" as const,
+    status: "UNAVAILABLE" as const,
+    observedBaselineLabelDenominator: 0,
+    observedBaselineNetPnlAfterCosts: null,
+    decisionCounts: {
+      selected: null,
+      rejected: null,
+      noFill: null,
+      invalid: null,
+      missedWinner: null,
+      unavailableReason: "NO_FROZEN_DECISION_OR_FILL_CLASSIFICATION",
+    },
+    riskDiagnostics: {
+      drawdown: null,
+      concentration: null,
+      unavailableReason: "NO_CAUSAL_PORTFOLIO_SEQUENCE_IN_CHALLENGER_LABELS",
+    },
+    unavailableReason: "NO_VISIBLE_CLOSED_NET_PNL_LABELS",
+  },
   prospectiveBrierScore: 0.25,
   comparison: null,
   comparisonUnavailableReason: "PAIRED_INPUTS_MISSING" as const,
@@ -157,6 +178,8 @@ function endpoint(
     return { experiment, report };
   if (url.startsWith("/api/challenger-experiments"))
     return { experiments: [experiment] };
+  if (url.startsWith("/api/signal-model-research/authorizations?"))
+    return { authorizations: [] };
   throw new Error(`Unexpected request: ${url}`);
 }
 
@@ -175,111 +198,235 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-describe("LearningView automation-first hierarchy", () => {
-  it("leads with the current situation, scheduler state and qualification gates", async () => {
-    mockEndpoints();
-    render(<LearningView marketId="CA_TSX" />);
+const coverageStage = {
+  key: "COVERAGE" as const,
+  marketId: "CA_TSX" as const,
+  scopeId: "e51cc793-d168-4acf-a552-532ee04c6ad2",
+  state: "RUNNING" as const,
+  asOf: "2026-09-10T15:00:00.000Z",
+  lastAttemptAt: "2026-09-10T14:50:00.000Z",
+  lastSuccessAt: null,
+  nextCheckAt: null,
+  progress: { completed: 6, total: 17, unit: "sessions" },
+  reasonCodes: [],
+  nextAction: {
+    kind: "AUTOMATIC" as const,
+    label: "The worker will check again",
+  },
+  jobId: null,
+  reportId: null,
+};
 
-    await waitFor(() => expect(getJsonMock).toHaveBeenCalledTimes(8));
-    expect(screen.getByRole("button", { name: "OVERVIEW" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
+const usCohort = {
+  ...overview.evidenceReadiness[0]!,
+  cohort: {
+    ...overview.evidenceReadiness[0]!.cohort,
+    marketId: "US_EQUITIES" as const,
+    strategy: "PRIOR_DAY_HIGH_BREAKOUT" as const,
+    profileConfigId: "44444444-4444-4444-8444-444444444444",
+    configVersion: "profile-us-prior-day-high-breakout-v1",
+    closedQuoteCount: 178,
+  },
+  closedQuoteCount: 178,
+  progressPct: 89,
+};
+
+function openTool(label: string) {
+  fireEvent.click(screen.getByRole("button", { name: "More learning tools" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: label }));
+  return screen.getByRole("dialog");
+}
+
+// Initial load: seven summary requests plus the selected challenger report.
+const INITIAL_REQUESTS = 8;
+
+describe("LearningView summary page", () => {
+  it("leads with status, training progress and the selected market's evidence", async () => {
+    mockEndpoints({
+      ...overview,
+      evidenceReadiness: [
+        ...overview.evidenceReadiness,
+        usCohort,
+      ] as unknown as typeof overview.evidenceReadiness,
+    });
+    render(<LearningView marketId="CA_TSX" />);
+    await waitFor(() =>
+      expect(getJsonMock).toHaveBeenCalledTimes(INITIAL_REQUESTS),
+    );
+
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "Learning checks on · 1 needs review · waiting for enough closed outcomes · next check",
     );
     expect(
-      await screen.findByText(/1 item needs review before this pipeline/),
+      screen.getByText(/Nothing is running\. Learning checks run on schedule/),
     ).toBeInTheDocument();
-    expect(screen.getByText(/Scheduled evidence checks/)).toBeInTheDocument();
-    expect(
-      screen.getAllByText(/Daily at 5:00 p.m. Eastern/).length,
-    ).toBeGreaterThan(0);
-    expect(screen.getByText(/Qualification progress/)).toBeInTheDocument();
-    expect(
-      screen.getByText(/Fewer closed quote outcomes than the gate requires/),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText(/Enough closed quote outcomes/),
-    ).toBeInTheDocument();
-    expect(screen.getByText(/Activation stays manual/)).toBeInTheDocument();
-    // Raw reason codes are explained, not headline copy.
-    expect(
-      screen.getAllByText(/Waiting for enough closed outcomes/).length,
-    ).toBeGreaterThan(0);
-    // The raw state remains inspectable under a details block.
-    expect(screen.getByText("Raw scheduler state")).toBeInTheDocument();
-  });
 
-  it("separates processes and keeps prospective observation read-only", async () => {
-    mockEndpoints();
-    render(<LearningView marketId="CA_TSX" />);
-    await waitFor(() => expect(getJsonMock).toHaveBeenCalledTimes(8));
-
-    fireEvent.click(screen.getByRole("button", { name: "PROCESSES" }));
-    expect(screen.getByText("Evidence and automation")).toBeInTheDocument();
-    expect(screen.getByText("Calibration")).toBeInTheDocument();
-    expect(screen.getByText("Prospective observation")).toBeInTheDocument();
-    expect(screen.getByText(/model-v2/)).toBeInTheDocument();
+    const progress = screen.getByRole("region", {
+      name: "Progress to training",
+    });
+    expect(within(progress).getByText("120 / 200")).toBeInTheDocument();
+    expect(within(progress).getByText("0 / 1")).toBeInTheDocument();
     expect(
-      screen.queryByRole("button", { name: /start|pause|resume|end|revoke/i }),
+      within(progress).getByText(
+        /1 prospective observation missed the capture deadline/,
+      ),
+    ).toBeInTheDocument();
+    const strip = within(progress).getByRole("list", {
+      name: "Learning pipeline",
+    });
+    expect(within(strip).getAllByRole("listitem")).toHaveLength(6);
+    expect(within(strip).getByText("1 enrolled")).toBeInTheDocument();
+    expect(
+      within(strip).getByText("Manual only, after comparison"),
+    ).toBeInTheDocument();
+
+    // The overview endpoint spans both markets; the US cohort stays out.
+    const evidence = screen.getByRole("region", {
+      name: "Evidence by strategy",
+    });
+    expect(within(evidence).getByText("ORB Retest")).toBeInTheDocument();
+    expect(
+      within(evidence).queryByText("Prior Day High Breakout"),
     ).not.toBeInTheDocument();
+    expect(within(evidence).queryByText(/178/)).not.toBeInTheDocument();
+
+    fireEvent.click(within(evidence).getByText("ORB Retest"));
+    const gates = within(evidence).getByRole("list", {
+      name: "Training gates",
+    });
+    expect(gates).toHaveTextContent("200 closed outcomes (120) (not met)");
+    expect(gates).toHaveTextContent("50 new since last dataset (120) (met)");
+    expect(
+      within(evidence).getByText(/Activation\s+stays manual/),
+    ).toBeInTheDocument();
+
+    const shadow = screen.getByRole("region", {
+      name: "Models and shadow comparison",
+    });
+    expect(within(shadow).getByText("None trained yet")).toBeInTheDocument();
+    expect(within(shadow).getByText(/all markets/)).toBeInTheDocument();
   });
 
-  it("shows model lifecycle gates and the challenger acceptance report under Results", async () => {
+  it("shows a running process with its measured progress", async () => {
+    getJsonMock.mockImplementation((url: string) =>
+      url.startsWith("/api/learning/evidence-automation")
+        ? Promise.resolve({ stages: [coverageStage] })
+        : Promise.resolve(endpoint(url)),
+    );
+    render(<LearningView marketId="CA_TSX" />);
+
+    const running = await screen.findByRole("region", { name: "Now running" });
+    await waitFor(() =>
+      expect(within(running).getByText("Coverage check")).toBeInTheDocument(),
+    );
+    expect(within(running).getByRole("progressbar")).toHaveAttribute(
+      "aria-valuenow",
+      "6",
+    );
+    expect(within(running).getByText("6 of 17")).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("1 process running");
+  });
+
+  it("keeps scheduler detail and process counts in the Processes drawer", async () => {
     mockEndpoints();
     render(<LearningView marketId="CA_TSX" />);
-    await waitFor(() => expect(getJsonMock).toHaveBeenCalledTimes(8));
+    await waitFor(() =>
+      expect(getJsonMock).toHaveBeenCalledTimes(INITIAL_REQUESTS),
+    );
 
-    fireEvent.click(screen.getByRole("button", { name: "RESULTS" }));
-    expect(screen.getByText("Model lifecycle")).toBeInTheDocument();
+    const dialog = openTool("Processes");
     expect(
-      screen.getByText(/No statistical models trained yet/),
+      within(dialog).getByText(/Scheduled evidence checks/),
+    ).toBeInTheDocument();
+    expect(within(dialog).getByText("Raw scheduler state")).toBeInTheDocument();
+    expect(
+      within(dialog).getByText("Evidence and automation"),
+    ).toBeInTheDocument();
+    expect(within(dialog).getByText("Process summary")).toBeInTheDocument();
+    expect(
+      within(dialog).getByText(/Unknown is not success/),
+    ).toBeInTheDocument();
+  });
+
+  it("keeps models, observation and the acceptance report read-only in their drawer", async () => {
+    mockEndpoints();
+    render(<LearningView marketId="CA_TSX" />);
+    await waitFor(() =>
+      expect(getJsonMock).toHaveBeenCalledTimes(INITIAL_REQUESTS),
+    );
+
+    const dialog = openTool("Models & monitoring");
+    expect(within(dialog).getByText("Model lifecycle")).toBeInTheDocument();
+    expect(
+      within(dialog).getByText(/No statistical models trained yet/),
     ).toBeInTheDocument();
     expect(
-      screen.getByText("Prospective acceptance progress"),
+      within(dialog).getByText("Prospective observation"),
+    ).toBeInTheDocument();
+    expect(within(dialog).getByText(/model-v2/)).toBeInTheDocument();
+    expect(
+      within(dialog).queryByRole("button", {
+        name: /start|pause|resume|end|revoke/i,
+      }),
+    ).not.toBeInTheDocument();
+    expect(
+      within(dialog).getByText("Prospective acceptance progress"),
     ).toBeInTheDocument();
     expect(
-      screen.getByText(/No frozen acceptance plan is attached/),
+      within(dialog).getByText(/No frozen acceptance plan is attached/),
     ).toBeInTheDocument();
     await waitFor(() =>
-      expect(screen.getByText("Pending")).toBeInTheDocument(),
+      expect(within(dialog).getByText("Pending")).toBeInTheDocument(),
     );
-    expect(screen.getByText("Missed deadline")).toBeInTheDocument();
-    expect(screen.getByText("Capture unknown")).toBeInTheDocument();
-    expect(screen.getByText(/Promotion authorized: No/)).toBeInTheDocument();
+    expect(within(dialog).getByText("Missed deadline")).toBeInTheDocument();
+    expect(within(dialog).getByText("Capture unknown")).toBeInTheDocument();
+    expect(
+      within(dialog).getByText(/Promotion authorized: No/),
+    ).toBeInTheDocument();
   });
 
-  it("keeps raw decision facts and process counts in Diagnostics", async () => {
+  it("keeps raw decision facts in their own drawer", async () => {
     mockEndpoints();
     render(<LearningView marketId="CA_TSX" />);
-    await waitFor(() => expect(getJsonMock).toHaveBeenCalledTimes(8));
+    await waitFor(() =>
+      expect(getJsonMock).toHaveBeenCalledTimes(INITIAL_REQUESTS),
+    );
 
-    fireEvent.click(screen.getByRole("button", { name: "DIAGNOSTICS" }));
-    expect(screen.getByText("Decision drill-down")).toBeInTheDocument();
-    expect(screen.getByText("Process summary")).toBeInTheDocument();
-    expect(screen.getByText(/Unknown is not success/)).toBeInTheDocument();
+    const dialog = openTool("Coordination decisions");
+    expect(within(dialog).getByText("Decision drill-down")).toBeInTheDocument();
   });
 
-  it("labels the schedule as an estimate and surfaces an overdue check as needing review", async () => {
+  it("surfaces an overdue check in the status line, review list and processes", async () => {
     mockEndpoints({
       ...overview,
       pipelineHealth: { ...overview.pipelineHealth, checkOverdue: true },
     });
     render(<LearningView marketId="CA_TSX" />);
-    await waitFor(() => expect(getJsonMock).toHaveBeenCalledTimes(8));
+    await waitFor(() =>
+      expect(getJsonMock).toHaveBeenCalledTimes(INITIAL_REQUESTS),
+    );
 
-    expect(screen.getByText("OVERDUE")).toBeInTheDocument();
-    expect(
-      screen.getByText(/The previous check is overdue for this schedule/),
-    ).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "scheduled check overdue",
+    );
     expect(
       screen.getByText(/scheduled evidence check is overdue for its cadence/),
     ).toBeInTheDocument();
-    expect(screen.getByText("schedule basis")).toBeInTheDocument();
+    const dialog = openTool("Processes");
+    expect(
+      within(dialog).getByText(
+        /The previous check is overdue for this schedule/,
+      ),
+    ).toBeInTheDocument();
+    expect(within(dialog).getByText("schedule basis")).toBeInTheDocument();
   });
 
   it("refreshes the selected challenger report with the overview lifecycle", async () => {
     mockEndpoints();
     render(<LearningView marketId="CA_TSX" />);
-    await waitFor(() => expect(getJsonMock).toHaveBeenCalledTimes(8));
+    await waitFor(() =>
+      expect(getJsonMock).toHaveBeenCalledTimes(INITIAL_REQUESTS),
+    );
 
     const reportCalls = () =>
       getJsonMock.mock.calls.filter(([url]) =>
@@ -297,7 +444,9 @@ describe("LearningView automation-first hierarchy", () => {
     // The overview refresh must also re-read the report it claims is current;
     // the selected experiment stays selected for the follow-up request.
     await waitFor(() => expect(reportCalls()).toBe(2));
-    await waitFor(() => expect(getJsonMock).toHaveBeenCalledTimes(16));
+    await waitFor(() =>
+      expect(getJsonMock).toHaveBeenCalledTimes(INITIAL_REQUESTS * 2),
+    );
   });
 
   it("keeps the selected report when a background refresh fails", async () => {
@@ -319,11 +468,13 @@ describe("LearningView automation-first hierarchy", () => {
       }
     });
     render(<LearningView marketId="CA_TSX" />);
-    await waitFor(() => expect(getJsonMock).toHaveBeenCalledTimes(8));
-
-    fireEvent.click(screen.getByRole("button", { name: "RESULTS" }));
     await waitFor(() =>
-      expect(screen.getByText("Pending")).toBeInTheDocument(),
+      expect(getJsonMock).toHaveBeenCalledTimes(INITIAL_REQUESTS),
+    );
+
+    const dialog = openTool("Models & monitoring");
+    await waitFor(() =>
+      expect(within(dialog).getByText("Pending")).toBeInTheDocument(),
     );
 
     await act(async () => {
@@ -333,9 +484,9 @@ describe("LearningView automation-first hierarchy", () => {
     await waitFor(() => expect(reportCalls).toBe(2));
     // The report still belongs to the selected experiment, so the failed
     // background refresh must not blank it.
-    expect(screen.getByText("Pending")).toBeInTheDocument();
+    expect(within(dialog).getByText("Pending")).toBeInTheDocument();
     expect(
-      screen.getByText(
+      within(dialog).getByText(
         /Report refresh failed.*last successfully loaded report/,
       ),
     ).toBeInTheDocument();
@@ -359,22 +510,24 @@ describe("LearningView automation-first hierarchy", () => {
       return Promise.resolve(endpoint(url));
     });
     render(<LearningView marketId="CA_TSX" />);
-    await waitFor(() => expect(getJsonMock).toHaveBeenCalledTimes(8));
-    fireEvent.click(screen.getByRole("button", { name: "RESULTS" }));
     await waitFor(() =>
-      expect(screen.getByText("Pending")).toBeInTheDocument(),
+      expect(getJsonMock).toHaveBeenCalledTimes(INITIAL_REQUESTS),
     );
-    fireEvent.click(screen.getByRole("button", { name: "PROCESSES" }));
-    fireEvent.click(screen.getByRole("button", { name: /model-v3/ }));
-    fireEvent.click(screen.getByRole("button", { name: "RESULTS" }));
-    expect(screen.queryByText("Pending")).not.toBeInTheDocument();
-    expect(screen.getByText("Loading selected report…")).toBeInTheDocument();
+    const dialog = openTool("Models & monitoring");
+    await waitFor(() =>
+      expect(within(dialog).getByText("Pending")).toBeInTheDocument(),
+    );
+    fireEvent.click(within(dialog).getByRole("button", { name: /model-v3/ }));
+    expect(within(dialog).queryByText("Pending")).not.toBeInTheDocument();
+    expect(
+      within(dialog).getByText("Loading selected report…"),
+    ).toBeInTheDocument();
     await act(async () => {
       resolveReport({
         experiment: otherExperiment,
         report: { ...report, experimentId: otherId },
       });
     });
-    expect(screen.getByText("Pending")).toBeInTheDocument();
+    expect(within(dialog).getByText("Pending")).toBeInTheDocument();
   });
 });

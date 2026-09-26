@@ -34,6 +34,7 @@ Automatic-policy approval requires complete market-scoped reference evidence
 before freezing thresholds. Design and implementation acceptance do not authorize
 activation.
 
+
 ## Decision
 
 ### 1. Authority is limited to simulated funded portfolios
@@ -139,6 +140,7 @@ Failure to freeze: if the reference window does not exist, is shorter than 40
 sessions, overlaps any evaluation window, or its sessions are unreconciled or
 unprovable, `M` cannot be frozen and no challenger may enroll. The gate stays
 closed rather than substituting a permissive number.
+
 
 A future gate-policy version may refreeze `M` from a new prior reference window,
 but it may only evaluate evidence collected after that refreeze; it may not
@@ -455,7 +457,10 @@ Stage A approval is available **now** and does not depend on the reference serie
 implementation can proceed while authority is disabled. Stage B is **blocked until
 the section 4.1 reference window exists** (at least 40 prior, non-overlapping,
 reconciled funded sessions per market) and the numeric `M_market` plus all
-referenced receipts can be frozen. Stage B approval remains revocable
+referenced receipts can be frozen.
+
+
+Stage B approval remains revocable
 at any time.
 
 Deployment of schema and read paths with authority disabled may precede Stage B.

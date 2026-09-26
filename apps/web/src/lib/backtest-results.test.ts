@@ -65,6 +65,28 @@ describe("groupBacktestResults", () => {
     expect(groups[1]!.title).toBe("VWAP Hold");
   });
 
+  it("separates profiles that share one scanner config version", () => {
+    // Production runs carry the scanner config version, which most profiles
+    // share; the profile identity is only in the run name.
+    const shared = "phase8-a79254aa0dec";
+    const orb = run({
+      id: "10000000-0000-4000-8000-0000000000b1",
+      name: "Auto qualification · ORB Standard · profile-orb-standard-v1",
+      configVersion: shared,
+    });
+    const vwap = run({
+      id: "10000000-0000-4000-8000-0000000000b2",
+      name: "Auto qualification · VWAP Hold · profile-vwap-hold-v1",
+      configVersion: shared,
+      completedAt: "2026-09-11T22:00:00.000Z",
+    });
+    const groups = groupBacktestResults([orb, vwap]);
+    expect(groups.map((group) => group.title)).toEqual([
+      "VWAP Hold",
+      "ORB Standard",
+    ]);
+  });
+
   it("keeps manual runs individually addressable", () => {
     const first = run({ id: "10000000-0000-4000-8000-0000000000a1" });
     const second = run({ id: "10000000-0000-4000-8000-0000000000a2" });

@@ -21,6 +21,14 @@ export interface CandleCollectionOptions {
 const DEFAULT_MAX_CONCURRENT_REQUESTS = 2;
 const DEFAULT_MAX_ATTEMPTS = 3;
 const DEFAULT_RETRY_BASE_DELAY_MS = 1_000;
+/** Incremental collection only re-reads the last two bars. A periodic full
+ * session read heals bars the provider published later than that. */
+const FULL_RECONCILE_INTERVAL_MS = 15 * 60_000;
+const INTERVAL_MS: Record<CandleInterval, number> = {
+  OneMinute: 60_000,
+  FiveMinutes: 300_000,
+  OneDay: 86_400_000,
+};
 
 const defaultSleep = (delayMs: number) =>
   new Promise<void>((resolve) => setTimeout(resolve, delayMs));
@@ -30,6 +38,17 @@ export class QuestradeCandleService {
   private readonly maxAttempts: number;
   private readonly retryBaseDelayMs: number;
   private readonly sleep: (delayMs: number) => Promise<void>;
+  private sessionStart?: number;
+  private lastFullCollectionAt?: number;
+  private readonly recent = new Map<string, Map<number, string>>();
+
+  /** Forget delivered bars so the next collection re-reads and resends the
+   * whole session, e.g. after a consumer failed to process delivered bars. */
+  reset(): void {
+    this.sessionStart = undefined;
+    this.lastFullCollectionAt = undefined;
+    this.recent.clear();
+  }
 
   constructor(
     private readonly adapter: MarketDataAdapter,
@@ -65,12 +84,61 @@ export class QuestradeCandleService {
   ): Promise<Candle[]> {
     const endTime = new Date(Math.min(now.getTime(), market.endTime.getTime()));
     if (endTime <= market.startTime || intervals.length === 0) return [];
-
-    return this.collectRange(
-      instruments,
-      { startTime: market.startTime, endTime },
-      intervals,
+    const sessionStart = market.startTime.getTime();
+    if (this.sessionStart !== sessionStart) this.reset();
+    this.sessionStart = sessionStart;
+    const fullCollection =
+      this.lastFullCollectionAt === undefined ||
+      now.getTime() - this.lastFullCollectionAt >= FULL_RECONCILE_INTERVAL_MS;
+    const requests = instruments.flatMap((instrument) =>
+      intervals.map((interval) => ({ instrument, interval })),
     );
+    const results = new Array<Candle[]>(requests.length);
+    let nextRequest = 0;
+    const worker = async () => {
+      while (nextRequest < requests.length) {
+        const index = nextRequest++;
+        const { instrument, interval } = requests[index]!;
+        const key = `${instrument.symbolId}:${interval}`;
+        const prior = this.recent.get(key);
+        const watermark =
+          !fullCollection && prior?.size
+            ? Math.max(...prior.keys())
+            : undefined;
+        const startTime = new Date(
+          Math.max(
+            sessionStart,
+            (watermark ?? sessionStart) - 2 * INTERVAL_MS[interval],
+          ),
+        );
+        const fetched = await this.fetchWithRetry(instrument, interval, {
+          startTime,
+          endTime,
+        });
+        results[index] = fetched.filter(
+          (candle) =>
+            prior?.get(candle.start.getTime()) !== candleFingerprint(candle),
+        );
+      }
+    };
+    await Promise.all(
+      Array.from(
+        { length: Math.min(this.maxConcurrentRequests, requests.length) },
+        () => worker(),
+      ),
+    );
+    const changed = results.flat();
+    await this.repository.saveCandles(changed);
+    if (fullCollection) this.lastFullCollectionAt = now.getTime();
+    for (const candle of changed) {
+      const key = `${candle.symbolId}:${candle.interval}`;
+      const recent = this.recent.get(key) ?? new Map<number, string>();
+      // Keep the whole session so a full reconciliation returns only bars the
+      // provider actually revised or published late.
+      recent.set(candle.start.getTime(), candleFingerprint(candle));
+      this.recent.set(key, recent);
+    }
+    return changed;
   }
 
   async collectRange(
@@ -126,6 +194,19 @@ export class QuestradeCandleService {
       }
     }
   }
+}
+
+function candleFingerprint(candle: Candle): string {
+  return JSON.stringify([
+    candle.end.getTime(),
+    candle.open,
+    candle.high,
+    candle.low,
+    candle.close,
+    candle.volume,
+    candle.source,
+    candle.isComplete,
+  ]);
 }
 
 function isTransientCandleError(error: unknown): boolean {

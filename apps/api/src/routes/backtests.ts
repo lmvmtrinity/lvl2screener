@@ -1,6 +1,8 @@
+import { readImportProgress } from "../historical-archive/import-progress.js";
 import {
   createBacktestSchema,
   createFundedHistoricalAutomationPolicySchema,
+  backtestDataSourceSchema,
   marketIdSchema,
   revokeFundedHistoricalAutomationPolicySchema,
 } from "@tsx-scanner/contracts";
@@ -22,6 +24,10 @@ export function registerBacktestRoutes(
   app: FastifyInstance,
   options: BuildAppOptions,
 ): void {
+  app.get("/api/historical-imports/progress", async () => ({
+    tasks: await readImportProgress(),
+    observedAt: new Date().toISOString(),
+  }));
   app.get<{ Querystring: { marketId?: string } }>(
     "/api/backtest-automation/status",
     async (request, reply) => {
@@ -86,7 +92,7 @@ export function registerBacktestRoutes(
     },
   );
 
-  app.get<{ Querystring: { marketId?: string } }>(
+  app.get<{ Querystring: { marketId?: string; source?: string } }>(
     "/api/captured-history/availability",
     async (request, reply) => {
       if (!options.backtestService?.getCapturedHistoryAvailability)
@@ -100,8 +106,16 @@ export function registerBacktestRoutes(
         return reply
           .code(400)
           .send({ error: "marketId must be CA_TSX or US_EQUITIES" });
+      const source = backtestDataSourceSchema.safeParse(
+        request.query.source ?? "CAPTURED_QUOTES",
+      );
+      if (!source.success)
+        return reply.code(400).send({
+          error: "source must be CAPTURED_QUOTES or HISTORICAL_ARCHIVE",
+        });
       return options.backtestService.getCapturedHistoryAvailability(
         market.data,
+        source.data,
       );
     },
   );
@@ -190,7 +204,11 @@ export function registerBacktestRoutes(
       if (!service) return;
       const requested = parseLimit(reply, request.query.limit, 100, 1, 200);
       if (requested === undefined) return;
-      return { runs: await service.listRuns(requested) };
+      return {
+        runs: (await service.listRuns(requested)).map(
+          ({ replayInput: _replayInput, ...summary }) => summary,
+        ),
+      };
     },
   );
 

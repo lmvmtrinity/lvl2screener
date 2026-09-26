@@ -53,7 +53,7 @@ const SCENARIOS = ["healthy", "waiting", "failure", "empty"];
 // differ by animation phase. Freeze them for deterministic evidence.
 const DISABLE_ANIMATIONS_CSS =
   "*, *::before, *::after { animation: none !important; transition: none !important; }";
-const MARKETS = { CA: "CA_TSX", US: "US_EQUITIES" };
+const MARKET_LABELS = { CA: "TSX · CAD", US: "US · USD" };
 const VIEWPORTS = [
   { width: "desktop", size: { width: 1440, height: 900 } },
   { width: "narrow", size: { width: 390, height: 844 } },
@@ -77,7 +77,7 @@ const selectedMarkets = (argValue("markets") ?? "CA,US")
   .map((value) => value.toUpperCase())
   .filter(Boolean);
 for (const market of selectedMarkets)
-  if (!MARKETS[market]) throw new Error(`Unknown market ${market}`);
+  if (!MARKET_LABELS[market]) throw new Error(`Unknown market ${market}`);
 const skipSection = process.argv.includes("--skip-section");
 const keepShots = process.argv.includes("--keep-shots");
 // `--with-toast` sends a second live frame carrying a fresh alert after the
@@ -224,18 +224,18 @@ function websocketInitScript(scenario, includeToast) {
 }
 
 const NAV_MATCHERS = {
-  SCANNER: [{ role: "button", name: "SCANNER", exact: true }],
-  DETAIL: [{ role: "button", name: "SCANNER", exact: true }],
-  DAILY: [{ role: "button", name: /^DAILY LIST/ }],
-  DISCOVERY: [{ role: "button", name: "DISCOVERY", exact: true }],
+  SCANNER: [{ role: "button", name: "Scanner", exact: true }],
+  DETAIL: [{ role: "button", name: "Scanner", exact: true }],
+  DAILY: [{ role: "button", name: /^Daily list/ }],
+  DISCOVERY: [{ role: "button", name: "Discovery", exact: true }],
   BOT: [
-    { role: "button", name: /^BOT · / },
+    { role: "button", name: /^Bot · / },
     { role: "button", name: "BOT", exact: true },
   ],
-  PERFORMANCE: [{ role: "button", name: "BOT PERFORMANCE", exact: true }],
-  LEARNING: [{ role: "button", name: "LEARNING", exact: true }],
-  LAB: [{ role: "button", name: "STRATEGY LAB", exact: true }],
-  BACKTESTS: [{ role: "button", name: "BACKTESTS", exact: true }],
+  PERFORMANCE: [{ role: "button", name: "Bot performance", exact: true }],
+  LEARNING: [{ role: "button", name: "Learning", exact: true }],
+  LAB: [{ role: "button", name: "Strategy lab", exact: true }],
+  BACKTESTS: [{ role: "button", name: "Backtests", exact: true }],
 };
 
 const PAGE_SECTIONS = {
@@ -277,15 +277,45 @@ const PAGE_SECTIONS = {
   PERFORMANCE: [
     {
       name: "independent",
-      matchers: [{ role: "button", name: "INDEPENDENT", exact: true }],
+      matchers: [{ role: "button", name: "Independent", exact: true }],
     },
   ],
   LEARNING: [
-    { name: "processes", matchers: [{ role: "button", name: /^processes$/i }] },
-    { name: "results", matchers: [{ role: "button", name: /^results$/i }] },
+    {
+      name: "results",
+      optional: true,
+      action: async (page) => {
+        await page.locator(".evidence-row button").first().click();
+      },
+    },
+    {
+      name: "processes",
+      action: async (page) => {
+        await page.getByRole("button", { name: "More learning tools" }).click();
+        await page.getByRole("menuitem", { name: "Processes" }).click();
+      },
+    },
+    {
+      name: "models",
+      action: async (page) => {
+        await page.keyboard.press("Escape");
+        await page.waitForTimeout(300);
+        await page.getByRole("button", { name: "More learning tools" }).click();
+        await page
+          .getByRole("menuitem", { name: "Models & monitoring" })
+          .click();
+      },
+    },
     {
       name: "diagnostics",
-      matchers: [{ role: "button", name: /^diagnostics$/i }],
+      action: async (page) => {
+        await page.keyboard.press("Escape");
+        await page.waitForTimeout(300);
+        await page.getByRole("button", { name: "More learning tools" }).click();
+        await page
+          .getByRole("menuitem", { name: "Coordination decisions" })
+          .click();
+      },
     },
   ],
   LAB: [
@@ -312,21 +342,38 @@ const PAGE_SECTIONS = {
     },
   ],
   BACKTESTS: [
-    { name: "results", matchers: [{ role: "tab", name: /^results$/i }] },
-    { name: "history", matchers: [{ role: "tab", name: /^history$/i }] },
+    {
+      name: "results",
+      optional: true,
+      action: async (page) => {
+        await page.locator(".result-row button").first().click();
+      },
+    },
     {
       name: "detail",
       optional: true,
       action: async (page) => {
-        await page.getByRole("tab", { name: /^results$/i }).click();
+        await page.getByRole("button", { name: /^Open full result/ }).click();
+      },
+    },
+    {
+      name: "history",
+      action: async (page) => {
+        await page.keyboard.press("Escape");
         await page.waitForTimeout(300);
-        await page.locator(".result-main button").first().click();
+        await page.getByRole("button", { name: "More backtest tools" }).click();
+        await page.getByRole("menuitem", { name: "Run history" }).click();
       },
     },
     {
       name: "manual",
       optional: true,
-      matchers: [{ role: "button", name: "Manual replay", exact: true }],
+      action: async (page) => {
+        await page.keyboard.press("Escape");
+        await page.waitForTimeout(300);
+        await page.getByRole("button", { name: "More backtest tools" }).click();
+        await page.getByRole("menuitem", { name: "Manual replay" }).click();
+      },
     },
     {
       name: "settings",
@@ -334,10 +381,9 @@ const PAGE_SECTIONS = {
       action: async (page) => {
         await page.keyboard.press("Escape");
         await page.waitForTimeout(300);
-        await page.getByRole("tab", { name: /^overview$/i }).click();
-        await page.waitForTimeout(300);
+        await page.getByRole("button", { name: "More backtest tools" }).click();
         await page
-          .getByRole("button", { name: "Automation settings", exact: true })
+          .getByRole("menuitem", { name: "Automation settings" })
           .click();
       },
     },
@@ -475,7 +521,10 @@ async function openPage(page, pageName, market) {
   await nav.waitFor({ state: "visible", timeout: 45_000 });
   await page.addStyleTag({ content: DISABLE_ANIMATIONS_CSS });
   if (market === "US") {
-    await page.getByLabel("Market").selectOption(MARKETS[market]);
+    await page
+      .getByRole("group", { name: "Market" })
+      .getByRole("button", { name: MARKET_LABELS[market] })
+      .click();
     await page.waitForTimeout(600);
   }
   await clickFirstMatch(nav, NAV_MATCHERS[pageName]);

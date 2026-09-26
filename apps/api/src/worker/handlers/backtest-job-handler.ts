@@ -25,6 +25,11 @@ import {
   type ResearchJobHandler,
 } from "../research-worker.js";
 import { replayInputCandidateCount } from "../../backtests/replay-candidate-plan.js";
+import {
+  discloseArchiveEvidence,
+  discloseArchiveResult,
+  isArchiveRun,
+} from "../../historical-archive/archive-disclosure.js";
 
 /** W8: the fully chunked example job type. Unlike the other three handlers (which run the existing
  * synchronous service as one atomic unit inside a job -- see synchronous-job-handler.ts), this
@@ -65,7 +70,9 @@ export class BacktestJobHandler implements ResearchJobHandler {
     const input = parsed.data;
 
     const capturedHistoryAvailability =
-      await this.store.getCapturedHistoryAvailability(input.marketId);
+      await this.store.getCapturedHistoryAvailability(input.marketId, {
+        source: input.dataSource,
+      });
     const violation = checkBacktestRequest(input, capturedHistoryAvailability);
     if (violation)
       throw new CategorizedError(
@@ -97,7 +104,10 @@ export class BacktestJobHandler implements ResearchJobHandler {
       policy,
     );
     const hashes: Record<string, string> = {};
-    if (this.lineage)
+    // Research lineage verifies retained captured inputs; archive runs have
+    // none to verify and stay unbound (ADR-019).
+    const lineage = isArchiveRun(input) ? undefined : this.lineage;
+    if (lineage)
       for (const date of dates) {
         if ((await context.heartbeat()).cancellationRequested)
           throw new CancelledError();
@@ -106,7 +116,7 @@ export class BacktestJobHandler implements ResearchJobHandler {
           await this.store.loadReplaySession(replayInput, policy, date),
         );
       }
-    const researchEvidence = await this.lineage?.resolve({
+    const researchEvidence = await lineage?.resolve({
       kind: "BACKTEST",
       marketId: input.marketId,
       scope: { input, replayInput },
@@ -144,7 +154,7 @@ export class BacktestJobHandler implements ResearchJobHandler {
         run.id,
         configVersion,
         input,
-        undefined,
+        input.economics ? { economics: input.economics } : undefined,
         researchEvidence !== undefined,
       );
       if (dates.length === 0) {
@@ -174,23 +184,37 @@ export class BacktestJobHandler implements ResearchJobHandler {
           policy,
         });
       }
-      const result = accumulator.finish().output;
-      const evidence = buildBacktestEvidence(
+      const authoritative = accumulator.finish();
+      const archive = isArchiveRun(input);
+      const result = archive
+        ? discloseArchiveResult(authoritative.output)
+        : authoritative.output;
+      const builtEvidence = buildBacktestEvidence(
         result,
         new Date(),
         input.marketId,
       );
-      const completed = await this.store.complete(run.id, result, evidence);
+      const evidence = archive
+        ? discloseArchiveEvidence(builtEvidence)
+        : builtEvidence;
+      const completed = await this.store.complete(
+        run.id,
+        result,
+        evidence,
+        authoritative.opportunityCaptures,
+      );
       const strategyEvidence = buildStrategyBacktestEvidence(
         result,
         new Date(),
         input.strategies,
         input.marketId,
       );
-      await this.profileEvidence?.linkBacktestEvidence(
-        completed,
-        strategyEvidence,
-      );
+      // Profile comparisons stay on captured history; archive runs are not linked.
+      if (!archive)
+        await this.profileEvidence?.linkBacktestEvidence(
+          completed,
+          strategyEvidence,
+        );
       return { resultRefId: completed.id };
     } catch (error) {
       if (error instanceof CancelledError) {

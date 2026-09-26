@@ -26,7 +26,20 @@ import { PostgresProfileStore } from "../src/profiles/profile-repository.js";
 const DATABASE_URL = isolatedDatabaseUrl("PERSISTENCE_TEST_DATABASE_URL");
 
 const BULL_FLAG_PROFILE_ID = "10000000-0000-4000-8000-000000000088"; // seeded in 038-remaining-setup-profiles.sql
-const BULL_FLAG_CONFIG_ID = "10000000-0000-4000-8000-000000000098";
+
+/** Qualification counts evidence recorded under the profile's current
+ * configuration, which migration 153 moved to a spread-stable version. */
+async function currentBullFlagConfig(
+  db: Pool,
+): Promise<{ id: string; configVersion: string }> {
+  const result = await db.query<{ id: string; configVersion: string }>(
+    `SELECT c.id,c.config_version AS "configVersion"
+     FROM scanner_profile p JOIN scanner_profile_config c ON c.id=p.current_config_id
+     WHERE p.id=$1`,
+    [BULL_FLAG_PROFILE_ID],
+  );
+  return result.rows[0]!;
+}
 const ORB_STANDARD_PROFILE_ID = "10000000-0000-4000-8000-000000000081";
 // Reserved id space so this fixture's rows are identifiable and removable in a shared dev database.
 const RUN_PRIOR = "2f000000-0000-4000-8000-000000000001";
@@ -129,6 +142,7 @@ async function seedCohort(
      RETURNING id`,
   );
   const instrumentId = inst.rows[0]?.id;
+  const config = await currentBullFlagConfig(db);
   await db.query(
     `INSERT INTO paper_bot_run(id,source,session_date,scheduled_close_at,status,execution_model_version,assumptions)
      VALUES($1,'LIVE',$2::date,now(),'RUNNING',$4,$3::jsonb)`,
@@ -147,14 +161,15 @@ async function seedCohort(
        profile_config_id,config_version,profile_parameters,strategy_key,strategy_version,signal_timestamp,score,
        reason_codes,source_event_payload,eligibility_status)
      VALUES($1,$2,gen_random_uuid(),$5,'QUALIFY.TO',$3,'Bull Flag',$4,
-       'profile-bull-flag-v1','{}'::jsonb,'BULL_FLAG','1.0.0',now(),80,'[]'::jsonb,
+       $6,'{}'::jsonb,'BULL_FLAG','1.0.0',now(),80,'[]'::jsonb,
        '{"signalSemanticsVersion":"setup-semantics-v2"}'::jsonb,'ELIGIBLE')`,
     [
       observationId,
       runId,
       BULL_FLAG_PROFILE_ID,
-      BULL_FLAG_CONFIG_ID,
+      config.id,
       instrumentId,
+      config.configVersion,
     ],
   );
   // Every observation carries both models; only the canonical QUOTE one may count.
@@ -244,12 +259,13 @@ async function seedBoundaryCohort(
      RETURNING id`,
   );
   boundaryInstrumentIds = seeded.rows.map((row) => row.id);
+  const config = await currentBullFlagConfig(db);
   await db.query(
     `INSERT INTO paper_signal_observation(run_id,source_event_id,instrument_id,symbol,profile_id,profile_name,
        profile_config_id,config_version,profile_parameters,strategy_key,strategy_version,signal_timestamp,score,
        reason_codes,source_event_payload,eligibility_status)
      SELECT $1,gen_random_uuid(),id,'BOUNDARY.TO',$2,'Bull Flag',$3,
-       'profile-bull-flag-v1','{}'::jsonb,'BULL_FLAG','1.0.0',
+       $5,'{}'::jsonb,'BULL_FLAG','1.0.0',
        '2199-01-04T14:00:00Z'::timestamptz + ((ordinal-1)/50)*interval '1 day'
          + ((ordinal-1)%50)*interval '2 minutes',80,'[]'::jsonb,
        '{"signalSemanticsVersion":"setup-semantics-v2"}'::jsonb,'ELIGIBLE'
@@ -257,8 +273,9 @@ async function seedBoundaryCohort(
     [
       RUN_CURRENT,
       BULL_FLAG_PROFILE_ID,
-      BULL_FLAG_CONFIG_ID,
+      config.id,
       boundaryInstrumentIds,
+      config.configVersion,
     ],
   );
   await db.query(

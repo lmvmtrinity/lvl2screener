@@ -33,6 +33,8 @@ import type {
   PaperCoordinationSummary,
   LearningAutomationRun,
   LearningDashboardOverview,
+  StrategyLearningReadiness,
+  StrategyLearningScope,
   MarketId,
   PaperCohortCurvePoint,
   PaperEvidenceComparison,
@@ -62,6 +64,13 @@ import type {
   FrozenStudyPlan,
   StudyAuthorizationRecord,
   StudyExecutionAuthorization,
+  SignalModelResearchAuthorization,
+  SignalModelResearchAuthorizationRecord,
+  SignalModelResearchPlan,
+  SignalModelResearchPreflight,
+  SignalModelResearchDispatch,
+  SignalModelResearchReadiness,
+  SignalModelResearchReport,
   ScannerProfile,
   StatisticalModel,
   StatisticalPredictionBatch,
@@ -74,6 +83,7 @@ import type {
   UpdateScannerProfile,
   ChallengerExperiment,
   ChallengerObservationReport,
+  FundedShadowStatus,
   RegisterChallenger,
   ExperimentAction,
   ExecutionDiagnosticResponse,
@@ -82,6 +92,9 @@ import type {
   RevokeFundedHistoricalAutomationPolicy,
 } from "@tsx-scanner/contracts";
 import type { FastifyServerOptions } from "fastify";
+import type { DailyListSeeder } from "./universe/daily-list-seeder.js";
+import type { PostgresDailySeedRepository } from "./universe/daily-seed-repository.js";
+import type { DailySeedRescan } from "./universe/daily-seed-rescan.js";
 import type { FoundationStatusService } from "./foundation/status-service.js";
 import type { OperationalStatusInput } from "./foundation/operational-status.js";
 import type { ObservabilitySnapshot } from "./observability/metrics.js";
@@ -188,6 +201,16 @@ export interface DiscoveryApi {
   fastFunnelStatus?(marketId: MarketId): Promise<FastFunnelStatus>;
 }
 
+export type DailySeedApi = Pick<
+  DailyListSeeder,
+  "status" | "preview" | "runNow" | "addTop" | "poolSize"
+>;
+export type DailySeedRescanApi = Pick<DailySeedRescan, "runNow">;
+export type DailySeedRepositoryApi = Pick<
+  PostgresDailySeedRepository,
+  "history" | "legacy"
+>;
+
 export interface BuildAppOptions {
   statusService: FoundationStatusService;
   logger?: FastifyServerOptions["logger"];
@@ -199,8 +222,16 @@ export interface BuildAppOptions {
   marketDataServices?: Partial<Record<MarketId, MarketDataApi>>;
   discoveryService?: DiscoveryApi;
   discoveryServices?: Partial<Record<MarketId, DiscoveryApi>>;
+  /** Pre-market daily-list seed per market (`daily-seed-v1`). */
+  dailySeeders?: Partial<Record<MarketId, DailySeedApi>>;
+  dailySeedRescans?: Partial<Record<MarketId, DailySeedRescanApi>>;
+  dailySeedRepository?: DailySeedRepositoryApi;
   backtestService?: BacktestApi;
   backtestAutomationService?: BacktestAutomationApi;
+  /** FP04 read-only funded shadow observation status for `/metrics`. */
+  fundedShadowStatusService?: {
+    status(marketId: MarketId): Promise<FundedShadowStatus>;
+  };
   fundedHistoricalPolicyService?: FundedHistoricalPolicyApi;
   fundedHistoricalService?: FundedHistoricalReplayApi;
   profileService?: ProfileApi;
@@ -213,6 +244,7 @@ export interface BuildAppOptions {
   researchEvidenceService?: ResearchEvidenceApi;
   coverageRequestService?: CoverageRequestApi;
   strategyStudyService?: StrategyStudyApi;
+  signalModelResearchService?: SignalModelResearchApi;
   challengerExperimentService?: ChallengerExperimentApi;
   learningDashboardService?: LearningDashboardApi;
   brokerMetrics?: {
@@ -341,6 +373,7 @@ export interface BacktestApi {
   getRun(id: string): Promise<BacktestRun>;
   getCapturedHistoryAvailability?(
     marketId?: MarketId,
+    source?: CreateBacktest["dataSource"],
   ): Promise<CapturedHistoryAvailability>;
   createRun(input: CreateBacktest): Promise<BacktestRun>;
   compare(ids: string[]): Promise<BacktestComparison>;
@@ -412,6 +445,15 @@ export interface LearningDashboardApi {
   overview(): Promise<LearningDashboardOverview>;
   automationRuns(limit?: number): Promise<LearningAutomationRun[]>;
   evidenceAutomation?(marketId: MarketId): Promise<EvidenceAutomationStage[]>;
+  strategyLearningReadiness?(
+    scope: StrategyLearningScope,
+    cutoff?: string,
+  ): Promise<StrategyLearningReadiness>;
+  backtestStrategyLearningReadiness?(
+    runId: string,
+    strategyKey: string,
+    marketId: MarketId,
+  ): Promise<StrategyLearningReadiness>;
 }
 
 export interface ResearchEvidenceApi {
@@ -448,6 +490,32 @@ export interface StrategyStudyApi {
     id: string,
     idempotencyKey: string,
   ): Promise<StudyAuthorizationRecord | null>;
+}
+
+export interface SignalModelResearchApi {
+  preflight(
+    plan: SignalModelResearchPlan,
+  ): Promise<SignalModelResearchPreflight>;
+  authorize(
+    authorization: SignalModelResearchAuthorization,
+    plan: SignalModelResearchPlan,
+    idempotencyKey: string,
+  ): Promise<SignalModelResearchAuthorizationRecord>;
+  list(
+    marketId: MarketId,
+    limit?: number,
+  ): Promise<SignalModelResearchAuthorizationRecord[]>;
+  get(id: string): Promise<SignalModelResearchAuthorizationRecord | null>;
+  readiness(id: string): Promise<SignalModelResearchReadiness | null>;
+  report(id: string): Promise<SignalModelResearchReport | null>;
+  revoke(
+    id: string,
+    idempotencyKey: string,
+  ): Promise<SignalModelResearchAuthorizationRecord | null>;
+  dispatch(
+    id: string,
+    idempotencyKey: string,
+  ): Promise<SignalModelResearchDispatch>;
 }
 
 export interface ChallengerExperimentApi {

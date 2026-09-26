@@ -91,11 +91,14 @@ export function parametersFrom(
   descriptors: ParameterDescriptor[],
   draft: Record<string, string>,
 ): StrategyParameters {
-  const values: Record<string, string | number | undefined> = {
+  const values: Record<string, string | number | null | undefined> = {
     ...defaultStrategyParameters(),
   };
   for (const descriptor of descriptors)
-    values[descriptor.key] = Number(draft[descriptor.key]);
+    values[descriptor.key] =
+      descriptor.type === "time"
+        ? draft[descriptor.key] || null
+        : Number(draft[descriptor.key]);
   return {
     ...values,
     stopPolicy: draft.stopPolicy as StrategyParameters["stopPolicy"],
@@ -112,7 +115,9 @@ export function draftFrom(
       descriptors.map((descriptor) => [
         descriptor.key,
         String(
-          (parameters as unknown as Record<string, number>)[descriptor.key],
+          (parameters as unknown as Record<string, number | string | null>)[
+            descriptor.key
+          ] ?? (descriptor.type === "time" ? "" : descriptor.default),
         ),
       ]),
     ),
@@ -362,13 +367,17 @@ export function ParameterFields({
                     CONTROL_CLASSES,
                     descriptor.fixed && "tw:cursor-not-allowed tw:opacity-55",
                   )}
-                  type="number"
-                  step={descriptor.step}
-                  min={descriptor.minimum}
-                  max={descriptor.maximum}
+                  type={descriptor.type === "time" ? "time" : "number"}
+                  step={descriptor.type === "time" ? 60 : descriptor.step}
+                  min={
+                    descriptor.type === "time" ? undefined : descriptor.minimum
+                  }
+                  max={
+                    descriptor.type === "time" ? undefined : descriptor.maximum
+                  }
                   value={
                     descriptor.fixed
-                      ? descriptor.default
+                      ? (descriptor.default ?? "")
                       : (draft[descriptor.key] ?? "")
                   }
                   readOnly={descriptor.fixed}
@@ -404,7 +413,7 @@ export function ParameterFields({
                       "tw:cursor-not-allowed tw:opacity-55",
                     )}
                     type="number"
-                    value={descriptor.default}
+                    value={descriptor.default ?? ""}
                     readOnly
                     disabled
                   />
@@ -777,7 +786,7 @@ export function StrategyLab({
     : "";
   return (
     <>
-      <section className="tw:mb-4 tw:grid tw:grid-cols-[minmax(320px,0.7fr)_minmax(600px,1.3fr)] tw:gap-4 tw:below-980:grid-cols-1">
+      <section className="tw:mb-4 tw:grid tw:grid-cols-[minmax(320px,0.7fr)_minmax(600px,1.3fr)] tw:gap-4 tw:max-[1200px]:grid-cols-1">
         <form
           className="lab-form tw:overflow-hidden tw:rounded-panel tw:border tw:border-line tw:bg-surface"
           onSubmit={(event) => void create(event)}
@@ -1024,7 +1033,7 @@ export function StrategyLab({
       </section>
       {error && <p className="error-banner">{error}</p>}
       {editProfile && (
-        <section className="tw:mb-4 tw:grid tw:grid-cols-[minmax(320px,0.7fr)_minmax(600px,1.3fr)] tw:gap-4 tw:below-980:grid-cols-1">
+        <section className="tw:mb-4 tw:grid tw:grid-cols-[minmax(320px,0.7fr)_minmax(600px,1.3fr)] tw:gap-4 tw:max-[1200px]:grid-cols-1">
           <form
             className="lab-form tw:overflow-hidden tw:rounded-panel tw:border tw:border-line tw:bg-surface"
             onSubmit={(event) => void saveParameters(event)}

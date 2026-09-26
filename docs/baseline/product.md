@@ -28,9 +28,11 @@ constraints, not a funded brokerage account.
    readiness, automation history, model lifecycle, and shadow experiments.
 
 The daily list is persisted and scoped to the trading date. Reference universe
-screening metrics do not silently remove valid manually supplied names. Automatic
-external-catalog discovery is under implementation,
-not an enabled substitute for manual intake.
+screening metrics do not silently remove valid manually supplied names. When
+enabled, the [pre-market daily seed](operations-runbook.md#pre-market-daily-list-seed)
+fills an empty list before the open with ranked liquid stocks; an operator list
+always takes precedence. The full-catalog discovery engine is frozen
+([ADR-018](../adr/018-pre-market-daily-seed-replaces-discovery-engine.md)).
 
 ## Markets and sessions
 

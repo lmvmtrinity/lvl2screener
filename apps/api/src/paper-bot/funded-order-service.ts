@@ -16,6 +16,17 @@ import { fundedAccountSummary, type FundedLedger } from "./funded-ledger.js";
 import { requestQuoteSessionClose } from "./execution-core.js";
 import { expireEntryOrder, type PendingEntryOrder } from "./pending-order.js";
 
+export class FundedPriorRunActiveError extends Error {
+  readonly code = "FUNDED_PRIOR_RUN_ACTIVE" as const;
+  readonly priorRunId: string;
+
+  constructor(priorRunId: string) {
+    super("Funded account has an active run");
+    this.name = "FundedPriorRunActiveError";
+    this.priorRunId = priorRunId;
+  }
+}
+
 export interface FundedCancellationNoOp {
   readonly status: "NO_OP";
   readonly orderId: string;
@@ -134,7 +145,7 @@ export class FundedOrderService {
         ).rows;
         for (const prior of priorRuns) {
           if (prior.status !== "COMPLETED")
-            throw new Error("Funded account has an active run");
+            throw new FundedPriorRunActiveError(prior.run_id);
           const unresolved = await client.query(
             `SELECT 1 FROM paper_entry_order
              WHERE run_id=$1 AND (state->>'status'='PENDING'
@@ -850,14 +861,18 @@ export class FundedOrderService {
               });
             }
           }
-          events.push({
-            id: `post-fill-mark:${this.runId}:${instrumentId}:${quote.timestamp}`,
-            at: quote.timestamp,
-            currency: this.currency,
-            type: "MARK",
-            instrumentId,
-            bid: quote.bid,
-          });
+          // The first mark is enough when this allocation changed no economic
+          // state. A second mark is needed after a fill or release so the
+          // resulting position receives the quote's final price.
+          if (events.length > 1)
+            events.push({
+              id: `post-fill-mark:${this.runId}:${instrumentId}:${quote.timestamp}`,
+              at: quote.timestamp,
+              currency: this.currency,
+              type: "MARK",
+              instrumentId,
+              bid: quote.bid,
+            });
           const marks = events.filter((event) => event.type === "MARK");
           const sales = events.filter((event) => event.type === "SELL");
           const other = events.filter(

@@ -34,6 +34,14 @@ export type ContextSignalName = z.infer<typeof contextSignalNameSchema>;
 export const analysisKindSchema = z.enum(["SETUP", "CONTEXT"]);
 export type AnalysisKind = z.infer<typeof analysisKindSchema>;
 export const strategyParametersSchema = z.object({
+  latestReadyTime: z
+    .string()
+    .regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/)
+    .nullable()
+    .optional(),
+  maxVwapDistanceAtr: z.number().nonnegative().max(20).optional(),
+  maxChangeFromOpenAtr: z.number().nonnegative().max(20).optional(),
+  minSectorRelativeStrengthPct: z.number().nonnegative().max(20).optional(),
   stopPolicy: z
     .enum(["HYBRID", "PATTERN_INVALIDATION", "NEAREST_SUPPORT"])
     .optional(),
@@ -74,6 +82,13 @@ export const strategyParametersSchema = z.object({
     .optional(),
   rsiSetupTimeoutMinutes: z.number().int().min(5).max(120).optional(),
   dailyEmaFilterEnabled: z.number().int().min(0).max(1).optional(),
+  spreadConfirmQuotes: z.number().int().min(1).max(20).optional(),
+  spreadConfirmSeconds: z.number().nonnegative().max(120).optional(),
+  spreadRecoveryPct: z.number().min(50).max(100).optional(),
+  spreadMinTicks: z.number().int().min(0).max(10).optional(),
+  stopMinAtrFraction: z.number().nonnegative().max(1).optional(),
+  stopMinSpreads: z.number().nonnegative().max(20).optional(),
+  targetMinR: z.number().nonnegative().max(5).optional(),
 });
 export type StrategyParameters = z.infer<typeof strategyParametersSchema>;
 
@@ -91,11 +106,11 @@ export const parameterDescriptorSchema = z.object({
   description: z.string().min(1),
   unit: z.string().nullable(),
   group: parameterGroupSchema,
-  type: z.enum(["number", "integer"]),
+  type: z.enum(["number", "integer", "time"]),
   minimum: z.number(),
   maximum: z.number(),
   step: z.number().positive(),
-  default: z.number(),
+  default: z.union([z.number(), z.string(), z.null()]),
   /** Fixed parameters are displayed for transparency but cannot be edited on a profile. */
   fixed: z.boolean().default(false),
 });
@@ -109,6 +124,62 @@ export const strategyParameterDescriptors: Record<
   StrategyParameterKey,
   ParameterDescriptor
 > = {
+  latestReadyTime: {
+    key: "latestReadyTime",
+    label: "Latest new READY time",
+    type: "time",
+    unit: "market local",
+    group: "COMMON",
+    minimum: 0,
+    maximum: 20,
+    step: 0.1,
+    default: null,
+    fixed: false,
+    description:
+      "Block new READY transitions at or after this time. Blank disables the filter.",
+  },
+  maxVwapDistanceAtr: {
+    key: "maxVwapDistanceAtr",
+    label: "Breakout VWAP distance maximum",
+    type: "number",
+    unit: "ATR",
+    group: "COMMON",
+    minimum: 0,
+    maximum: 20,
+    step: 0.1,
+    default: 0,
+    fixed: false,
+    description:
+      "For prior-day and high-of-day breakouts, block new READY above this distance from VWAP. 0 disables; missing values wait.",
+  },
+  maxChangeFromOpenAtr: {
+    key: "maxChangeFromOpenAtr",
+    label: "Breakout change from open maximum",
+    type: "number",
+    unit: "ATR",
+    group: "COMMON",
+    minimum: 0,
+    maximum: 20,
+    step: 0.1,
+    default: 0,
+    fixed: false,
+    description:
+      "For prior-day and high-of-day breakouts, block new READY above this change from open. 0 disables; missing values wait.",
+  },
+  minSectorRelativeStrengthPct: {
+    key: "minSectorRelativeStrengthPct",
+    label: "VWAP hold sector strength minimum",
+    type: "number",
+    unit: "percentage points",
+    group: "COMMON",
+    minimum: 0,
+    maximum: 20,
+    step: 0.1,
+    default: 0,
+    fixed: false,
+    description:
+      "For VWAP hold, require stock minus sector return since open at least this large. 0 disables; missing or stale sector values wait.",
+  },
   rvolAtTimeMin: {
     key: "rvolAtTimeMin",
     label: "Relative volume minimum",
@@ -135,6 +206,104 @@ export const strategyParameterDescriptors: Record<
     default: 0.25,
     fixed: false,
     description: `Bid/ask spread above this percentage rejects the candidate outright. Separate from the fixed preferred spread threshold of ${SPREAD_PREFERRED_MAX_PCT}%.`,
+  },
+  spreadConfirmQuotes: {
+    key: "spreadConfirmQuotes",
+    label: "Spread confirmation quotes",
+    unit: "quotes",
+    group: "COMMON",
+    type: "integer",
+    minimum: 1,
+    maximum: 20,
+    step: 1,
+    default: 1,
+    fixed: false,
+    description:
+      "Consecutive quotes above the hard spread limit before the setup is blocked. 1 blocks on the first wide quote.",
+  },
+  spreadConfirmSeconds: {
+    key: "spreadConfirmSeconds",
+    label: "Spread confirmation seconds",
+    unit: "s",
+    group: "COMMON",
+    type: "number",
+    minimum: 0,
+    maximum: 120,
+    step: 1,
+    default: 0,
+    fixed: false,
+    description:
+      "Seconds the spread must stay above the hard limit before the setup is blocked. A setup cannot become READY while the spread is above the limit.",
+  },
+  spreadRecoveryPct: {
+    key: "spreadRecoveryPct",
+    label: "Spread recovery %",
+    unit: "% of limit",
+    group: "COMMON",
+    type: "number",
+    minimum: 50,
+    maximum: 100,
+    step: 1,
+    default: 100,
+    fixed: false,
+    description:
+      "After a spread block, the spread must fall to this share of the hard limit before the setup re-arms. 100 re-arms at the limit itself.",
+  },
+  spreadMinTicks: {
+    key: "spreadMinTicks",
+    label: "Spread tick floor",
+    unit: "ticks",
+    group: "COMMON",
+    type: "integer",
+    minimum: 0,
+    maximum: 10,
+    step: 1,
+    default: 0,
+    fixed: false,
+    description:
+      "Minimum allowed spread in price ticks, so low-priced symbols are not rejected by tick size alone. 0 disables the floor.",
+  },
+  stopMinAtrFraction: {
+    key: "stopMinAtrFraction",
+    label: "Stop floor (ATR fraction)",
+    unit: "× ATR",
+    group: "COMMON",
+    type: "number",
+    minimum: 0,
+    maximum: 1,
+    step: 0.01,
+    default: 0,
+    fixed: false,
+    description:
+      "Minimum stop distance as a fraction of the daily ATR(14). A tighter structural stop is widened to it. 0 keeps the structural stop.",
+  },
+  stopMinSpreads: {
+    key: "stopMinSpreads",
+    label: "Stop floor (spreads)",
+    unit: "× spread",
+    group: "COMMON",
+    type: "number",
+    minimum: 0,
+    maximum: 20,
+    step: 0.5,
+    default: 0,
+    fixed: false,
+    description:
+      "Minimum stop distance as a multiple of the quoted spread at the signal. 0 disables the floor.",
+  },
+  targetMinR: {
+    key: "targetMinR",
+    label: "Minimum target R",
+    unit: "R",
+    group: "COMMON",
+    type: "number",
+    minimum: 0,
+    maximum: 5,
+    step: 0.1,
+    default: 0,
+    fixed: false,
+    description:
+      "Minimum target distance in multiples of the stop risk. A closer resistance is replaced by this target. 0 keeps the nearest resistance.",
   },
   atrPctMin: {
     key: "atrPctMin",
@@ -603,6 +772,10 @@ export const defaultStrategyParameters = (): StrategyParameters =>
     rsiDivergenceVolumeContractionMaxRatio: 0.8,
     rsiSetupTimeoutMinutes: 30,
     dailyEmaFilterEnabled: 0,
+    latestReadyTime: null,
+    maxVwapDistanceAtr: 0,
+    maxChangeFromOpenAtr: 0,
+    minSectorRelativeStrengthPct: 0,
   });
 
 /** The first RSI/VWAP experiment uses its structural pivot low as the stop anchor. */
@@ -653,6 +826,19 @@ export const validateStrategyParameters = (
         });
       continue;
     }
+    if (descriptor.type === "time") {
+      if (
+        value !== null &&
+        value !== undefined &&
+        (typeof value !== "string" ||
+          !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(value))
+      )
+        issues.push({
+          key,
+          message: `${descriptor.label} must be HH:MM or blank`,
+        });
+      continue;
+    }
     if (typeof value !== "number" || !Number.isFinite(value)) {
       issues.push({
         key,
@@ -690,8 +876,8 @@ export const parameterChangeSchema = z.object({
   key: z.string(),
   label: z.string(),
   unit: z.string().nullable(),
-  previous: z.number().nullable(),
-  next: z.number().nullable(),
+  previous: z.union([z.number(), z.string()]).nullable(),
+  next: z.union([z.number(), z.string()]).nullable(),
 });
 export type ParameterChange = z.infer<typeof parameterChangeSchema>;
 export const profileConfigVersionSchema = z.object({

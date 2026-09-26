@@ -263,6 +263,7 @@
   --color-danger-tint: var(--danger-tint);
   --color-danger-tint-soft: var(--danger-tint-soft);
   --color-danger-tint-pale: var(--danger-tint-pale);
+  --color-gain: var(--gain);
 
   /* Ink (text), brightest to dimmest */
   --color-ink-50: var(--ink-50);

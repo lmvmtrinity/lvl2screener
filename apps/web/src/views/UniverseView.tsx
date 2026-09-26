@@ -1,7 +1,9 @@
 import {
+  type CandidateCoverage,
   type CandidateIntakeStatus,
   type CandidatePasteReport,
   type UniverseAutomation,
+  type UniverseMember,
   type UniverseRefreshRun,
   universeRefreshRunListSchema,
   universeResponseSchema,
@@ -14,81 +16,49 @@ import {
   useRef,
   useState,
 } from "react";
-import { Panel, PanelHeader, PanelMeta } from "../components/ui/Panel.js";
+import {
+  CARD,
+  DOT_TONES,
+  LABEL,
+  LINK_BUTTON,
+  MoreMenu,
+  SECONDARY_BUTTON,
+  SectionHead,
+  Stat,
+  badge,
+} from "../components/PageSections.js";
 import { getJson, sendJson } from "../lib/api.js";
 import { classes } from "../lib/classes.js";
 import { ago, countdown } from "../lib/format.js";
 import { useNow } from "../lib/use-now.js";
 import { useRefreshOnFocus } from "../lib/use-refresh.js";
+import { Drawer } from "../ui.js";
 
 const RUN_POLL_MS = 5_000;
 
-/* Complete utility strings per state: only one class may set a given
- * declaration, because stylesheet order (not JSX order) decides conflicts. */
-const LIFECYCLE_CHIP_BASE =
-  "tw:rounded-[4px] tw:px-[6px] tw:py-1 tw:font-mono tw:text-[0.54rem] tw:font-bold tw:not-italic";
-const LIFECYCLE_CHIP_TONE: Record<string, string> = {
-  default: "tw:bg-surface-raised tw:text-accent",
-  warming: "tw:bg-surface-warn tw:text-warn",
-  qualified: "tw:bg-surface-warn tw:text-warn",
-  unavailable: "tw:bg-surface-danger tw:text-danger-soft",
-  invalidated: "tw:bg-surface-danger tw:text-danger-soft",
-  excluded: "tw:bg-surface-danger tw:text-danger-soft",
-  failed: "tw:bg-surface-danger tw:text-danger-soft",
-};
+const PRIMARY_BUTTON =
+  "tw:cursor-pointer tw:rounded-[9px] tw:border tw:border-accent tw:bg-accent tw:px-[14px] tw:py-[9px] tw:font-sans tw:text-[0.8rem] tw:font-semibold tw:text-on-accent tw:disabled:cursor-not-allowed tw:disabled:opacity-45";
+const FIELD_LABEL =
+  "tw:flex tw:flex-1 tw:flex-col tw:gap-[7px] tw:font-sans tw:text-[0.72rem] tw:font-medium tw:text-ink-400";
+const FIELD_CONTROL =
+  "tw:w-full tw:rounded-[9px] tw:border tw:border-line-input tw:bg-bg tw:px-3 tw:py-[10px] tw:font-sans tw:text-[0.84rem] tw:text-ink-100 tw:outline-none tw:focus:border-accent";
 
-const ROW_STATUS_BASE =
-  "tw:w-max tw:rounded-[5px] tw:border tw:px-2 tw:py-[6px] tw:font-mono tw:text-[0.58rem] tw:font-bold tw:tracking-[0.07em] tw:not-italic";
-const ROW_STATUS_TONE: Record<string, string> = {
-  default: "tw:border-line-accent tw:bg-surface-raised tw:text-accent",
-  excluded: "tw:border-line-warn tw:bg-surface-warn tw:text-warn",
-  warming: "tw:border-line-warn tw:bg-surface-warn tw:text-warn",
-  unavailable: "tw:border-line-danger tw:bg-surface-danger tw:text-danger-soft",
-  invalidated: "tw:border-line-danger tw:bg-surface-danger tw:text-danger-soft",
-};
-
-const PIPELINE_BASE =
-  "tw:rounded-[4px] tw:border tw:border-line-input tw:bg-surface tw:px-[7px] tw:py-[5px] tw:font-mono tw:text-[0.56rem] tw:font-bold tw:tracking-[0.06em]";
-const PIPELINE_TONE: Record<string, string> = {
-  default: "tw:text-ink-550",
-  warming: "tw:text-warn",
-  qualified: "tw:text-warn",
-  excluded: "tw:text-danger-soft",
-  failed: "tw:text-danger-soft",
-};
+const TH =
+  "tw:whitespace-nowrap tw:border-b tw:border-line tw:px-4 tw:py-[13px] tw:first:pl-[22px] tw:last:pr-[22px] tw:font-sans tw:text-[0.68rem] tw:font-semibold tw:tracking-[0.08em] tw:uppercase tw:text-ink-500";
+const TD =
+  "tw:border-b tw:border-line-subtle tw:px-4 tw:py-[13px] tw:first:pl-[22px] tw:last:pr-[22px] tw:align-middle tw:text-[0.84rem] tw:text-ink-200";
+const NUM =
+  "tw:whitespace-nowrap tw:font-mono tw:text-[0.8rem] tw:tabular-nums";
+/* Secondary columns hidden on phones; the expanded row carries them. */
+const NARROW_HIDDEN = "tw:below-md:hidden";
 
 const PASTE_GROUP_TONE: Record<string, string> = {
-  default: "tw:text-ink-550",
-  unsupported: "tw:text-danger-soft",
-  failed: "tw:text-danger-soft",
-  duplicate: "tw:text-warn",
+  accepted: "ok",
+  normalized: "ok",
+  duplicate: "warn",
+  unsupported: "bad",
+  failed: "bad",
 };
-
-const WATCHLIST_ACTIONS_CLASSES =
-  "tw:flex tw:flex-col tw:gap-[7px] tw:below-md:w-full";
-const WATCHLIST_ACTION_CLASSES =
-  "tw:cursor-pointer tw:rounded-input tw:border tw:border-line-input tw:bg-surface tw:px-3 tw:py-[9px] tw:font-mono tw:text-[0.61rem] tw:font-bold tw:tracking-[0.05em] tw:text-ink-450 tw:disabled:cursor-not-allowed tw:disabled:opacity-45";
-const WATCHLIST_ACTION_DANGER_CLASSES =
-  "tw:cursor-pointer tw:rounded-input tw:border tw:border-line-danger tw:bg-surface-danger tw:px-3 tw:py-[9px] tw:font-mono tw:text-[0.61rem] tw:font-bold tw:tracking-[0.05em] tw:text-danger-soft tw:disabled:cursor-not-allowed tw:disabled:opacity-45";
-
-const FIELD_LABEL_CLASSES =
-  "tw:flex tw:flex-1 tw:flex-col tw:gap-[7px] tw:font-mono tw:text-[0.63rem] tw:font-bold tw:tracking-[0.08em] tw:text-ink-700";
-const FIELD_CONTROL_CLASSES =
-  "tw:w-full tw:rounded-input tw:border tw:border-line-input tw:bg-bg tw:px-3 tw:py-[11px] tw:text-ink-100 tw:outline-none tw:focus:border-accent";
-
-const UNIVERSE_ROW_BASE =
-  "tw:grid tw:min-w-[1120px] tw:grid-cols-[1.05fr_0.7fr_0.6fr_0.8fr_0.9fr_0.8fr_0.55fr_1.7fr] tw:items-center tw:gap-[14px] tw:border-b tw:border-line-subtle tw:px-[22px] tw:py-[15px]";
-const UNIVERSE_HEADER_CLASSES = classes(
-  UNIVERSE_ROW_BASE,
-  "tw:font-mono tw:text-[0.6rem] tw:font-bold tw:tracking-[0.08em] tw:text-ink-750",
-);
-const UNIVERSE_BODY_CLASSES = classes(
-  UNIVERSE_ROW_BASE,
-  "tw:text-[0.78rem] tw:text-ink-350",
-);
-
-const HISTORY_RUN_BASE =
-  "universe-run tw:grid tw:grid-cols-[88px_1.5fr_1.5fr_1.3fr_1.4fr] tw:items-center tw:gap-[18px] tw:border-b tw:border-line-subtle tw:px-[22px] tw:py-[15px] tw:text-[0.74rem] tw:text-ink-550 tw:below-900:grid-cols-[80px_1.3fr_1fr]";
 
 function elapsedText(
   startedAt: string,
@@ -109,53 +79,91 @@ function stageLabel(value: string | null): string {
   return value ? new Date(value).toLocaleString() : "not recorded";
 }
 
-function WarmupTimeline({
-  symbol,
-  pipeline,
-}: {
-  symbol: string;
-  pipeline?: CandidateIntakeStatus;
-}) {
+function lifecycleLabel(status: string): string {
+  return status.charAt(0).toUpperCase() + status.slice(1).toLowerCase();
+}
+
+function money(value: number | null): string {
+  return value === null
+    ? "—"
+    : value >= 1_000_000_000
+      ? `$${(value / 1_000_000_000).toFixed(1)}B`
+      : `$${(value / 1_000_000).toFixed(1)}M`;
+}
+
+type RowGroup = "analyzing" | "warming" | "blocked";
+
+/** One status per symbol: the lifecycle decides failures and exclusions, and
+ * live coverage decides how far analysis has got. */
+export function symbolState(
+  pipeline: CandidateIntakeStatus | undefined,
+  coverage: CandidateCoverage | undefined,
+  member: UniverseMember | undefined,
+): { label: string; tone: string; group: RowGroup } {
+  if (pipeline?.status === "FAILED")
+    return {
+      label: `Failed · ${pipeline.attemptCount} attempts`,
+      tone: "bad",
+      group: "blocked",
+    };
+  if (pipeline?.status === "EXCLUDED")
+    return { label: "Excluded", tone: "warn", group: "blocked" };
+  switch (coverage?.status) {
+    case "READY":
+      return { label: "Setup ready", tone: "ok", group: "analyzing" };
+    case "FORMING":
+      return { label: "Setup forming", tone: "pending", group: "analyzing" };
+    case "ANALYZABLE":
+      return { label: "Analyzable", tone: "ok", group: "analyzing" };
+    case "WARMING":
+      return { label: "Warming up", tone: "pending", group: "warming" };
+    case "INVALIDATED":
+      return { label: "Invalidated", tone: "warn", group: "blocked" };
+    case "UNAVAILABLE":
+      return { label: "Unavailable", tone: "bad", group: "blocked" };
+  }
+  if (member && !member.eligible)
+    return { label: "Unavailable", tone: "bad", group: "blocked" };
+  if (pipeline?.status === "READY")
+    return { label: "Analyzable", tone: "ok", group: "analyzing" };
+  return { label: "Warming up", tone: "pending", group: "warming" };
+}
+
+function WarmupTimeline({ pipeline }: { pipeline?: CandidateIntakeStatus }) {
   const stages = [
     { label: "Discovered", at: pipeline?.discoveredAt ?? null },
     { label: "Intake", at: pipeline?.intakeAt ?? null },
     { label: "Strategy ready", at: pipeline?.strategyReadyAt ?? null },
   ];
   return (
-    <div className="candidate-warmup tw:basis-full tw:rounded-input tw:border tw:border-line-input tw:bg-surface-sunken tw:px-[14px] tw:py-3">
-      <div className="candidate-warmup-head tw:flex tw:items-baseline tw:gap-[10px]">
-        <strong className="tw:text-[0.8rem] tw:text-ink-150">
-          {symbol} warm-up
-        </strong>
-        <small className="tw:text-[0.66rem] tw:text-ink-700">
-          {pipeline
-            ? `${pipeline.source} · ${pipeline.status}`
-            : "No lifecycle record"}
-        </small>
+    <div className="candidate-warmup">
+      <div className={LABEL}>
+        Warm-up
+        {pipeline ? ` · ${pipeline.source.toLowerCase()}` : ""}
         {pipeline?.status === "FAILED" ? (
-          <b className="tw:ml-auto tw:font-mono tw:text-[0.62rem] tw:font-bold tw:text-danger-soft">
+          <b className="tw:ml-2 tw:font-semibold tw:text-danger-soft tw:normal-case tw:tracking-normal">
             {pipeline.attemptCount} attempts
           </b>
         ) : null}
       </div>
-      <ol className="candidate-warmup-stages tw:m-0 tw:mt-[10px] tw:grid tw:list-none tw:gap-[5px] tw:p-0">
+      <ol className="tw:m-0 tw:mt-2 tw:grid tw:list-none tw:gap-[5px] tw:p-0">
         {stages.map((stage) => (
           <li
-            className="tw:grid tw:grid-cols-[120px_1fr] tw:gap-3 tw:text-[0.72rem]"
+            className="tw:grid tw:grid-cols-[120px_1fr] tw:gap-3 tw:text-[0.78rem]"
             key={stage.label}
           >
-            <div className="tw:text-ink-700">{stage.label}</div>
-            <b className="tw:font-mono tw:font-semibold tw:text-ink-250">
+            <span className="tw:text-ink-400">{stage.label}</span>
+            <b className="tw:font-mono tw:font-medium tw:text-ink-200">
               {stageLabel(stage.at)}
             </b>
           </li>
         ))}
       </ol>
-      {pipeline?.reason ? (
-        <p className="candidate-warmup-reason tw:mt-[9px] tw:mb-0 tw:text-[0.7rem] tw:text-warn">
-          {pipeline.reason}
+      {pipeline ? null : (
+        <p className="tw:m-0 tw:mt-2 tw:text-[0.76rem] tw:text-ink-400">
+          No lifecycle record.
         </p>
-      ) : null}
+      )}
     </div>
   );
 }
@@ -164,12 +172,10 @@ export function UniverseView({
   automation,
   updated,
   marketId = "CA_TSX",
-  marketChanged,
 }: {
   automation: UniverseAutomation;
   updated: (value: UniverseAutomation) => void;
   marketId?: "CA_TSX" | "US_EQUITIES";
-  marketChanged?: (value: "CA_TSX" | "US_EQUITIES") => void;
 }) {
   const [runs, setRuns] = useState<UniverseRefreshRun[]>(
       automation.latestRun ? [automation.latestRun] : [],
@@ -182,7 +188,8 @@ export function UniverseView({
     [report, setReport] = useState<CandidatePasteReport>(),
     [error, setError] = useState(""),
     [refreshNote, setRefreshNote] = useState(""),
-    [lastHistoryLoadAt, setLastHistoryLoadAt] = useState<number | null>(null);
+    [lastHistoryLoadAt, setLastHistoryLoadAt] = useState<number | null>(null),
+    [drawer, setDrawer] = useState<"history" | "policy" | null>(null);
   const now = useNow();
   const historyGeneration = useRef(0);
   const historyRequest = useRef<{
@@ -385,34 +392,50 @@ export function UniverseView({
       else next.add(symbol);
       return next;
     });
-  const eligible = automation.members.filter((value) => value.eligible).length,
-    excluded = automation.members.length - eligible,
-    p = automation.policy;
-  const money = (value: number | null) =>
-    value === null
-      ? "—"
-      : value >= 1_000_000_000
-        ? `$${(value / 1_000_000_000).toFixed(1)}B`
-        : `$${(value / 1_000_000).toFixed(1)}M`;
+
+  const p = automation.policy;
   const entries = new Map(
       automation.candidates?.map((value) => [value.normalizedSymbol, value]) ??
         [],
     ),
     coverage = new Map(
       automation.coverage?.map((value) => [value.symbol, value]) ?? [],
-    );
+    ),
+    members = new Map(automation.members.map((value) => [value.symbol, value]));
   const pipelineStatuses = automation.candidateStatuses ?? [];
   const pipelineBySymbol = new Map(
     pipelineStatuses.map((value) => [value.symbol, value]),
   );
-  const pipelineSummary = [
-    "QUALIFIED",
-    "ADDED",
-    "WARMING",
-    "READY",
-    "EXCLUDED",
-    "FAILED",
-  ] as const;
+  // Configured symbols first, then policy members and excluded candidates
+  // that are no longer on the list, so nothing the engine saw is hidden.
+  const symbols = [
+    ...new Set([
+      ...configured,
+      ...automation.members.map((value) => value.symbol),
+      ...pipelineStatuses
+        .filter((value) => value.status === "EXCLUDED")
+        .map((value) => value.symbol),
+    ]),
+  ];
+  const rows = symbols.map((symbol) => {
+    const pipeline = pipelineBySymbol.get(symbol);
+    const item = coverage.get(symbol);
+    const member = members.get(symbol);
+    return {
+      symbol,
+      pipeline,
+      item,
+      member,
+      entry: entries.get(symbol),
+      onList: configured.includes(symbol),
+      state: symbolState(pipeline, item, member),
+    };
+  });
+  const counts = {
+    analyzing: rows.filter((row) => row.state.group === "analyzing").length,
+    warming: rows.filter((row) => row.state.group === "warming").length,
+    blocked: rows.filter((row) => row.state.group === "blocked").length,
+  };
   const reportGroups = report
     ? (
         [
@@ -424,7 +447,7 @@ export function UniverseView({
         ] as const
       ).filter((key) => report[key].length)
     : [];
-  const marketLabel = p.marketId === "US_EQUITIES" ? "US Equities" : "TSX";
+  const marketLabel = p.marketId === "US_EQUITIES" ? "US · USD" : "TSX · CAD";
   const currency = p.marketId === "US_EQUITIES" ? "USD" : "CAD";
   const history =
     latestRun && !runs.some((run) => run.id === latestRun.id)
@@ -443,584 +466,579 @@ export function UniverseView({
     "No reason reported";
   const activity = running
     ? {
-        tone: "running",
+        tone: "pending",
         headline: "Refreshing now",
         detail: `started ${ago(now, latestRun?.startedAt)}`,
       }
     : latestRun?.status === "FAILED"
       ? {
-          tone: "failed",
+          tone: "bad",
           headline: "Refresh failed",
           detail: `failed ${ago(now, latestRun?.startedAt)}`,
         }
       : latestRun?.status === "COMPLETED"
         ? {
-            tone: "completed",
+            tone: "ok",
             headline: "Refresh completed",
             detail: ago(now, latestRun?.completedAt),
           }
         : {
-            tone: "idle",
+            tone: "waiting",
             headline: "No refresh recorded yet",
             detail: "",
           };
-  const healthFailed = latestRun?.status === "FAILED";
-  const policyPanel = (
-    <Panel
-      as="article"
-      className={classes("universe-policy", automation.editable && "tw:mb-4")}
-    >
-      <PanelHeader
-        className="tw:below-560:flex-col tw:below-560:items-start tw:below-560:gap-[15px]"
-        title={
-          automation.editable
-            ? "Level-2 analysis context"
-            : `${marketLabel} Liquid Momentum`
-        }
-        description={
-          automation.editable
-            ? "TradingView supplies the daily candidates; every valid symbol is passed to all enabled strategies."
-            : `Automated Level-1 eligibility policy · ${p.version}`
-        }
-        descriptionClassName="tw:mt-[5px] tw:mb-0 tw:text-[0.75rem] tw:text-ink-700"
-        actions={
+
+  const policyFacts: [string, string][] = [
+    ["Reference price", `${currency} ${p.minimumPrice}–${p.maximumPrice}`],
+    ["Market cap", `≥ ${money(p.minimumMarketCap)}`],
+    ["Average volume", `≥ ${(p.minimumAverageVolume90d / 1_000).toFixed(0)}K`],
+    ["Dollar volume", `≥ ${money(p.minimumDollarVolume)}`],
+    ["ATR(14)", `≥ ${p.minimumAtrPct}%`],
+    ["History", `≥ ${p.minimumHistoryDays} days`],
+  ];
+
+  return (
+    <>
+      <div className="tw:-mt-3 tw:mb-7 tw:flex tw:flex-wrap tw:items-center tw:justify-between tw:gap-3">
+        <section
+          className="universe-activity tw:grid tw:gap-1"
+          aria-label="Refresh activity"
+        >
+          <p className="tw:m-0 tw:flex tw:items-center tw:gap-[10px] tw:text-[0.86rem] tw:text-ink-300">
+            <span
+              className={classes(
+                "tw:h-2 tw:w-2 tw:shrink-0 tw:rounded-full",
+                DOT_TONES[activity.tone],
+              )}
+              aria-hidden="true"
+            />
+            <span role="status">
+              <strong className="tw:font-semibold tw:text-ink-100">
+                {activity.headline}
+              </strong>
+              {activity.detail ? ` · ${activity.detail}` : ""}
+            </span>
+            <span>
+              · {configured.length}{" "}
+              {configured.length === 1 ? "symbol" : "symbols"} on the{" "}
+              {automation.watchlistDate ?? "daily"} list
+            </span>
+          </p>
+          <p className="universe-activity-meta tw:m-0 tw:pl-[18px] tw:text-[0.76rem] tw:text-ink-500">
+            {lastSuccess ? (
+              <>
+                Last successful refresh {ago(now, lastSuccess.completedAt)} ·
+                took{" "}
+                {elapsedText(lastSuccess.startedAt, lastSuccess.completedAt)}
+              </>
+            ) : (
+              "No successful refresh recorded yet."
+            )}
+            {nextCheckAt ? (
+              <> · next check {countdown(now, nextCheckAt)}</>
+            ) : null}
+          </p>
+        </section>
+        <div className="tw:flex tw:items-center tw:gap-[10px]">
           <button
             type="button"
-            className="run-backtest universe-refresh tw:m-0 tw:w-auto tw:cursor-pointer tw:rounded-[7px] tw:border tw:border-accent tw:bg-accent tw:px-[15px] tw:py-[10px] tw:font-mono tw:text-[0.65rem] tw:font-[750] tw:tracking-[0.08em] tw:text-on-accent tw:disabled:cursor-wait tw:disabled:opacity-45"
+            className={classes(SECONDARY_BUTTON, "universe-refresh")}
             disabled={refreshing}
             onClick={() => void refresh()}
           >
-            {refreshing ? "REFRESHING…" : "REFRESH NOW"}
+            {refreshing ? "Refreshing…" : "Refresh now"}
           </button>
-        }
-      />
-      <div className="policy-grid tw:grid tw:grid-cols-3 tw:gap-px tw:bg-surface-sunken tw:below-900:grid-cols-2 tw:below-560:grid-cols-1">
-        <span className="tw:flex tw:flex-col tw:gap-2 tw:bg-surface tw:px-[22px] tw:py-[19px] tw:font-mono tw:text-[0.62rem] tw:font-bold tw:tracking-[0.08em] tw:text-ink-700">
-          REFERENCE PRICE{" "}
-          <b className="tw:text-[0.82rem] tw:tracking-normal tw:text-ink-150">
-            {currency} {p.minimumPrice}–{p.maximumPrice}
-          </b>
-        </span>
-        <span className="tw:flex tw:flex-col tw:gap-2 tw:bg-surface tw:px-[22px] tw:py-[19px] tw:font-mono tw:text-[0.62rem] tw:font-bold tw:tracking-[0.08em] tw:text-ink-700">
-          MARKET CAP{" "}
-          <b className="tw:text-[0.82rem] tw:tracking-normal tw:text-ink-150">
-            ≥ {money(p.minimumMarketCap)}
-          </b>
-        </span>
-        <span className="tw:flex tw:flex-col tw:gap-2 tw:bg-surface tw:px-[22px] tw:py-[19px] tw:font-mono tw:text-[0.62rem] tw:font-bold tw:tracking-[0.08em] tw:text-ink-700">
-          AVG VOL{" "}
-          <b className="tw:text-[0.82rem] tw:tracking-normal tw:text-ink-150">
-            ≥ {(p.minimumAverageVolume90d / 1_000).toFixed(0)}K
-          </b>
-        </span>
-        <span className="tw:flex tw:flex-col tw:gap-2 tw:bg-surface tw:px-[22px] tw:py-[19px] tw:font-mono tw:text-[0.62rem] tw:font-bold tw:tracking-[0.08em] tw:text-ink-700">
-          DOLLAR VOL{" "}
-          <b className="tw:text-[0.82rem] tw:tracking-normal tw:text-ink-150">
-            ≥ {money(p.minimumDollarVolume)}
-          </b>
-        </span>
-        <span className="tw:flex tw:flex-col tw:gap-2 tw:bg-surface tw:px-[22px] tw:py-[19px] tw:font-mono tw:text-[0.62rem] tw:font-bold tw:tracking-[0.08em] tw:text-ink-700">
-          ATR(14){" "}
-          <b className="tw:text-[0.82rem] tw:tracking-normal tw:text-ink-150">
-            ≥ {p.minimumAtrPct}%
-          </b>
-        </span>
-        <span className="tw:flex tw:flex-col tw:gap-2 tw:bg-surface tw:px-[22px] tw:py-[19px] tw:font-mono tw:text-[0.62rem] tw:font-bold tw:tracking-[0.08em] tw:text-ink-700">
-          HISTORY{" "}
-          <b className="tw:text-[0.82rem] tw:tracking-normal tw:text-ink-150">
-            ≥ {p.minimumHistoryDays} days
-          </b>
-        </span>
+          <MoreMenu
+            label="More daily list tools"
+            items={[
+              {
+                label: "Refresh history",
+                onSelect: () => setDrawer("history"),
+              },
+              {
+                label: "Eligibility policy",
+                onSelect: () => setDrawer("policy"),
+              },
+              ...(automation.editable && configured.length
+                ? [
+                    {
+                      label: "Clear today's list",
+                      onSelect: () => void clear(),
+                    },
+                  ]
+                : []),
+            ]}
+          />
+        </div>
       </div>
-    </Panel>
-  );
-  const healthCard = (
-    <article
-      className={classes(
-        "universe-health tw:flex tw:flex-col tw:justify-center tw:rounded-panel tw:border tw:p-[26px]",
-        healthFailed
-          ? "tw:border-line-danger-strong tw:bg-surface-danger"
-          : "tw:border-line-accent tw:bg-surface",
-      )}
-    >
-      <span className="tw:font-mono tw:text-[0.62rem] tw:font-bold tw:tracking-[0.1em] tw:text-ink-700">
-        DAILY WATCHLIST
-      </span>
-      <strong
-        className={classes(
-          "tw:my-[10px] tw:text-[1.6rem]",
-          healthFailed ? "tw:text-danger" : "tw:text-accent",
-        )}
-      >
-        {configured.length} SYMBOLS
-      </strong>
-      <b className="tw:font-mono tw:text-[0.72rem] tw:font-bold">
-        {eligible} ANALYZED · {excluded} UNAVAILABLE
-      </b>
-      <small className="tw:mt-[17px] tw:text-ink-700">
-        {latestRun?.status ?? "NOT RUN"} ·{" "}
-        {automation.watchlistDate ??
-          (latestRun?.completedAt
-            ? new Date(latestRun.completedAt).toLocaleDateString()
-            : automation.provider)}
-      </small>
-    </article>
-  );
-  const activityPanel = (
-    <Panel
-      as="section"
-      className="universe-activity tw:px-[22px] tw:py-4"
-      aria-label="Refresh activity"
-    >
-      <div className="universe-activity-headline tw:flex tw:items-baseline tw:gap-[2px] tw:text-[0.98rem]">
-        <strong
-          className={classes(
-            activity.tone === "running"
-              ? "tw:text-accent"
-              : activity.tone === "failed"
-                ? "tw:text-danger"
-                : "tw:text-ink-150",
-          )}
-          role="status"
-        >
-          {activity.headline}
-        </strong>
-        {activity.detail ? (
-          <span className="tw:text-[0.8rem] tw:text-ink-550">
-            {" "}
-            · {activity.detail}
-          </span>
-        ) : null}
-      </div>
-      <p className="universe-activity-meta tw:mt-[7px] tw:mb-0 tw:text-[0.78rem] tw:text-ink-700">
-        {lastSuccess ? (
-          <>
-            Last successful refresh {ago(now, lastSuccess.completedAt)} · took{" "}
-            {elapsedText(lastSuccess.startedAt, lastSuccess.completedAt)}
-          </>
-        ) : (
-          "No successful refresh recorded yet."
-        )}
-        {nextCheckAt ? <> · next check {countdown(now, nextCheckAt)}</> : null}
-      </p>
+
       {latestRun?.status === "FAILED" ? (
-        <p className="universe-activity-failure tw:mt-[9px] tw:mb-0 tw:rounded-[7px] tw:border tw:border-line-danger tw:bg-surface-danger tw:px-[11px] tw:py-[9px] tw:text-[0.78rem] tw:text-danger-soft">
+        <p className="universe-activity-failure tw:mt-0 tw:mb-4 tw:rounded-[10px] tw:border tw:border-line-danger tw:bg-surface-danger tw:px-[14px] tw:py-[10px] tw:text-[0.8rem] tw:text-danger-soft">
           <b className="tw:text-danger">{failureReason}</b> — previous analysis
           set remains active.
         </p>
       ) : null}
       {refreshNote ? (
-        <p className="universe-activity-stale tw:mt-2 tw:mb-0 tw:text-[0.76rem] tw:text-warn">
+        <p className="universe-activity-stale tw:mt-0 tw:mb-4 tw:text-[0.78rem] tw:text-warn">
           {refreshNote}
         </p>
       ) : null}
-    </Panel>
-  );
-  const watchlistPanel = (
-    <Panel as="section" className="watchlist-panel tw:border-line-accent">
-      <PanelHeader
-        className="tw:below-md:flex-col tw:below-md:items-start tw:below-md:gap-[15px]"
-        emphasis="headline"
-        title="TradingView candidates"
-        description="Paste comma-, space-, or line-separated symbols. Bare symbols use the selected input market; exchange prefixes such as `TSX:SHOP`, `NASDAQ:AAPL`, and `NYSE:BAM` are also recognized."
-        actions={
-          <>
-            <label className="tw:flex tw:items-center tw:gap-[0.55rem] tw:text-[0.68rem] tw:tracking-[0.12em] tw:text-ink-550">
-              INPUT MARKET
-              <select
-                className="tw:min-w-[8.5rem]"
-                aria-label="Candidate input market"
-                value={marketId}
-                onChange={(event) =>
-                  marketChanged?.(
-                    event.target.value as "CA_TSX" | "US_EQUITIES",
-                  )
-                }
-              >
-                <option value="CA_TSX">TSX · CAD</option>
-                <option value="US_EQUITIES">US · USD</option>
-              </select>
-            </label>
-            <PanelMeta>{automation.watchlistDate ?? "DAILY"}</PanelMeta>
-          </>
-        }
-      />
-      <form
-        className="watchlist-form tw:flex tw:items-end tw:gap-3 tw:px-6 tw:pt-[18px] tw:pb-3 tw:below-1100:flex-col tw:below-1100:items-stretch tw:below-1100:[&_button]:w-full"
-        onSubmit={(event) => void add(event)}
-      >
-        <label className={FIELD_LABEL_CLASSES}>
-          PASTE SYMBOLS
-          <textarea
-            className={classes(
-              FIELD_CONTROL_CLASSES,
-              "tw:uppercase tw:resize-y",
-            )}
-            aria-label="TradingView symbols"
-            rows={3}
-            value={symbolInput}
-            onChange={(event) => setSymbolInput(event.target.value)}
-            placeholder={"TSX:SHOP, TSX:RY\nBTO.TO"}
-          />
-        </label>
-        <div className="watchlist-meta tw:grid tw:min-w-[260px] tw:gap-[9px] tw:below-md:w-full tw:below-md:min-w-0">
-          <label className={FIELD_LABEL_CLASSES}>
-            NOTE (OPTIONAL)
-            <input
-              className={FIELD_CONTROL_CLASSES}
-              maxLength={500}
-              value={note}
-              onChange={(event) => setNote(event.target.value)}
-              placeholder="Morning momentum scan"
-            />
-          </label>
-          <label className={FIELD_LABEL_CLASSES}>
-            TAGS (COMMA-SEPARATED)
-            <input
-              className={FIELD_CONTROL_CLASSES}
-              value={tags}
-              onChange={(event) => setTags(event.target.value)}
-              placeholder="gap-up, materials"
-            />
-          </label>
-        </div>
-        <div className={WATCHLIST_ACTIONS_CLASSES}>
-          <button
-            className={WATCHLIST_ACTION_CLASSES}
-            disabled={refreshing || !symbolInput.trim()}
+      {error && <p className="error-banner">{error}</p>}
+
+      {automation.editable && (
+        <section className="tw:mb-6" aria-label="Add candidates">
+          <SectionHead title="Add candidates">
+            Paste from TradingView · bare symbols use {marketLabel}
+          </SectionHead>
+          <div
+            className={classes(CARD, "watchlist-panel tw:px-[22px] tw:py-5")}
           >
-            {refreshing ? "UPDATING…" : "ADD CANDIDATES"}
-          </button>
-          <button
-            type="button"
-            className={WATCHLIST_ACTION_CLASSES}
-            disabled={refreshing || !symbolInput.trim()}
-            onClick={() => void replace()}
-          >
-            REPLACE DAILY LIST
-          </button>
-          <button
-            type="button"
-            className={WATCHLIST_ACTION_DANGER_CLASSES}
-            disabled={refreshing || !configured.length}
-            onClick={() => void clear()}
-          >
-            CLEAR TODAY
-          </button>
-        </div>
-      </form>
-      {report && (
-        <section
-          className="paste-report tw:mx-6 tw:mt-1 tw:mb-[18px] tw:rounded-[9px] tw:border tw:border-line-input tw:bg-bg tw:p-[15px]"
-          aria-label="Candidate paste report"
-        >
-          <div className="tw:mb-[11px] tw:flex tw:items-center tw:justify-between tw:font-mono tw:text-[0.65rem] tw:font-bold tw:tracking-[0.08em] tw:text-ink-150">
-            <strong>PASTE REPORT</strong>
-            <button
-              type="button"
-              className="tw:cursor-pointer tw:border-0 tw:bg-transparent tw:font-mono tw:text-[0.58rem] tw:font-bold tw:text-ink-700"
-              onClick={() => setReport(undefined)}
+            <form
+              className="watchlist-form tw:grid tw:grid-cols-[minmax(0,1fr)_auto] tw:items-end tw:gap-4 tw:below-md:grid-cols-[minmax(0,1fr)]"
+              onSubmit={(event) => void add(event)}
             >
-              DISMISS
-            </button>
-          </div>
-          {reportGroups.length ? (
-            reportGroups.map((key) => (
-              <article
-                className="tw:grid tw:grid-cols-[120px_1fr] tw:gap-2 tw:border-t tw:border-line-subtle tw:py-2 tw:below-md:grid-cols-1"
-                key={key}
-              >
-                <b
-                  className={classes(
-                    "tw:font-mono tw:text-[0.6rem] tw:font-bold",
-                    PASTE_GROUP_TONE[key] ?? PASTE_GROUP_TONE.default,
-                  )}
+              <label className={FIELD_LABEL}>
+                Symbols
+                <textarea
+                  className={classes(FIELD_CONTROL, "tw:uppercase tw:resize-y")}
+                  aria-label="TradingView symbols"
+                  rows={2}
+                  value={symbolInput}
+                  onChange={(event) => setSymbolInput(event.target.value)}
+                  placeholder="TSX:SHOP, TSX:RY, BTO.TO"
+                />
+              </label>
+              <div className="tw:flex tw:gap-[10px] tw:below-md:[&_button]:flex-1">
+                <button
+                  className={PRIMARY_BUTTON}
+                  disabled={refreshing || !symbolInput.trim()}
                 >
-                  {key.toUpperCase()} · {report[key].length}
-                </b>
-                {report[key].map((item, index) => (
-                  <span
-                    className="tw:flex tw:items-baseline tw:gap-2 tw:text-[0.72rem] tw:text-ink-150 tw:below-md:flex-col tw:below-md:items-start tw:below-md:gap-[3px]"
-                    key={`${item.originalInput}:${index}`}
+                  {refreshing ? "Updating…" : "Add candidates"}
+                </button>
+                <button
+                  type="button"
+                  className={SECONDARY_BUTTON}
+                  disabled={refreshing || !symbolInput.trim()}
+                  onClick={() => void replace()}
+                >
+                  Replace list
+                </button>
+              </div>
+              <details className="tw:col-span-full tw:text-[0.78rem] tw:text-ink-400">
+                <summary className="tw:w-max tw:cursor-pointer">
+                  Note and tags (optional)
+                </summary>
+                <div className="tw:mt-3 tw:flex tw:gap-3 tw:below-md:flex-col">
+                  <label className={FIELD_LABEL}>
+                    Note
+                    <input
+                      className={FIELD_CONTROL}
+                      maxLength={500}
+                      value={note}
+                      onChange={(event) => setNote(event.target.value)}
+                      placeholder="Morning momentum scan"
+                    />
+                  </label>
+                  <label className={FIELD_LABEL}>
+                    Tags, comma-separated
+                    <input
+                      className={FIELD_CONTROL}
+                      value={tags}
+                      onChange={(event) => setTags(event.target.value)}
+                      placeholder="gap-up, materials"
+                    />
+                  </label>
+                </div>
+              </details>
+            </form>
+            {report && (
+              <section
+                className="paste-report tw:mt-4 tw:rounded-[10px] tw:border tw:border-line-subtle tw:bg-surface-sunken tw:px-4 tw:py-3"
+                aria-label="Candidate paste report"
+              >
+                <div className="tw:mb-2 tw:flex tw:items-center tw:justify-between">
+                  <span className={LABEL}>Paste report</span>
+                  <button
+                    type="button"
+                    className={LINK_BUTTON}
+                    onClick={() => setReport(undefined)}
                   >
-                    <strong>{item.originalInput || "(empty)"}</strong>
-                    {item.normalizedSymbol &&
-                      item.normalizedSymbol !== item.originalInput && (
-                        <em className="tw:not-italic tw:text-accent">
-                          → {item.normalizedSymbol}
-                        </em>
-                      )}
-                    <small className="tw:text-ink-700">{item.reason}</small>
-                  </span>
-                ))}
-              </article>
-            ))
-          ) : (
-            <p>No symbols were submitted.</p>
-          )}
+                    Dismiss
+                  </button>
+                </div>
+                {reportGroups.length ? (
+                  reportGroups.map((key) => (
+                    <article
+                      className="tw:grid tw:grid-cols-[130px_1fr] tw:items-start tw:gap-3 tw:border-t tw:border-line-subtle tw:py-2 tw:below-md:grid-cols-1"
+                      key={key}
+                    >
+                      <span
+                        className={badge(PASTE_GROUP_TONE[key] ?? "waiting")}
+                      >
+                        {lifecycleLabel(key)} · {report[key].length}
+                      </span>
+                      <span className="tw:grid tw:gap-1">
+                        {report[key].map((item, index) => (
+                          <span
+                            className="tw:flex tw:flex-wrap tw:items-baseline tw:gap-2 tw:text-[0.8rem] tw:text-ink-150"
+                            key={`${item.originalInput}:${index}`}
+                          >
+                            <strong>{item.originalInput || "(empty)"}</strong>
+                            {item.normalizedSymbol &&
+                              item.normalizedSymbol !== item.originalInput && (
+                                <em className="tw:not-italic tw:text-accent">
+                                  → {item.normalizedSymbol}
+                                </em>
+                              )}
+                            <small className="tw:text-ink-400">
+                              {item.reason}
+                            </small>
+                          </span>
+                        ))}
+                      </span>
+                    </article>
+                  ))
+                ) : (
+                  <p className="tw:m-0">No symbols were submitted.</p>
+                )}
+              </section>
+            )}
+          </div>
         </section>
       )}
-      {pipelineStatuses.length > 0 && (
-        <div
-          className="candidate-pipeline-summary tw:flex tw:flex-wrap tw:gap-[7px] tw:px-6 tw:pb-4"
-          aria-label="Candidate lifecycle summary"
-        >
-          {pipelineSummary.map((status) => {
-            const count = pipelineStatuses.filter(
-              (value) => value.status === status,
-            ).length;
-            const tone = PIPELINE_TONE[status.toLowerCase()];
-            return count > 0 ? (
-              <span
-                className={classes(
-                  PIPELINE_BASE,
-                  tone ?? PIPELINE_TONE.default,
-                )}
-                key={status}
-              >
-                {status} <b className="tw:text-ink-150">{count}</b>
-              </span>
-            ) : null;
-          })}
-        </div>
-      )}
-      <div className="watchlist-symbols tw:flex tw:flex-wrap tw:gap-2 tw:px-6 tw:pb-5">
-        {configured.map((value) => {
-          const entry = entries.get(value),
-            item = coverage.get(value),
-            pipeline = pipelineBySymbol.get(value),
-            lifecycleStatus = pipeline?.status ?? item?.status ?? "WARMING",
-            coverageText =
-              item?.reasons[0] ??
-              `${item?.setupCount ?? 0} setups · ${item?.contextCount ?? 0} context`;
-          return (
-            <Fragment key={value}>
-              <span className="tw:flex tw:max-w-full tw:flex-wrap tw:items-center tw:gap-[9px] tw:rounded-input tw:border tw:border-line-input tw:bg-surface tw:py-2 tw:pr-[9px] tw:pl-[11px]">
-                <b className="tw:font-mono tw:text-[0.72rem] tw:font-[750]">
-                  {value}
-                  <small className="tw:mt-[3px] tw:block tw:text-[0.55rem] tw:font-medium tw:text-ink-750">
-                    {pipeline?.source ?? entry?.source ?? "MANUAL"} ·{" "}
-                    {entry
+
+      <section className="tw:mb-4" aria-label="Today's list">
+        <SectionHead title="Today's list">
+          {automation.editable
+            ? "Every valid symbol is passed to all enabled strategies"
+            : `Automated Level-1 eligibility · ${p.version}`}
+        </SectionHead>
+        <div className={classes(CARD, "universe-health")}>
+          <dl
+            className="tw:m-0 tw:grid tw:grid-cols-[repeat(4,minmax(0,1fr))] tw:border-b tw:border-line tw:below-900:grid-cols-[repeat(2,minmax(0,1fr))]"
+            aria-label="Candidate lifecycle summary"
+          >
+            <Stat
+              label="Symbols"
+              value={String(rows.length)}
+              hint={`${latestRun?.status.toLowerCase() ?? "not run"} · ${
+                automation.watchlistDate ?? automation.provider
+              }`}
+            />
+            <Stat
+              label="Being analyzed"
+              value={String(counts.analyzing)}
+              hint="analyzable, forming or ready"
+            />
+            <Stat
+              label="Warming up"
+              value={String(counts.warming)}
+              hint="collecting data before analysis"
+            />
+            <Stat
+              label="Unavailable"
+              value={String(counts.blocked)}
+              hint="excluded, failed or unavailable"
+            />
+          </dl>
+          {rows.length ? (
+            <div className="universe-table tw:overflow-x-auto">
+              <table className="tw:w-full tw:border-collapse">
+                <thead>
+                  <tr>
+                    <th className={classes(TH, "tw:text-left")}>Symbol</th>
+                    <th className={classes(TH, "tw:text-left")}>Status</th>
+                    <th className={classes(TH, "tw:text-right", NARROW_HIDDEN)}>
+                      Price
+                    </th>
+                    <th className={classes(TH, "tw:text-right", NARROW_HIDDEN)}>
+                      Dollar vol
+                    </th>
+                    <th className={classes(TH, "tw:text-right", NARROW_HIDDEN)}>
+                      ATR
+                    </th>
+                    <th className={classes(TH, "tw:text-left", NARROW_HIDDEN)}>
+                      Setups / notes
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((row) => {
+                    const open = expanded.has(row.symbol);
+                    const { member, item, entry, pipeline } = row;
+                    const reason =
+                      pipeline?.reason ??
+                      item?.reasons[0] ??
+                      (member && !member.eligible
+                        ? member.reasons
+                            .map((value) => value.replaceAll("_", " "))
+                            .join(" · ")
+                        : null);
+                    const addedAt = entry
                       ? new Date(entry.addedAt).toLocaleTimeString([], {
                           hour: "2-digit",
                           minute: "2-digit",
                         })
-                      : automation.watchlistDate}
-                  </small>
-                </b>
-                <i
-                  className={classes(
-                    LIFECYCLE_CHIP_BASE,
-                    LIFECYCLE_CHIP_TONE[lifecycleStatus.toLowerCase()] ??
-                      LIFECYCLE_CHIP_TONE.default,
-                  )}
-                >
-                  {lifecycleStatus}
-                  {pipeline?.status === "FAILED"
-                    ? ` · ${pipeline.attemptCount} ATTEMPTS`
-                    : ""}
-                </i>
-                {pipeline?.reason && (
-                  <small className="tw:text-[0.58rem] tw:text-ink-700">
-                    {pipeline.reason}
-                  </small>
-                )}
-                <em className="tw:max-w-[360px] tw:text-[0.62rem] tw:not-italic tw:text-ink-700">
-                  {entry?.note
-                    ? `${entry.note} · ${coverageText}`
-                    : coverageText}
-                </em>
-                {entry?.tags.map((tag) => (
-                  <small
-                    className="candidate-tag tw:rounded-[4px] tw:bg-surface-raised tw:px-[5px] tw:py-[3px] tw:font-mono tw:text-[0.54rem] tw:font-semibold tw:text-ink-450"
-                    key={tag}
-                  >
-                    {tag}
-                  </small>
-                ))}
-                <button
-                  type="button"
-                  className="candidate-warmup-toggle tw:cursor-pointer tw:rounded-[4px] tw:border-0 tw:bg-surface-raised tw:px-[6px] tw:py-1 tw:font-mono tw:text-[0.55rem] tw:font-bold tw:text-ink-450"
-                  aria-label={`Warm-up stages for ${value}`}
-                  aria-expanded={expanded.has(value)}
-                  onClick={() => toggleExpanded(value)}
-                >
-                  {expanded.has(value) ? "HIDE WARM-UP" : "WARM-UP"}
-                </button>
-                <button
-                  type="button"
-                  className="tw:cursor-pointer tw:rounded-[4px] tw:border-0 tw:bg-surface-danger tw:px-[6px] tw:py-1 tw:font-mono tw:text-[0.55rem] tw:font-bold tw:text-danger-soft tw:disabled:cursor-not-allowed tw:disabled:opacity-40"
-                  aria-label={`Remove ${value}`}
-                  disabled={refreshing}
-                  onClick={() => void remove(value)}
-                >
-                  REMOVE
-                </button>
-              </span>
-              {expanded.has(value) ? (
-                <WarmupTimeline symbol={value} pipeline={pipeline} />
-              ) : null}
-            </Fragment>
-          );
-        })}
-        {pipelineStatuses
-          .filter((value) => value.status === "EXCLUDED")
-          .filter((value) => !configured.includes(value.symbol))
-          .map((value) => (
-            <Fragment key={value.symbol}>
-              <span className="tw:flex tw:max-w-full tw:flex-wrap tw:items-center tw:gap-[9px] tw:rounded-input tw:border tw:border-line-input tw:bg-surface tw:py-2 tw:pr-[9px] tw:pl-[11px]">
-                <b className="tw:font-mono tw:text-[0.72rem] tw:font-[750]">
-                  {value.symbol}
-                  <small className="tw:mt-[3px] tw:block tw:text-[0.55rem] tw:font-medium tw:text-ink-750">
-                    {value.source} · EXCLUDED
-                  </small>
-                </b>
-                <i className="tw:rounded-[4px] tw:bg-surface-danger tw:px-[6px] tw:py-1 tw:font-mono tw:text-[0.54rem] tw:font-bold tw:not-italic tw:text-danger-soft">
-                  EXCLUDED
-                </i>
-                <em className="tw:max-w-[360px] tw:text-[0.62rem] tw:not-italic tw:text-ink-700">
-                  {value.reason ?? "Manual exclusion"}
-                </em>
-                <button
-                  type="button"
-                  className="candidate-warmup-toggle tw:cursor-pointer tw:rounded-[4px] tw:border-0 tw:bg-surface-raised tw:px-[6px] tw:py-1 tw:font-mono tw:text-[0.55rem] tw:font-bold tw:text-ink-450"
-                  aria-label={`Warm-up stages for ${value.symbol}`}
-                  aria-expanded={expanded.has(value.symbol)}
-                  onClick={() => toggleExpanded(value.symbol)}
-                >
-                  {expanded.has(value.symbol) ? "HIDE WARM-UP" : "WARM-UP"}
-                </button>
-              </span>
-              {expanded.has(value.symbol) ? (
-                <WarmupTimeline symbol={value.symbol} pipeline={value} />
-              ) : null}
-            </Fragment>
-          ))}
-        {!configured.length && (
-          <p className="tw:my-1 tw:text-[0.78rem] tw:text-ink-700">
-            No candidates yet. Paste today’s TradingView results above to begin
-            analysis.
-          </p>
-        )}
-      </div>
-    </Panel>
-  );
-  return (
-    <>
-      <section className="tw:mb-4 tw:grid tw:grid-cols-[minmax(0,1fr)_300px] tw:gap-4 tw:below-900:grid-cols-1">
-        {automation.editable ? watchlistPanel : policyPanel}
-        <div className="tw:flex tw:flex-col tw:gap-4">
-          {healthCard}
-          {activityPanel}
-        </div>
-      </section>
-      {automation.editable ? policyPanel : null}
-      {error && <p className="error-banner">{error}</p>}
-      <section className="universe-table tw:mb-4 tw:overflow-x-auto tw:overflow-y-hidden tw:rounded-panel tw:border tw:border-line tw:bg-surface">
-        <PanelHeader
-          title="Analysis inputs"
-          description="Resolved market data and live coverage for every symbol sent to the strategy engine."
-          descriptionClassName="tw:mt-[5px] tw:mb-0 tw:text-[0.75rem] tw:text-ink-700"
-          className="tw:min-w-[1120px]"
-          actions={<PanelMeta>{automation.members.length} EVALUATED</PanelMeta>}
-        />
-        <div className={UNIVERSE_HEADER_CLASSES}>
-          <span>SYMBOL</span>
-          <span>COVERAGE</span>
-          <span>PRICE</span>
-          <span>MARKET CAP</span>
-          <span>AVG VOL 90D</span>
-          <span>DOLLAR VOL</span>
-          <span>ATR</span>
-          <span>SECTOR / REASON</span>
-        </div>
-        {automation.members.map((member) => {
-          const item = coverage.get(member.symbol);
-          const status =
-            item?.status.toLowerCase() ??
-            (member.eligible ? "included" : "excluded");
-          return (
-            <div className={UNIVERSE_BODY_CLASSES} key={member.symbol}>
-              <strong>
-                {member.symbol}
-                <small className="tw:mt-1 tw:block tw:text-[0.64rem] tw:font-medium tw:text-ink-750">
-                  {member.description}
-                </small>
-              </strong>
-              <i
-                className={classes(
-                  ROW_STATUS_BASE,
-                  ROW_STATUS_TONE[status] ?? ROW_STATUS_TONE.default,
-                )}
-              >
-                {item?.status ??
-                  (member.eligible ? "ANALYZABLE" : "UNAVAILABLE")}
-              </i>
-              <b>
-                {member.price === null ? "—" : `$${member.price.toFixed(2)}`}
-              </b>
-              <span>{money(member.marketCap)}</span>
-              <span>
-                {member.averageVolume90d === null
-                  ? "—"
-                  : Math.round(member.averageVolume90d).toLocaleString()}
-              </span>
-              <span>{money(member.dollarVolume)}</span>
-              <span>
-                {member.atrPct === null ? "—" : `${member.atrPct.toFixed(2)}%`}
-              </span>
-              <span>
-                {item?.reasons.length
-                  ? item.reasons.join(" · ")
-                  : member.eligible
-                    ? (member.sector ?? "—")
-                    : member.reasons
-                        .map((value) => value.replaceAll("_", " "))
-                        .join(" · ")}
-              </span>
+                      : null;
+                    return (
+                      <Fragment key={row.symbol}>
+                        <tr
+                          className={classes(
+                            "candidate-row",
+                            open && "tw:bg-surface-raised",
+                          )}
+                        >
+                          <td
+                            className={classes(
+                              TD,
+                              open && "tw:shadow-[inset_3px_0_0_var(--accent)]",
+                            )}
+                          >
+                            <button
+                              type="button"
+                              className="tw:grid tw:cursor-pointer tw:gap-[2px] tw:border-0 tw:bg-transparent tw:p-0 tw:text-left tw:hover:[&_strong]:text-accent"
+                              aria-label={`Warm-up stages for ${row.symbol}`}
+                              aria-expanded={open}
+                              onClick={() => toggleExpanded(row.symbol)}
+                            >
+                              <strong className="tw:font-mono tw:text-[0.86rem] tw:font-semibold tw:text-ink-50">
+                                {row.symbol}
+                              </strong>
+                              <small className="tw:text-[0.74rem] tw:text-ink-500">
+                                {member?.description ??
+                                  lifecycleLabel(
+                                    pipeline?.source ??
+                                      entry?.source ??
+                                      "MANUAL",
+                                  )}
+                                {addedAt ? ` · added ${addedAt}` : ""}
+                              </small>
+                            </button>
+                          </td>
+                          <td className={TD}>
+                            <span className="tw:grid tw:justify-items-start tw:gap-1">
+                              <span className={badge(row.state.tone)}>
+                                {row.state.label}
+                              </span>
+                              {pipeline && (
+                                <small className="tw:text-[0.72rem] tw:text-ink-500">
+                                  {lifecycleLabel(pipeline.status)} ·{" "}
+                                  {lifecycleLabel(pipeline.source)}
+                                </small>
+                              )}
+                            </span>
+                          </td>
+                          <td
+                            className={classes(
+                              TD,
+                              NUM,
+                              "tw:text-right",
+                              NARROW_HIDDEN,
+                            )}
+                          >
+                            {member?.price == null
+                              ? "—"
+                              : `$${member.price.toFixed(2)}`}
+                          </td>
+                          <td
+                            className={classes(
+                              TD,
+                              NUM,
+                              "tw:text-right",
+                              NARROW_HIDDEN,
+                            )}
+                          >
+                            {money(member?.dollarVolume ?? null)}
+                          </td>
+                          <td
+                            className={classes(
+                              TD,
+                              NUM,
+                              "tw:text-right",
+                              NARROW_HIDDEN,
+                            )}
+                          >
+                            {member?.atrPct == null
+                              ? "—"
+                              : `${member.atrPct.toFixed(2)}%`}
+                          </td>
+                          <td
+                            className={classes(
+                              TD,
+                              "tw:max-w-[340px] tw:text-[0.8rem]",
+                              NARROW_HIDDEN,
+                            )}
+                          >
+                            <span className="tw:grid tw:gap-1">
+                              {reason ? (
+                                <span className="tw:text-warn-soft">
+                                  {reason}
+                                </span>
+                              ) : item ? (
+                                <span>
+                                  {item.setupCount}{" "}
+                                  {item.setupCount === 1 ? "setup" : "setups"} ·{" "}
+                                  {item.contextCount} context
+                                </span>
+                              ) : (
+                                <span className="tw:text-ink-500">
+                                  {member?.sector ?? "—"}
+                                </span>
+                              )}
+                              {Boolean(entry?.note || entry?.tags.length) && (
+                                <span className="tw:flex tw:flex-wrap tw:items-center tw:gap-[6px] tw:text-[0.74rem] tw:text-ink-400">
+                                  {entry?.note}
+                                  {entry?.tags.map((tag) => (
+                                    <small
+                                      className="candidate-tag tw:rounded-full tw:border tw:border-line tw:px-[7px] tw:py-[1px] tw:text-[0.68rem] tw:text-ink-300"
+                                      key={tag}
+                                    >
+                                      {tag}
+                                    </small>
+                                  ))}
+                                </span>
+                              )}
+                            </span>
+                          </td>
+                        </tr>
+                        {open && (
+                          <tr className="tw:bg-surface-raised">
+                            <td
+                              colSpan={6}
+                              className="tw:border-b tw:border-line tw:px-[22px] tw:pt-1 tw:pb-5 tw:shadow-[inset_3px_0_0_var(--accent)]"
+                            >
+                              <div className="tw:grid tw:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)] tw:gap-6 tw:below-md:grid-cols-[minmax(0,1fr)]">
+                                <WarmupTimeline pipeline={pipeline} />
+                                <div>
+                                  <div className={LABEL}>Market data</div>
+                                  <dl className="tw:m-0 tw:mt-2 tw:grid tw:grid-cols-[120px_1fr] tw:gap-x-3 tw:gap-y-[5px] tw:text-[0.78rem]">
+                                    <dt className="tw:text-ink-400">Price</dt>
+                                    <dd className="tw:m-0 tw:font-mono tw:text-ink-200">
+                                      {member?.price == null
+                                        ? "—"
+                                        : `$${member.price.toFixed(2)}`}
+                                    </dd>
+                                    <dt className="tw:text-ink-400">
+                                      Market cap
+                                    </dt>
+                                    <dd className="tw:m-0 tw:font-mono tw:text-ink-200">
+                                      {money(member?.marketCap ?? null)}
+                                    </dd>
+                                    <dt className="tw:text-ink-400">
+                                      Avg volume 90d
+                                    </dt>
+                                    <dd className="tw:m-0 tw:font-mono tw:text-ink-200">
+                                      {member?.averageVolume90d == null
+                                        ? "—"
+                                        : Math.round(
+                                            member.averageVolume90d,
+                                          ).toLocaleString()}
+                                    </dd>
+                                    <dt className="tw:text-ink-400">Sector</dt>
+                                    <dd className="tw:m-0 tw:text-ink-200">
+                                      {member?.sector ?? "—"}
+                                    </dd>
+                                    {item && (
+                                      <>
+                                        <dt className="tw:text-ink-400">
+                                          Coverage
+                                        </dt>
+                                        <dd className="tw:m-0 tw:text-ink-200">
+                                          {item.setupCount} setups ·{" "}
+                                          {item.contextCount} context
+                                          {item.warmupPending.length
+                                            ? ` · waiting on ${item.warmupPending.join(", ")}`
+                                            : ""}
+                                        </dd>
+                                      </>
+                                    )}
+                                  </dl>
+                                </div>
+                              </div>
+                              {reason && (
+                                <p className="tw:m-0 tw:mt-3 tw:text-[0.8rem] tw:text-warn-soft">
+                                  {reason}
+                                </p>
+                              )}
+                              {automation.editable && row.onList && (
+                                <button
+                                  type="button"
+                                  className={classes(
+                                    LINK_BUTTON,
+                                    "tw:mt-3 tw:text-danger-soft tw:hover:text-danger tw:disabled:cursor-not-allowed tw:disabled:opacity-40",
+                                  )}
+                                  aria-label={`Remove ${row.symbol}`}
+                                  disabled={refreshing}
+                                  onClick={() => void remove(row.symbol)}
+                                >
+                                  Remove from today's list
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                        )}
+                      </Fragment>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
-          );
-        })}
-        {!automation.members.length && (
-          <div className="empty compact tw:p-[25px] tw:text-center tw:text-ink-700">
-            The daily analysis list is empty.
-          </div>
-        )}
+          ) : (
+            <p className="tw:m-0 tw:px-[22px] tw:py-6 tw:text-center tw:text-[0.84rem] tw:text-ink-400">
+              {automation.editable
+                ? "No candidates yet. Paste today's TradingView results above to begin analysis."
+                : "The daily analysis list is empty."}
+            </p>
+          )}
+        </div>
       </section>
-      <Panel as="section" className="universe-history tw:mb-[18px]">
-        <PanelHeader
-          title="Refresh history"
-          description="Newest first; an active run updates automatically."
-          descriptionClassName="tw:mt-[5px] tw:mb-0 tw:text-[0.75rem] tw:text-ink-700"
-          actions={<PanelMeta>{runs.length} RUNS</PanelMeta>}
-        />
+
+      <Drawer
+        open={drawer === "history"}
+        onClose={() => setDrawer(null)}
+        title="Refresh history"
+        size="wide"
+      >
+        <p className="tw:mx-0 tw:mt-0 tw:mb-3 tw:text-[0.78rem] tw:text-ink-400">
+          Newest first; an active run updates automatically.
+        </p>
         <div
           aria-label="Refresh history runs"
-          className="universe-history-list tw:max-h-[min(520px,65vh)] tw:overflow-y-auto tw:overscroll-contain tw:[scrollbar-gutter:stable] tw:focus-visible:outline-1 tw:focus-visible:-outline-offset-1 tw:focus-visible:outline-line-accent"
-          tabIndex={0}
+          className="universe-history tw:grid"
         >
           {runs.map((run) => (
-            <div className={classes(HISTORY_RUN_BASE)} key={run.id}>
-              <i
-                className={classes(
-                  "tw:font-mono tw:text-[0.62rem] tw:font-bold tw:not-italic",
-                  run.status === "FAILED" ? "tw:text-danger" : "tw:text-accent",
+            <div
+              className="universe-run tw:grid tw:grid-cols-[110px_1.4fr_1.4fr_1.2fr] tw:items-start tw:gap-4 tw:border-b tw:border-line-subtle tw:py-3 tw:text-[0.78rem] tw:text-ink-300 tw:below-md:grid-cols-[1fr]"
+              key={run.id}
+            >
+              <span
+                className={badge(
+                  run.status === "FAILED"
+                    ? "bad"
+                    : run.status === "RUNNING"
+                      ? "pending"
+                      : "ok",
                 )}
               >
                 {run.status}
-              </i>
-              <strong className="tw:text-ink-150">
+              </span>
+              <strong className="tw:font-medium tw:text-ink-150">
                 {new Date(run.startedAt).toLocaleString()}
-                <small className="tw:mt-1 tw:block tw:font-medium tw:text-ink-750">
-                  {run.provider} · {run.policyVersion}
+                <small className="tw:mt-1 tw:block tw:text-[0.72rem] tw:text-ink-500">
+                  {run.refreshKind === "LIST_EDIT"
+                    ? "List edit"
+                    : "Full refresh"}{" "}
+                  · {run.provider} · {run.policyVersion}
                 </small>
               </strong>
-              <span className="universe-run-funnel tw:font-mono tw:text-[0.68rem] tw:font-semibold tw:text-ink-450 tw:below-900:hidden">
+              <span className="universe-run-funnel tw:font-mono tw:text-[0.74rem]">
                 {run.status === "RUNNING"
                   ? `${run.discoveredCount} submitted so far`
-                  : `${run.discoveredCount} submitted · ${run.eligibleCount} analyzable · ${run.activatedCount} activated`}
+                  : run.refreshKind === "LIST_EDIT"
+                    ? `${run.discoveredCount} listed · ${run.evaluatedCount} newly evaluated · ${run.activatedCount} activated`
+                    : `${run.discoveredCount} submitted · ${run.eligibleCount} analyzable · ${run.activatedCount} activated`}
               </span>
-              <span className="universe-run-timing tw:text-ink-450">
+              <span className="universe-run-timing">
                 {run.completedAt
                   ? `completed ${new Date(run.completedAt).toLocaleTimeString()} · ${
                       elapsedText(run.startedAt, run.completedAt) ?? "—"
@@ -1028,19 +1046,45 @@ export function UniverseView({
                   : run.status === "RUNNING"
                     ? `running · started ${ago(now, run.startedAt)}`
                     : "not completed"}
+                {run.error || run.warnings.length ? (
+                  <b className="tw:mt-1 tw:block tw:font-medium tw:text-warn">
+                    {run.error ?? run.warnings.join(" · ")}
+                  </b>
+                ) : null}
               </span>
-              <b className="tw:text-[0.68rem] tw:font-medium tw:text-warn tw:below-900:hidden">
-                {run.error ?? run.warnings.join(" · ")}
-              </b>
             </div>
           ))}
           {!runs.length && (
-            <div className="empty compact tw:p-[25px] tw:text-center tw:text-ink-700">
+            <p className="tw:m-0 tw:py-6 tw:text-center tw:text-ink-400">
               No refreshes recorded.
-            </div>
+            </p>
           )}
         </div>
-      </Panel>
+      </Drawer>
+      <Drawer
+        open={drawer === "policy"}
+        onClose={() => setDrawer(null)}
+        title="Eligibility policy"
+      >
+        <p className="tw:mx-0 tw:mt-0 tw:mb-4 tw:text-[0.78rem] tw:leading-[1.5] tw:text-ink-400">
+          {automation.editable
+            ? "TradingView supplies the daily candidates; these Level-1 thresholds decide which ones are analyzable."
+            : `Automated Level-1 eligibility policy · ${p.version}`}
+        </p>
+        <dl className="universe-policy tw:m-0 tw:grid tw:grid-cols-[repeat(2,minmax(0,1fr))] tw:gap-x-4 tw:gap-y-4">
+          {policyFacts.map(([label, value]) => (
+            <div key={label}>
+              <dt className={LABEL}>{label}</dt>
+              <dd className="tw:m-0 tw:mt-1 tw:font-mono tw:text-[0.9rem] tw:text-ink-100">
+                {value}
+              </dd>
+            </div>
+          ))}
+        </dl>
+        <p className="tw:mx-0 tw:mt-4 tw:mb-0 tw:font-mono tw:text-[0.72rem] tw:text-ink-500">
+          {p.version}
+        </p>
+      </Drawer>
     </>
   );
 }

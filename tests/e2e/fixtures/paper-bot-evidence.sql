@@ -84,10 +84,10 @@ BEGIN
   INSERT INTO strategy_signal(
     id, instrument_id, profile_id, strategy_name, strategy_version, config_version,
     timestamp, previous_state, state, score, entry_reference, stop_reference,
-    target_reference, estimated_rr, feature_snapshot_json, reason_codes, setup_instance_id)
+    target_reference, estimated_rr, reason_codes, setup_instance_id)
   VALUES(v_signal, v_instrument, p_profile, 'ORB_RETEST', '1.0.0', p_config,
     p_ts, 'FORMING', p_state, p_score, p_entry, p_stop, p_target, 2.0,
-    '{}'::jsonb, '["BREAKOUT_CONFIRMED","RETEST_HELD"]'::jsonb, v_setup)
+    '["BREAKOUT_CONFIRMED","RETEST_HELD"]'::jsonb, v_setup)
   ON CONFLICT (id) DO NOTHING;
 
   INSERT INTO strategy_state_event(

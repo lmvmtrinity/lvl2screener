@@ -3,13 +3,13 @@
 INSERT INTO strategy_signal (
   id, instrument_id, profile_id, strategy_name, strategy_version, config_version,
   timestamp, previous_state, state, score, entry_reference, stop_reference,
-  target_reference, estimated_rr, feature_snapshot_json, reason_codes, setup_instance_id
+  target_reference, estimated_rr, reason_codes, setup_instance_id
 )
 SELECT
   '20000000-0000-4000-8000-000000000001', i.id,
   '10000000-0000-4000-8000-000000000081', 'ORB_RETEST', '1.0.0',
   'profile-orb-standard-v1', now() - interval '2 minutes', 'WATCH',
-  'READY', 88, 25.00, 24.50, 26.00, 2.0, '{}'::jsonb,
+  'READY', 88, 25.00, 24.50, 26.00, 2.0,
   '["BREAKOUT_CONFIRMED","RETEST_HELD"]'::jsonb,
   '20000000-0000-4000-8000-000000000099'
 FROM instrument i

@@ -119,6 +119,11 @@ export interface UnfinishedLiveRun {
   readonly laterSessions: number;
 }
 
+export interface PriorClosePendingHealth {
+  readonly closePending: number;
+  readonly oldestClosePendingAt: string | null;
+}
+
 export interface PaperBotStore {
   /**
    * Resumes the existing RUNNING/CLOSE_PENDING live run for the same session
@@ -128,6 +133,10 @@ export interface PaperBotStore {
    */
   startOrResumeLiveRun(input: StartRunInput): Promise<PaperBotRun>;
   listUnfinishedLiveRuns(marketId?: MarketId): Promise<UnfinishedLiveRun[]>;
+  findPriorClosePendingHealth?(
+    marketId: MarketId,
+    currentRunId: string,
+  ): Promise<PriorClosePendingHealth>;
 
   /**
    * The completed one-minute bars ending exactly at `boundaryTimestamp`, from
@@ -545,6 +554,50 @@ export class PostgresPaperBotStore implements PaperBotStore {
       run: mapRun(row),
       laterSessions: Number(row.laterSessions),
     }));
+  }
+
+  async findPriorClosePendingHealth(
+    marketId: MarketId,
+    currentRunId: string,
+  ): Promise<PriorClosePendingHealth> {
+    const result = await this.pool.query<{
+      closePending: string;
+      closePendingWithActivity: string;
+      oldestClosePendingAt: Date | string | null;
+    }>(
+      `SELECT
+         count(DISTINCT e.id) FILTER (WHERE e.status='CLOSE_PENDING') AS "closePending",
+         count(DISTINCT e.id) FILTER (
+           WHERE e.status='CLOSE_PENDING' AND a.occurred_at IS NOT NULL
+         ) AS "closePendingWithActivity",
+         min(a.occurred_at) FILTER (WHERE e.status='CLOSE_PENDING') AS "oldestClosePendingAt"
+       FROM paper_execution e
+       JOIN paper_signal_observation o ON o.id=e.observation_id
+       JOIN paper_bot_run r ON r.id=o.run_id
+       LEFT JOIN paper_bot_activity a
+         ON a.execution_id=e.id
+        AND a.event_type='EXECUTION_CLOSE_PENDING'
+        AND a.deduplication_key='execution:' || e.id || ':status:CLOSE_PENDING'
+       WHERE r.source='LIVE'
+         AND r.market_id=$1
+         AND r.id<>$2
+         AND e.status='CLOSE_PENDING'
+         AND e.close_abandoned_at IS NULL`,
+      [marketId, currentRunId],
+    );
+    const row = result.rows[0];
+    const closePending = Number(row?.closePending ?? 0);
+    const closePendingWithActivity = Number(row?.closePendingWithActivity ?? 0);
+    return {
+      closePending,
+      oldestClosePendingAt:
+        closePending !== closePendingWithActivity ||
+        row?.oldestClosePendingAt == null
+          ? null
+          : row.oldestClosePendingAt instanceof Date
+            ? row.oldestClosePendingAt.toISOString()
+            : new Date(row.oldestClosePendingAt).toISOString(),
+    };
   }
 
   async startBacktestRun(input: StartRunInput): Promise<PaperBotRun> {

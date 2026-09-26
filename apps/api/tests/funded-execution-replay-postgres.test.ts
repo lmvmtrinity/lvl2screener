@@ -24,7 +24,10 @@ import type { AssumptionsSnapshot } from "../src/paper-bot/types.js";
 import { PostgresFundedExecutionTrainingStore } from "../src/statistical-models/funded-execution-training-repository.js";
 import { FundedExecutionTrainingService } from "../src/statistical-models/funded-execution-training-service.js";
 import type { FundedExecutionTrainingClient } from "../src/statistical-models/funded-execution-training-service.js";
-import { isolatedDatabaseUrl } from "./isolated-database.js";
+import {
+  isolatedDatabaseUrl,
+  pauseHistoricalFixtureMaintenance,
+} from "./isolated-database.js";
 
 /**
  * FP02-R3 replay chronology integration. The four chronological replay sessions
@@ -175,6 +178,7 @@ describe.skipIf(!databaseUrl)(
     beforeAll(async () => {
       pool = new Pool({ connectionString: databaseUrl, max: 6 });
       await migrate(pool);
+      await pauseHistoricalFixtureMaintenance(pool);
       store = new PostgresFundedExecutionTrainingStore(pool);
       await pool.query(
         `INSERT INTO strategy_definition(id,strategy_key,version,name,description,analysis_kind)

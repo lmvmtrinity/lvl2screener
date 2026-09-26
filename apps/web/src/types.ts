@@ -24,6 +24,8 @@ export type PaperBotStatus = {
   reconciliationBacklog: number | null;
   unreconcilableEvents: number;
   overdueRuns: number;
+  priorClosePendingExecutions?: number;
+  oldestPriorClosePendingAgeMs?: number | null;
   unresolvedCoordinatedPositions?: number;
   completedRunsWithUnresolvedCoordinatedPositions?: number;
   oldestUnresolvedCoordinatedAgeMs?: number | null;
@@ -34,6 +36,9 @@ export type PaperBotStatus = {
   lastError: string | null;
   lastSuccessfulProcessingAt?: string | null;
   fundedProcessing?: boolean;
+  fundedCycleState?: "PROCESSED" | "WAITING" | "FAILED";
+  fundedBindingState?: "UNBOUND" | "BOUND" | "WAITING_FOR_PRIOR_RUN" | "FAILED";
+  fundedBlockReason?: "PRIOR_RUN_ACTIVE" | null;
   fundedLastSuccessfulProcessingAt?: string | null;
   /** Account-wide funded state across runs, not just the current run. */
   funded?: {

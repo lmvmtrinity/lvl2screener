@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { readFileSync } from "node:fs";
 import {
   BROKER_BUDGET,
   decideBudget,
@@ -6,6 +7,8 @@ import {
   type BudgetUsage,
 } from "../src/questrade/request-budget.js";
 import { QuestradeRateLimiter } from "../src/questrade/rate-limiter.js";
+import { PostgresRequestBudget } from "../src/questrade/postgres-request-budget.js";
+import type { Pool } from "pg";
 import type {
   QuestradeRequestObservation,
   QuestradeRequestObserver,
@@ -22,6 +25,34 @@ const baseline: BudgetUsage = {
   lastDiscoveryMs: -Infinity,
   blockedUntilMs: 0,
 };
+
+it("gets a durable budget decision in one database call", async () => {
+  const query = vi.fn(async () => ({
+    rows: [
+      {
+        granted: false,
+        retry_after_ms: 50,
+        remaining_hour: 14999,
+        remaining_discovery_hour: 1799,
+      },
+    ],
+  }));
+  const budget = new PostgresRequestBudget(
+    { query } as unknown as Pool,
+    "broker",
+  );
+  await expect(budget.acquire(true)).resolves.toEqual({
+    granted: false,
+    retryAfterMs: 50,
+    remainingHour: 14999,
+    remainingDiscoveryHour: 1799,
+  });
+  expect(query).toHaveBeenCalledTimes(1);
+  expect(query).toHaveBeenCalledWith(
+    expect.stringContaining("questrade_acquire_request_budget"),
+    ["broker", true],
+  );
+});
 afterEach(() => vi.useRealTimers());
 
 describe("broker request budget", () => {
@@ -356,5 +387,31 @@ describe("bounded discovery queue", () => {
       discoveryCancelled: 0,
       discoveryExpired: 0,
     });
+  });
+});
+
+describe("database broker budget function", () => {
+  it("uses the same limits as the in-process budget rules", () => {
+    const sql = readFileSync(
+      new URL(
+        "../../../database/init/151-questrade-budget-acquire.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    const reserveLimit =
+      BROKER_BUDGET.hour - BROKER_BUDGET.monitoringReserveHour;
+    for (const fragment of [
+      `v_second_count >= ${BROKER_BUDGET.second}`,
+      `v_hour_count >= ${BROKER_BUDGET.hour}`,
+      `INTERVAL '${BROKER_BUDGET.spacingMs} milliseconds'`,
+      `INTERVAL '${BROKER_BUDGET.discoverySpacingMs / 1_000} second'`,
+      `v_discovery_count >= ${BROKER_BUDGET.discoveryHour}`,
+      `v_hour_count >= ${reserveLimit}`,
+      `greatest(0,${BROKER_BUDGET.hour}-v_hour_count`,
+      `${BROKER_BUDGET.discoveryHour}-v_discovery_count`,
+      `${reserveLimit}-v_hour_count`,
+    ])
+      expect(sql).toContain(fragment);
   });
 });

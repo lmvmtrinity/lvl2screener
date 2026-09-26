@@ -190,6 +190,71 @@ describe("LearningDashboardService", () => {
     expect(overview.pipelineHealth.nextCheckIsEstimate).toBe(true);
   });
 
+  it("uses the frozen cohort count for new-outcome readiness", async () => {
+    const evidenceService = {
+      ...mockEvidenceService,
+      listCohorts: async () => [
+        {
+          marketId: "CA_TSX" as const,
+          strategy: "ORB_RETEST" as const,
+          strategyVersion: "v1",
+          profileConfigId,
+          configVersion: "1",
+          executionModelVersion: "paper-model-v1",
+          assumptions: {},
+          closedQuoteCount: 300,
+          positives: 150,
+          negatives: 150,
+          firstSignalAt: "2026-08-01T14:00:00.000Z",
+          lastSignalAt: "2026-09-01T14:00:00.000Z",
+          missingFeatureCount: 0,
+        },
+      ],
+      latestDatasetFor: async () => ({
+        id: datasetId,
+        sourceKind: "PAPER_EVIDENCE" as const,
+        marketId: "CA_TSX" as const,
+        policyVersion: "paper-evidence-v1",
+        cohort: {
+          marketId: "CA_TSX" as const,
+          strategy: "ORB_RETEST" as const,
+          strategyVersion: "v1",
+          profileConfigId,
+          configVersion: "1",
+          executionModelVersion: "paper-model-v1",
+          assumptions: {},
+          closedQuoteCount: 300,
+          positives: 150,
+          negatives: 150,
+          firstSignalAt: "2026-08-01T14:00:00.000Z",
+          lastSignalAt: "2026-09-01T14:00:00.000Z",
+          missingFeatureCount: 0,
+        },
+        requestedCutoff: "2026-09-01T14:00:00.000Z",
+        effectiveCutoff: "2026-08-25T14:00:00.000Z",
+        sourceDigest: "digest-1",
+        sourceRowCount: 220,
+        excludedCounts: {},
+        createdAt: "2026-08-25T14:00:00.000Z",
+      }),
+    } satisfies Partial<PaperEvidenceTrainingService>;
+    const service = new LearningDashboardService(
+      mockAutomationStore as LearningAutomationStore,
+      evidenceService as unknown as PaperEvidenceTrainingService,
+      mockModelService as StatisticalModelApi,
+      mockMonitoringService as PredictionMonitoringApi,
+      mockReportingService as PaperReportingApi,
+      true,
+    );
+
+    const overview = await service.overview();
+    expect(overview.evidenceReadiness[0]?.newOutcomesSinceLastDataset).toBe(0);
+    expect(overview.evidenceReadiness[0]?.qualifies).toBe(false);
+    expect(overview.evidenceReadiness[0]?.disqualificationReason).toBe(
+      "INSUFFICIENT_NEW_OUTCOMES (0 < 50)",
+    );
+  });
+
   function serviceWithLatest(
     latestRun: NonNullable<
       Awaited<ReturnType<LearningAutomationStore["latestRun"]>>

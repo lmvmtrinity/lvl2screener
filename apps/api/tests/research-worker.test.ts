@@ -115,6 +115,30 @@ describe("ResearchWorker", () => {
     );
   });
 
+  it("claims nothing while paused and resumes when the pause lifts", async () => {
+    const { repo } = fakeRepository(undefined);
+    let paused = true;
+    const info = vi.fn();
+    const worker = new ResearchWorker(
+      repo as unknown as ResearchJobRepository,
+      { BACKTEST: { execute: vi.fn() } },
+      {
+        ownerId: "worker-a",
+        claimsPaused: () => paused,
+        logger: { info, error: vi.fn() },
+      },
+    );
+    expect(await worker.runOnce()).toBe(false);
+    expect(repo.claimNext).not.toHaveBeenCalled();
+    paused = false;
+    await worker.runOnce();
+    expect(repo.claimNext).toHaveBeenCalledOnce();
+    expect(info.mock.calls.map(([fields]) => fields.event)).toEqual([
+      "RESEARCH_CLAIMS_PAUSED",
+      "RESEARCH_CLAIMS_RESUMED",
+    ]);
+  });
+
   it("records a categorized failure and lets the repository decide retry vs terminal", async () => {
     const job = claimed();
     const { repo, calls } = fakeRepository(job);
@@ -265,5 +289,41 @@ describe("ResearchWorker", () => {
     await new Promise((resolve) => setTimeout(resolve, 20));
     // Reaching this line without the test timing out means stop() resolved and the loop exited.
     await expect(worker.stop()).resolves.toBeUndefined();
+  });
+
+  it("waits for an in-flight lease sweep before stop() resolves", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let reaps = 0;
+    const repo = {
+      claimNext: vi.fn(async () => undefined),
+      heartbeat: vi.fn(async () => ({ cancellationRequested: false })),
+      complete: vi.fn(async () => undefined),
+      fail: vi.fn(async () => undefined),
+      markCancelled: vi.fn(async () => undefined),
+      reapExpiredLeases: vi.fn(async () => {
+        reaps += 1;
+        await gate;
+        return { requeued: 0, interrupted: 0 };
+      }),
+    };
+    const worker = new ResearchWorker(
+      repo as unknown as ResearchJobRepository,
+      {},
+      { ownerId: "worker-a", pollIntervalMs: 5, reapIntervalMs: 5 },
+    );
+    worker.start();
+    await vi.waitFor(() => expect(reaps).toBeGreaterThan(0));
+    let stopped = false;
+    const stopping = worker.stop().then(() => {
+      stopped = true;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(stopped).toBe(false);
+    release();
+    await stopping;
+    expect(stopped).toBe(true);
   });
 });

@@ -17,7 +17,7 @@ type Row = {
   status: string;
   model_type: string;
   model_version: string;
-  source_kind: "BACKTEST_RUN" | "PAPER_EVIDENCE";
+  source_kind: "BACKTEST_RUN" | "PAPER_EVIDENCE" | "CAPTURED_BACKTEST_RESEARCH";
   backtest_run_id: string | null;
   training_dataset_id: string | null;
   strategy_name: string;

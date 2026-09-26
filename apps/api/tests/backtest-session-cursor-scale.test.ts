@@ -22,10 +22,11 @@ function syntheticInstrumentIds(): string[] {
   );
 }
 
-// 30 consecutive calendar days from 2026-06-01.
+// 30 consecutive calendar days from an uncovered year. Unknown dates remain in
+// the producer scope for truthful downstream calendar UNKNOWN evidence.
 function sessionDates(): string[] {
   const dates: string[] = [];
-  const start = new Date("2026-06-01T00:00:00Z");
+  const start = new Date("2035-06-01T00:00:00Z");
   for (let index = 0; index < SESSION_COUNT; index++) {
     const day = new Date(start.getTime() + index * 86_400_000);
     dates.push(day.toISOString().slice(0, 10));
@@ -52,12 +53,12 @@ function syntheticReplayInput(instrumentIds: string[]) {
       observedAt: "2026-08-25T00:00:00.000Z",
       tables: {
         quoteSnapshot: {
-          earliest: "2026-06-01T13:30:00.000Z",
-          latest: "2026-06-30T20:00:00.000Z",
+          earliest: "2035-06-01T13:30:00.000Z",
+          latest: "2035-06-30T20:00:00.000Z",
         },
         candle: { earliest: null, latest: null },
       },
-      replay: { earliestDate: "2026-06-01", latestDate: "2026-06-30" },
+      replay: { earliestDate: "2035-06-01", latestDate: "2035-06-30" },
     },
     warnings: [],
     candidateProvenance: "CURRENT_ACTIVE_UNIVERSE" as const,

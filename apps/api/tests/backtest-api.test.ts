@@ -75,6 +75,7 @@ const run = {
   startDate: "2026-08-01",
   endDate: "2026-08-25",
   trades: [],
+  replayInput: { inputHash: "large frozen replay input", candidates: [1, 2] },
 } as unknown as BacktestRun;
 
 class FakeBacktests implements BacktestApi {
@@ -255,7 +256,7 @@ describe("Phase 8 backtest API", () => {
       });
     expect(
       (await app.inject({ method: "GET", url: "/api/backtests" })).json(),
-    ).toEqual({ runs: [run] });
+    ).toEqual({ runs: [{ ...run, replayInput: undefined }] });
     expect(
       (
         await app.inject({
@@ -305,10 +306,12 @@ describe("Phase 8 backtest API", () => {
       parameters: { rvolAtTimeMin: 2, scoreCutoff: 0 },
       slippageBps: 2,
     });
-    expect(
-      (await app.inject({ method: "GET", url: `/api/backtests/${id}` }))
-        .statusCode,
-    ).toBe(200);
+    const detail = await app.inject({
+      method: "GET",
+      url: `/api/backtests/${id}`,
+    });
+    expect(detail.statusCode).toBe(200);
+    expect(detail.json().replayInput).toEqual(run.replayInput);
     await app.close();
   });
 

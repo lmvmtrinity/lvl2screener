@@ -9,6 +9,11 @@ import type { Pool } from "pg";
 import type { FrozenCoverageRecipe, MarketId } from "@tsx-scanner/contracts";
 import { marketSessionTimezone } from "./execution-provenance.js";
 import {
+  calendarPolicyHashFor,
+  calendarProvenanceForAt,
+  legacyCalendarPolicyHash,
+} from "../universe/market-calendar.js";
+import {
   buildSessionPayload,
   type ReplaySessionPolicy,
 } from "./backtest-repository.js";
@@ -144,6 +149,7 @@ export class PostgresResearchCoverageSource implements ResearchCoverageSource {
     request: CoverageRequest,
     options: CoverageReadOptions = {},
   ): Promise<FrozenCoverageInputs> {
+    const calendarMode = resolveCalendarMode(request);
     const manifest = await this.pool.query<ManifestRow>(
       "SELECT market_id,manifest FROM research_manifest WHERE hash=$1",
       [request.manifestHash],
@@ -166,7 +172,7 @@ export class PostgresResearchCoverageSource implements ResearchCoverageSource {
     const sessionPayloads: Record<string, Record<string, unknown>> = {};
     let retainedRecords = 0;
     for (const [index, date] of request.sessionDates.entries()) {
-      const session = await this.readSession(request, date);
+      const session = await this.readSession(request, date, calendarMode);
       retainedRecords += session.retainedRecordCount;
       if (retainedRecords > MAX_COVERAGE_RETAINED_RECORDS)
         throw new CoverageInputLimitError(
@@ -185,6 +191,7 @@ export class PostgresResearchCoverageSource implements ResearchCoverageSource {
   private async readSession(
     request: CoverageRequest,
     date: string,
+    calendarMode: CalendarMode,
   ): Promise<{
     expected: ExpectedInputCell[];
     receipts: RetainedInputReceipt[];
@@ -193,6 +200,18 @@ export class PostgresResearchCoverageSource implements ResearchCoverageSource {
     payload: Record<string, unknown>;
   }> {
     const basePolicy = this.policies[request.marketId];
+    const calendarEvidence =
+      calendarMode === "BOUND"
+        ? calendarProvenanceForAt(
+            request.marketId,
+            request.sessionDates,
+            request.inputCutoff,
+          )
+        : null;
+    const calendarIndex = request.sessionDates.indexOf(date);
+    const sessionBoundary = calendarEvidence?.verified
+      ? (calendarEvidence.sessions[calendarIndex] ?? null)
+      : null;
     const policy: CoverageSessionPolicy = request.recipe
       ? {
           ...basePolicy,
@@ -200,8 +219,12 @@ export class PostgresResearchCoverageSource implements ResearchCoverageSource {
           streamRequirements: request.recipe.streamRequirements,
         }
       : basePolicy;
-    const start = zonedBoundary(date, policy.windowStart, policy.timezone);
-    const end = zonedBoundary(date, policy.windowEnd, policy.timezone);
+    const start = sessionBoundary
+      ? new Date(sessionBoundary.open)
+      : zonedBoundary(date, policy.windowStart, policy.timezone);
+    const end = sessionBoundary
+      ? new Date(sessionBoundary.close)
+      : zonedBoundary(date, policy.windowEnd, policy.timezone);
     const streamRequirements = policy.streamRequirements ?? [
       {
         timeframe: policy.warmupTimeframe,
@@ -298,7 +321,9 @@ export class PostgresResearchCoverageSource implements ResearchCoverageSource {
                 ? "REQUIRED"
                 : "UNKNOWN",
             membershipSourceHash: membershipProvenance,
-            calendarSourceHash: null,
+            calendarSourceHash: calendarEvidence?.verified
+              ? calendarEvidence.sourceHash
+              : null,
             windowStart: start.toISOString(),
             windowEnd: end.toISOString(),
             maxQuoteGapMs: policy.maxQuoteGapMs,
@@ -423,6 +448,7 @@ export class PostgresResearchCoverageSource implements ResearchCoverageSource {
             local_date: dateInZone(row.start_time, policy.timezone),
           })),
         replayPolicy,
+        sessionBoundary,
       );
       const payloadHash = hashResearchSession(date, payload);
       await client.query("COMMIT");
@@ -471,6 +497,38 @@ function defaultPolicy(
       maxQuoteGapMs: 30_000,
     }
   );
+}
+
+type CalendarMode = "LEGACY" | "BOUND";
+
+function resolveCalendarMode(request: CoverageRequest): CalendarMode {
+  const recipe = request.recipe;
+  if (!recipe) return "LEGACY";
+  if (recipe.marketId !== request.marketId)
+    throw new Error("COVERAGE_CALENDAR_MARKET_MISMATCH");
+  if (recipe.inputCutoff !== request.inputCutoff)
+    throw new Error("COVERAGE_CALENDAR_CUTOFF_MISMATCH");
+  if (
+    recipe.sessionDates.length !== request.sessionDates.length ||
+    recipe.sessionDates.some(
+      (date, index) => date !== request.sessionDates[index],
+    )
+  )
+    throw new Error("COVERAGE_CALENDAR_SCOPE_MISMATCH");
+  const legacyHash = legacyCalendarPolicyHash(
+    recipe.replayPolicy?.timezone ?? marketSessionTimezone(request.marketId),
+  );
+  if (recipe.calendarPolicyHash === legacyHash) return "LEGACY";
+  const expectedHash = calendarPolicyHashFor({
+    marketId: request.marketId,
+    timezone:
+      recipe.replayPolicy?.timezone ?? marketSessionTimezone(request.marketId),
+    sessionDates: request.sessionDates,
+    inputCutoff: request.inputCutoff,
+  });
+  if (recipe.calendarPolicyHash !== expectedHash)
+    throw new Error("COVERAGE_CALENDAR_POLICY_HASH_MISMATCH");
+  return "BOUND";
 }
 
 function dbTimeframe(

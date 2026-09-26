@@ -1,5 +1,8 @@
 import {
   executableStrategyStudyJobPayloadSchema,
+  type StrategyStudyReport,
+  type StrategyLearningTrialAttempt,
+  type StrategyLearningExperimentIdentity,
   type MarketId,
 } from "@tsx-scanner/contracts";
 import type { Pool } from "pg";
@@ -23,7 +26,16 @@ import {
   assertStudyIdentity,
   type ResearchRuntimeIdentityProvider,
 } from "../../backtests/research-runtime-identity.js";
-import { canonicalJson } from "../../backtests/research-coverage.js";
+import {
+  canonicalJson,
+  contentHash,
+} from "../../backtests/research-coverage.js";
+import {
+  boundedRuleTrialClaim,
+  buildBoundedRuleTrialAttempt,
+} from "../../backtests/bounded-rule-candidates.js";
+import { PostgresStrategyLearningExperimentStore } from "../../backtests/strategy-learning-experiment-repository.js";
+import { StrategyLearningExperimentService } from "../../backtests/strategy-learning-experiment-service.js";
 import {
   CategorizedError,
   CancelledError,
@@ -60,7 +72,8 @@ export class StrategyStudyJobHandler implements ResearchJobHandler {
     );
     if (
       previous?.report &&
-      canonicalJson(previous.plan) === canonicalJson(parsed.data.plan)
+      canonicalJson(previous.plan) === canonicalJson(parsed.data.plan) &&
+      !parsed.data.plan.boundedRuleCandidate
     )
       return { resultRefId: previous.id };
     try {
@@ -107,6 +120,62 @@ export class StrategyStudyJobHandler implements ResearchJobHandler {
       fence,
       parsed.data.authority,
     );
+    let trial:
+      | {
+          service: StrategyLearningExperimentService;
+          attemptId: string;
+          candidateIdentity: string;
+          candidateHash: string;
+          searchSpaceHash: string;
+          studySpecHash: string;
+        }
+      | undefined;
+    const candidate = parsed.data.plan.boundedRuleCandidate;
+    if (candidate) {
+      const studySpecHash = contentHash(parsed.data.plan);
+      await store.register(parsed.data.plan);
+      const service = new StrategyLearningExperimentService(
+        new PostgresStrategyLearningExperimentStore(this.pool),
+      );
+      const identity: StrategyLearningExperimentIdentity = {
+        studyId: parsed.data.plan.experimentId,
+        studySpecHash,
+        marketId: parsed.data.plan.comparison.marketId,
+        sourceDigest: parsed.data.plan.binding.inputHash,
+        binding: parsed.data.plan.binding,
+        authority: parsed.data.authority!,
+        // Existing authorization permits one study; this ledger entry covers its one frozen candidate.
+        trialBudget: 1,
+      };
+      await service.freeze(identity);
+      const claim = await service.claimTrial(
+        identity.studyId,
+        identity.studySpecHash,
+        boundedRuleTrialClaim(candidate),
+        fence,
+      );
+      if (claim.status === "COMPLETED") {
+        if (!previous?.report || !claim.terminalAttempt)
+          throw new Error("STRATEGY_STUDY_TRIAL_REPORT_MISSING");
+        const expected = buildBoundedRuleTrialAttempt({
+          plan: parsed.data.plan,
+          report: previous.report,
+          candidateIdentity: claim.candidateIdentity,
+          attemptId: claim.terminalAttempt.attemptId,
+        });
+        if (canonicalJson(expected) !== canonicalJson(claim.terminalAttempt))
+          throw new Error("STRATEGY_STUDY_TRIAL_REPORT_CONFLICT");
+        return { resultRefId: previous.id };
+      }
+      trial = {
+        service,
+        attemptId: claim.attemptId,
+        candidateIdentity: claim.candidateIdentity,
+        candidateHash: candidate.candidateHash,
+        searchSpaceHash: candidate.searchSpaceHash,
+        studySpecHash,
+      };
+    }
     const fencedBacktests = this.backtests.withFence(fence, (client) =>
       assertStudyAuthority(client, parsed.data.authority, fence).then(
         () => undefined,
@@ -144,9 +213,63 @@ export class StrategyStudyJobHandler implements ResearchJobHandler {
         if (heartbeat.cancellationRequested)
           throw new CancelledError("Study cancelled before next stage");
       },
+      afterStageClaim: async (_plan, stage) => {
+        if (stage === "TEST" && trial)
+          await trial.service.linkFinalTest(
+            parsed.data.plan.experimentId,
+            trial.studySpecHash,
+            fence.jobId,
+          );
+      },
     });
     try {
-      const report = await service.evaluate(parsed.data.plan);
+      let report: StrategyStudyReport;
+      try {
+        report = await service.evaluate(parsed.data.plan);
+      } catch (error) {
+        // A cancellation may occur after a durable stage claim but before its
+        // result is saved. Keep the candidate claim pending and charged so a
+        // retry can resume that exact study without inventing a terminal result.
+        if (trial && !(error instanceof CancelledError)) {
+          const attempt: StrategyLearningTrialAttempt = {
+            attemptId: trial.attemptId,
+            candidateIdentity: trial.candidateIdentity,
+            status: "FAILED",
+            outcome: {
+              version: "bounded-rule-trial-failure-v1",
+              candidateIdentity: trial.candidateIdentity,
+              candidateHash: trial.candidateHash,
+              searchSpaceHash: trial.searchSpaceHash,
+              studyId: parsed.data.plan.experimentId,
+              studySpecHash: trial.studySpecHash,
+              reason: error instanceof Error ? error.message : String(error),
+            },
+          };
+          await trial.service
+            .recordTrial(
+              parsed.data.plan.experimentId,
+              trial.studySpecHash,
+              attempt,
+              fence,
+            )
+            .catch(() => undefined);
+        }
+        throw error;
+      }
+      if (trial) {
+        const attempt = buildBoundedRuleTrialAttempt({
+          plan: parsed.data.plan,
+          report,
+          candidateIdentity: trial.candidateIdentity,
+          attemptId: trial.attemptId,
+        });
+        await trial.service.recordTrial(
+          parsed.data.plan.experimentId,
+          trial.studySpecHash,
+          attempt,
+          fence,
+        );
+      }
       return { resultRefId: report.experimentId };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -172,7 +295,9 @@ export class StrategyStudyJobHandler implements ResearchJobHandler {
       if (
         message.includes("STUDY_INPUT_CHANGED") ||
         message.includes("STRATEGY_STUDY_SPEC_CONFLICT") ||
-        message.includes("STUDY_SESSION_SCOPE_MISMATCH")
+        message.includes("STUDY_SESSION_SCOPE_MISMATCH") ||
+        message.includes("STRATEGY_STUDY_TEST_SESSION_ALREADY_RESERVED") ||
+        message.includes("STRATEGY_STUDY_TEST_SCOPE_UNPROVEN")
       )
         throw new CategorizedError("VALIDATION", message, { cause: error });
       throw error;

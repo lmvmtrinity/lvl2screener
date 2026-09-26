@@ -17,6 +17,32 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-tsx_scanner}
       POSTGRES_USER: ${POSTGRES_USER:-tsx_scanner}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-local_development_only}
+    # Operational guardrails for the retained (100GB-class) database:
+    # - Docker's default 64MB /dev/shm makes parallel hash joins/sorts fail with
+    #   "could not resize shared memory segment: No space left on device"; 1g matches the
+    #   image-tuned 4GB shared_buffers posture.
+    # - max_wal_size is raised from the 1GB default because WAL-driven checkpoints were
+    #   occurring too frequently under the scanner's write volume. PostgreSQL treats it as a
+    #   soft limit: fewer, larger checkpoints in exchange for more disk and longer recovery.
+    # - pg_stat_statements is appended to the image's existing timescaledb preload for query
+    #   attribution; create the extension per database (see docs/baseline/operations-runbook.md).
+    # - log_temp_files=10240 only reports spills above 10MB: the September 18 review identified
+    #   the fingerprint aggregate and the funded projection bodies, so per-file logging is no
+    #   longer needed. wal_compression=zstd reduces checkpoint WAL volume and track_io_timing
+    #   attributes read/write latency to pg_stat_statements.
+    shm_size: 1g
+    command:
+      - postgres
+      - -c
+      - shared_preload_libraries=timescaledb,pg_stat_statements
+      - -c
+      - max_wal_size=16GB
+      - -c
+      - log_temp_files=10240
+      - -c
+      - wal_compression=zstd
+      - -c
+      - track_io_timing=on
     # W5: no host port. Reach it with `docker compose exec postgres psql ...`, or layer
     # docker-compose.debug-ports.yml (host-only, never used by the default or remote profile) for
     # a directly reachable localhost port during local development.
@@ -35,11 +61,17 @@ services:
       retries: 12
       start_period: 10s
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
 
   scanner:
     build:
       context: .
       dockerfile: services/scanner/Dockerfile
+    image: ${SCANNER_IMAGE:-tsx-scanner:local}
     environment:
       LOG_LEVEL: ${LOG_LEVEL:-info}
       SCANNER_SERVICE_TOKEN: ${SCANNER_SERVICE_TOKEN:-local-development-only-scanner-token}
@@ -66,6 +98,42 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+
+  scanner-research:
+    image: ${SCANNER_IMAGE:-tsx-scanner:local}
+    environment:
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      SCANNER_SERVICE_TOKEN: ${SCANNER_SERVICE_TOKEN:-local-development-only-scanner-token}
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/ready', timeout=2)",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
 
   api:
     build:
@@ -76,13 +144,17 @@ services:
       API_PORT: 3000
       DATABASE_URL: postgresql://${POSTGRES_USER:-tsx_scanner}:${POSTGRES_PASSWORD:-local_development_only}@postgres:5432/${POSTGRES_DB:-tsx_scanner}
       SCANNER_URL: http://scanner:8000
+      RESEARCH_SCANNER_URL: http://scanner-research:8000
       SCANNER_SERVICE_TOKEN: ${SCANNER_SERVICE_TOKEN:-local-development-only-scanner-token}
       WEB_ORIGIN: ${WEB_ORIGIN:-http://localhost:${WEB_PORT:-5173}}
       MARKET_DATA_MODE: ${MARKET_DATA_MODE:-mock}
       EODHD_API_TOKEN: ${EODHD_API_TOKEN:-}
       MASSIVE_API_KEY: ${MASSIVE_API_KEY:-}
+      # Read only by the historical-import command (ADR-019).
+      DATABENTO_API_KEY: ${DATABENTO_API_KEY:-}
       QUESTRADE_REFRESH_TOKEN: ${QUESTRADE_REFRESH_TOKEN:-}
       MARKET_DATA_POLL_MS: ${MARKET_DATA_POLL_MS:-2000}
+      STRATEGY_PERSIST_HEARTBEAT_MS: ${STRATEGY_PERSIST_HEARTBEAT_MS:-60000}
       DISCOVERY_POLL_MS: ${DISCOVERY_POLL_MS:-15000}
       DISCOVERY_LEASE_MS: ${DISCOVERY_LEASE_MS:-600000}
       DISCOVERY_WORKERS: ${DISCOVERY_WORKERS:-4}
@@ -91,7 +163,7 @@ services:
       DISCOVERY_INPUT_RETENTION_DAYS: ${DISCOVERY_INPUT_RETENTION_DAYS:-30}
       DISCOVERY_SUMMARY_RETENTION_DAYS: ${DISCOVERY_SUMMARY_RETENTION_DAYS:-365}
       DISCOVERY_FAST_FUNNEL_ENABLED: ${DISCOVERY_FAST_FUNNEL_ENABLED:-false}
-      QUOTE_BATCH_SIZE: ${QUOTE_BATCH_SIZE:-50}
+      QUOTE_BATCH_SIZE: ${QUOTE_BATCH_SIZE:-100}
       UNIVERSE_MINIMUM_SIZE: ${UNIVERSE_MINIMUM_SIZE:-1}
       UNIVERSE_MIN_PRICE: ${UNIVERSE_MIN_PRICE:-5}
       UNIVERSE_MAX_PRICE: ${UNIVERSE_MAX_PRICE:-150}
@@ -99,6 +171,15 @@ services:
       UNIVERSE_MIN_AVERAGE_VOLUME: ${UNIVERSE_MIN_AVERAGE_VOLUME:-500000}
       UNIVERSE_MIN_DOLLAR_VOLUME: ${UNIVERSE_MIN_DOLLAR_VOLUME:-20000000}
       UNIVERSE_MIN_ATR_PCT: ${UNIVERSE_MIN_ATR_PCT:-1.5}
+      DAILY_LIST_SEED_ENABLED: ${DAILY_LIST_SEED_ENABLED:-false}
+      DAILY_LIST_SEED_TIME: ${DAILY_LIST_SEED_TIME:-08:45}
+      DAILY_LIST_SEED_CA_COUNT: ${DAILY_LIST_SEED_CA_COUNT:-10}
+      DAILY_LIST_SEED_US_COUNT: ${DAILY_LIST_SEED_US_COUNT:-15}
+      DAILY_LIST_RESCAN_ENABLED: ${DAILY_LIST_RESCAN_ENABLED:-false}
+      DAILY_LIST_RESCAN_TIME: ${DAILY_LIST_RESCAN_TIME:-09:55}
+      DAILY_LIST_RESCAN_MARKETS: ${DAILY_LIST_RESCAN_MARKETS:-CA_TSX}
+      DAILY_LIST_RESCAN_MAX_ADDS: ${DAILY_LIST_RESCAN_MAX_ADDS:-5}
+      DAILY_LIST_RESCAN_MAX_CANDIDATES: ${DAILY_LIST_RESCAN_MAX_CANDIDATES:-150}
       TSX_UNIVERSE_SYMBOLS: ${TSX_UNIVERSE_SYMBOLS:-}
       ENABLED_MARKETS: ${ENABLED_MARKETS:-CA_TSX,US_EQUITIES}
       US_MARKET_DATA_ENABLED: ${US_MARKET_DATA_ENABLED:-true}
@@ -115,6 +196,8 @@ services:
       PAPER_MODEL_TRAINING_CHECK_MS: ${PAPER_MODEL_TRAINING_CHECK_MS:-}
       BACKTEST_AUTOMATION_ENABLED: ${BACKTEST_AUTOMATION_ENABLED:-false}
       BACKTEST_AUTOMATION_MAX_OUTSTANDING: ${BACKTEST_AUTOMATION_MAX_OUTSTANDING:-2}
+      FUNDED_SHADOW_OBSERVATION_ENABLED: ${FUNDED_SHADOW_OBSERVATION_ENABLED:-false}
+      FUNDED_SHADOW_MAX_PREDICTION_LAG_MS: ${FUNDED_SHADOW_MAX_PREDICTION_LAG_MS:-30000}
       OPENING_RANGE_START: ${OPENING_RANGE_START:-09:30}
       OPENING_RANGE_END: ${OPENING_RANGE_END:-09:45}
       SCANNING_START: ${SCANNING_START:-09:45}
@@ -193,6 +276,11 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
 
   worker:
     build:
@@ -202,6 +290,7 @@ services:
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-tsx_scanner}:${POSTGRES_PASSWORD:-local_development_only}@postgres:5432/${POSTGRES_DB:-tsx_scanner}
       SCANNER_URL: http://scanner:8000
+      RESEARCH_SCANNER_URL: http://scanner-research:8000
       SCANNER_SERVICE_TOKEN: ${SCANNER_SERVICE_TOKEN:-local-development-only-scanner-token}
       MARKET_DATA_MODE: ${MARKET_DATA_MODE:-mock}
       # The worker loads the shared API configuration at startup. In live mode that
@@ -229,6 +318,8 @@ services:
       PAPER_MODEL_TRAINING_CHECK_MS: ${PAPER_MODEL_TRAINING_CHECK_MS:-}
       BACKTEST_AUTOMATION_ENABLED: ${BACKTEST_AUTOMATION_ENABLED:-false}
       BACKTEST_AUTOMATION_MAX_OUTSTANDING: ${BACKTEST_AUTOMATION_MAX_OUTSTANDING:-2}
+      FUNDED_SHADOW_OBSERVATION_ENABLED: ${FUNDED_SHADOW_OBSERVATION_ENABLED:-false}
+      FUNDED_SHADOW_MAX_PREDICTION_LAG_MS: ${FUNDED_SHADOW_MAX_PREDICTION_LAG_MS:-30000}
       OPENING_RANGE_START: ${OPENING_RANGE_START:-09:30}
       OPENING_RANGE_END: ${OPENING_RANGE_END:-09:45}
       SCANNING_START: ${SCANNING_START:-09:45}
@@ -241,6 +332,7 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-info}
       RESEARCH_JOB_LEASE_MS: ${RESEARCH_JOB_LEASE_MS:-720000}
       RESEARCH_JOB_POLL_MS: ${RESEARCH_JOB_POLL_MS:-2000}
+      RESEARCH_PAUSE_DURING_SESSION: ${RESEARCH_PAUSE_DURING_SESSION:-true}
       # The worker never serves HTTP, but it shares apps/api/src/config.ts with the API process,
       # so a remote-profile secret requirement (OPERATOR_PASSWORD_HASH/SESSION_SECRET) must be
       # satisfied here too or the worker refuses to boot.
@@ -252,6 +344,8 @@ services:
         condition: service_healthy
       scanner:
         condition: service_healthy
+      scanner-research:
+        condition: service_healthy
     restart: unless-stopped
     read_only: true
     tmpfs:
@@ -260,6 +354,11 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
 
   web:
     build:
@@ -290,6 +389,11 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
 
   # W5 Phase B: optional remote-access front door. Same image and static bundle as `web`, a
   # different (TLS-terminating, rate-limited) server block, and published on a real network
@@ -337,6 +441,11 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
 
 volumes:
   postgres_data:

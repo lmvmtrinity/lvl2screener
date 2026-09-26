@@ -94,22 +94,27 @@ export class PostgresResearchEvidenceStore implements ResearchEvidenceStore {
         if (report.sessionPayloadHashes[date] !== hash)
           throw new Error("COVERAGE_SESSION_HASH_MISMATCH");
         await client.query(
-          `INSERT INTO research_coverage_session(report_hash,session_date,payload_hash,payload)
-          VALUES($1,$2,$3,$4::jsonb) ON CONFLICT(report_hash,session_date) DO NOTHING`,
-          [reportHash, date, hash, JSON.stringify(payload)],
+          `INSERT INTO research_coverage_payload(payload_hash,payload)
+           VALUES($1,$2::jsonb) ON CONFLICT(payload_hash) DO NOTHING`,
+          [hash, JSON.stringify(payload)],
         );
-        const existing = await client.query<{
-          payload: unknown;
-          payload_hash: string;
-        }>(
-          "SELECT payload,payload_hash FROM research_coverage_session WHERE report_hash=$1 AND session_date=$2",
-          [reportHash, date],
+        const inserted = await client.query<{ payload_hash: string }>(
+          `INSERT INTO research_coverage_session(report_hash,session_date,payload_hash)
+           VALUES($1,$2,$3) ON CONFLICT(report_hash,session_date) DO NOTHING
+           RETURNING payload_hash`,
+          [reportHash, date, hash],
         );
-        if (
-          existing.rows[0]?.payload_hash !== hash ||
-          canonicalJson(existing.rows[0]?.payload) !== canonicalJson(payload)
-        )
-          throw new Error("COVERAGE_SESSION_CONFLICT");
+        if (!inserted.rowCount) {
+          const match = await client.query<{ same_hash: boolean }>(
+            `SELECT EXISTS(
+               SELECT 1 FROM research_coverage_session
+               WHERE report_hash=$1 AND session_date=$2 AND payload_hash=$3
+             ) AS same_hash`,
+            [reportHash, date, hash],
+          );
+          if (!match.rows[0]?.same_hash)
+            throw new Error("COVERAGE_SESSION_CONFLICT");
+        }
       }
     });
   }

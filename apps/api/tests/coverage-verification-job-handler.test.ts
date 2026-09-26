@@ -19,6 +19,38 @@ const payload = {
 };
 
 describe("coverage verification job handler", () => {
+  it("keeps EVIDENCE_RUNTIME_MISMATCH fail-closed without rewriting old payloads", async () => {
+    const handler = new CoverageVerificationJobHandler(
+      { verifyInputs: async () => ({}) } as never,
+      { saveManifest: async () => undefined } as never,
+      {} as never,
+      undefined,
+      {
+        current: async () => ({
+          engineRevision: "c".repeat(40),
+          runtimeFingerprint: "d".repeat(64),
+          featureVersion: "1.0.0",
+        }),
+      } as never,
+    );
+    const job = {
+      id: "10000000-0000-4000-8000-000000000002",
+      leaseOwner: "worker-1",
+      attemptCount: 1,
+      requestPayload: payload,
+    } as unknown as ClaimedResearchJob;
+    const context = {
+      jobId: job.id,
+      heartbeat: async () => ({ cancellationRequested: false }),
+    };
+    const failure = await handler
+      .execute(job, context)
+      .catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(CategorizedError);
+    expect((failure as CategorizedError).category).toBe("VALIDATION");
+    expect((failure as Error).message).toBe("EVIDENCE_RUNTIME_MISMATCH");
+  });
+
   it("fails an over-scoped coverage request as non-retryable VALIDATION", async () => {
     const handler = new CoverageVerificationJobHandler(
       {

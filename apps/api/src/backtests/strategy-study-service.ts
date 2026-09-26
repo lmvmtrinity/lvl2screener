@@ -41,6 +41,8 @@ export interface StudyPorts {
   runner: StudyRunner;
   verify(plan: FrozenStudyPlan): Promise<boolean>;
   checkpoint(): Promise<void>;
+  /** Runs after the durable stage claim exists and before new or resumed TEST work. */
+  afterStageClaim?(plan: FrozenStudyPlan, stage: StudyStage): Promise<void>;
 }
 
 export function selectStudyChallenger(
@@ -147,6 +149,7 @@ export class StrategyStudyService {
           await this.ports.store.saveReport(value);
           return value;
         }
+        await this.ports.afterStageClaim?.(plan, stage);
         stageResult = studyStageResultSchema.parse(
           await this.ports.runner.run(plan, stage),
         );
@@ -154,6 +157,7 @@ export class StrategyStudyService {
         await this.ports.checkpoint();
         await this.ports.store.saveResult(plan.experimentId, stageResult);
       } else {
+        await this.ports.afterStageClaim?.(plan, stage);
         stageResult = studyStageResultSchema.parse(stageResult);
         validateStageResult(plan, stageResult, stage);
       }

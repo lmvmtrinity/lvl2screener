@@ -169,7 +169,7 @@ export class PostgresMarketDataRepository implements MarketDataRepository {
           JOIN paper_signal_observation o ON o.id=e.observation_id
           JOIN paper_bot_run r ON r.id=o.run_id
           WHERE o.instrument_id=i.id AND r.market_id=$1 AND r.source='LIVE'
-            AND e.model='QUOTE' AND e.status IN ('OPEN','CLOSE_PENDING')
+            AND e.model IN ('QUOTE','CANDLE') AND e.status IN ('OPEN','CLOSE_PENDING')
             AND e.close_abandoned_at IS NULL)
         OR EXISTS (SELECT 1 FROM paper_coordination_position p
           JOIN paper_signal_observation o ON o.id=p.observation_id
@@ -326,6 +326,11 @@ export class PostgresMarketDataRepository implements MarketDataRepository {
            end_time = EXCLUDED.end_time, open = EXCLUDED.open, high = EXCLUDED.high,
            low = EXCLUDED.low, close = EXCLUDED.close, volume = EXCLUDED.volume,
            source = EXCLUDED.source, is_complete = EXCLUDED.is_complete
+         WHERE (candle.end_time, candle.open, candle.high, candle.low,
+                candle.close, candle.volume, candle.source, candle.is_complete)
+           IS DISTINCT FROM
+               (EXCLUDED.end_time, EXCLUDED.open, EXCLUDED.high, EXCLUDED.low,
+                EXCLUDED.close, EXCLUDED.volume, EXCLUDED.source, EXCLUDED.is_complete)
          RETURNING (xmax = 0) AS inserted`,
         [
           JSON.stringify(

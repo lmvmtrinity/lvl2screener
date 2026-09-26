@@ -68,7 +68,10 @@ try {
   await page.goto(APP_URL, { waitUntil: "domcontentloaded" });
   await page.locator('nav[aria-label="Sections"]').waitFor({ timeout: 45_000 });
   if (market === "US") {
-    await page.getByLabel("Market").selectOption("US_EQUITIES");
+    await page
+      .getByRole("group", { name: "Market" })
+      .getByRole("button", { name: "US · USD" })
+      .click();
     await page.waitForTimeout(600);
   }
   await page

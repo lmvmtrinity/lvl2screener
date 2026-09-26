@@ -35,6 +35,10 @@ result corrupts evidence even when individual requests succeed.
 6. Expose account-wide unresolved recovery across runs. Order expiry releases an
    unfilled reservation; it does not liquidate owned shares. Missing executable
    facts leave visible unresolved positions rather than invented closes.
+7. An idle funded quote writes one durable price mark. A post-fill mark is written
+   when the same allocation bought, sold or released an order, so valuation after
+   that effect is preserved. Existing ledger events remain immutable and replay
+   reconstruction reads the retained event sequence in durable application order.
 
 ## Implementation and verification
 
@@ -60,6 +64,11 @@ retain at most 256 duplicate events only when each evicted event has an identica
 durable copy; unverified legacy history remains intact. The isolated
 `production-recovery-postgres.test.ts` covers backlog restart, watermark recovery,
 bounded snapshots, old-event retry/conflict detection and market-scoped recovery quotes.
+
+September 24 closed-market scheduling records an idle funded CLOCK once per minute
+outside the close collection window. Pending facts and close-pending orders keep
+the two-second cadence. The inbox still serializes and durably acknowledges every
+fact before its economic effects are treated as complete.
 
 Retries and reports are auditable, at the cost of durable history, serialized
 allocation and explicit unavailable legacy reports. Optimize only with measured

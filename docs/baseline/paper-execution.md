@@ -66,6 +66,15 @@ at exactly 16:00 or verified early-close handling from the configured clock alon
 Startup and subsequent processing recover overdue work through normal execution
 paths. An unresolved older position must remain visible even when a report filters
 to today. Never repair an unresolved position with an ad-hoc historical UPDATE.
+Market-scoped recovery instruments with unresolved independent QUOTE or CANDLE
+executions, coordinated positions, or funded orders are collected even when they
+are absent from today's candidate list. Their candles remain out of scanner
+features and candidate evaluation. A prior CANDLE close uses the first retained
+complete one-minute bar at or after its recorded boundary; without one it remains
+`CLOSE_PENDING`. Recovery-only candle fetch failures are logged per instrument
+without aborting the active scanner candle batch or other recovery instruments.
+An incomplete close collection remains eligible for another attempt after one
+minute, including on a late closed-market startup.
 
 The closed-market cycle collects closing quotes and completed bars before asking
 for settlement. It retries collection once per minute during the first five

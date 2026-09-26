@@ -36,7 +36,10 @@ import { PostgresPaperBotStore } from "../src/paper-bot/paper-bot-repository.js"
 import { stableUuid } from "../src/paper-bot/stable-uuid.js";
 import { zonedSessionBoundary } from "../src/paper-bot/session-time.js";
 import type { AssumptionsSnapshot, QuoteFact } from "../src/paper-bot/types.js";
-import { isolatedDatabaseUrl } from "./isolated-database.js";
+import {
+  isolatedDatabaseUrl,
+  pauseHistoricalFixtureMaintenance,
+} from "./isolated-database.js";
 import { projectFundedComparisonSessionItems } from "../src/paper-bot/funded-comparison-input-freezer.js";
 import { applyComparisonSideSession } from "../src/paper-bot/funded-comparison-side-runner.js";
 import type { FundedComparisonSharedInput } from "../src/paper-bot/funded-comparison-shared-input.js";
@@ -170,6 +173,7 @@ describe.skipIf(!databaseUrl)(
     beforeAll(async () => {
       pool = new Pool({ connectionString: databaseUrl, max: 4 });
       await migrate(pool);
+      await pauseHistoricalFixtureMaintenance(pool);
       instrumentId = randomUUID();
       symbol = `FR6_${instrumentId.slice(0, 8)}.TO`;
       await pool.query(
@@ -635,9 +639,9 @@ describe.skipIf(!databaseUrl)(
       await pool.query(
         `INSERT INTO strategy_signal(
            id,instrument_id,strategy_name,strategy_version,config_version,
-           timestamp,previous_state,state,score,feature_snapshot_json,reason_codes)
+           timestamp,previous_state,state,score,reason_codes)
          VALUES($1,$2,'ORB_RETEST','1.0.0',$3,$4::timestamptz,'FORMING','READY',90,
-                '{}'::jsonb,'[]'::jsonb)`,
+                '[]'::jsonb)`,
         [
           signalId,
           observation.instrument_id,
@@ -813,9 +817,9 @@ describe.skipIf(!databaseUrl)(
       await pool.query(
         `INSERT INTO strategy_signal(
            id,instrument_id,strategy_name,strategy_version,config_version,
-           timestamp,previous_state,state,score,feature_snapshot_json,reason_codes)
+           timestamp,previous_state,state,score,reason_codes)
          VALUES($1,$2,'ORB_RETEST','1.0.0',$3,$4::timestamptz,'FORMING','READY',90,
-                '{}'::jsonb,'[]'::jsonb)`,
+                '[]'::jsonb)`,
         [
           signalId,
           bObservation.instrument_id,

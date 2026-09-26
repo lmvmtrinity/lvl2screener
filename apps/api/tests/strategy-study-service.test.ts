@@ -234,6 +234,25 @@ it("runs development before selection and TEST, then persists the report", async
   ]);
 });
 
+it("runs the TEST claim hook after durable claim and before TEST evaluation", async () => {
+  const store = new FakeStore();
+  const value = ports(store);
+  const order: string[] = [];
+  value.afterStageClaim = async (_plan, stage) => {
+    if (stage === "TEST") order.push("TEST_LINK");
+  };
+  const priorRun = value.runner.run.bind(value.runner);
+  value.runner.run = async (rawPlan, stage) => {
+    if (stage === "TEST") order.push("TEST_RUN");
+    return priorRun(rawPlan, stage);
+  };
+  await new StrategyStudyService(value).evaluate(plan);
+  expect(order).toEqual(["TEST_LINK", "TEST_RUN"]);
+  expect(store.calls.indexOf("TEST_CLAIM")).toBeLessThan(
+    store.calls.indexOf("TEST_RUN"),
+  );
+});
+
 it("returns interrupted rather than replaying a claimed TEST", async () => {
   const store = new FakeStore();
   store.results.set("TRAIN", stageResult("TRAIN"));

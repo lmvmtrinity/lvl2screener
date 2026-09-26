@@ -7,7 +7,7 @@ export type ButtonVariant =
   | "segmented"
   | "tab"
   | "profile"
-  | "nav"
+  | "sidebar"
   | "control"
   | "link";
 
@@ -28,7 +28,9 @@ const VARIANT_CLASSES: Record<ButtonVariant, string> = {
   /* Scanner profile tabs use role="tab"/aria-selected rather than aria-pressed. */
   profile:
     "tw:shrink-0 tw:grow-0 tw:cursor-pointer tw:rounded-[6px] tw:border-0 tw:bg-transparent tw:px-[13px] tw:py-[9px] tw:font-mono tw:text-[0.63rem] tw:font-bold tw:tracking-[0.06em] tw:text-ink-650 tw:aria-selected:bg-accent tw:aria-selected:text-on-accent",
-  nav: "tw:cursor-pointer tw:whitespace-nowrap tw:rounded-[7px] tw:border-0 tw:bg-transparent tw:px-[11px] tw:py-2 tw:font-mono tw:text-[0.62rem] tw:font-bold tw:tracking-[0.075em] tw:text-ink-550 tw:hover:bg-surface-raised tw:hover:text-ink-100 tw:aria-[current=page]:bg-accent tw:aria-[current=page]:text-on-accent tw:below-md:px-[10px]",
+  /* Vertical section navigation in the app sidebar; a row on narrow screens. */
+  sidebar:
+    "tw:flex tw:w-full tw:cursor-pointer tw:items-center tw:whitespace-nowrap tw:rounded-[8px] tw:border-0 tw:bg-transparent tw:px-[10px] tw:py-[9px] tw:text-left tw:font-sans tw:text-[0.84rem] tw:font-medium tw:text-ink-400 tw:hover:bg-surface-raised tw:hover:text-ink-100 tw:aria-[current=page]:bg-surface-raised tw:aria-[current=page]:text-ink-50 tw:below-md:w-auto tw:below-md:py-[7px]",
   /* Filter/clear controls that sit beside a field. */
   control:
     "tw:min-h-[34px] tw:cursor-pointer tw:rounded-input tw:border tw:border-line-input tw:bg-bg tw:px-[11px] tw:py-[7px] tw:font-mono tw:text-[0.58rem] tw:font-bold tw:text-ink-550",

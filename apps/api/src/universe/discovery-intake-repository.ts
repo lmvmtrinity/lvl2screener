@@ -1,4 +1,5 @@
 import type { Pool, PoolClient } from "pg";
+import type { DailySeedIntakeGuard } from "./daily-seed-intake-guard.js";
 import { z } from "zod";
 import {
   candidateIntakeEntrySchema,
@@ -56,6 +57,7 @@ export interface DiscoveryIntakeRepository extends DiscoveryOutboxWriter {
     tradingDate: string,
     candidates: CandidateIntakeEntry[],
     marketId: MarketId,
+    guard?: DailySeedIntakeGuard,
   ): Promise<CandidateIntakeEntry[]>;
   setExclusion(input: {
     marketId: MarketId;
@@ -762,10 +764,18 @@ export class PostgresDiscoveryIntakeRepository implements DiscoveryIntakeReposit
     tradingDate: string,
     candidates: CandidateIntakeEntry[],
     marketId: MarketId,
+    guard?: DailySeedIntakeGuard,
   ): Promise<CandidateIntakeEntry[]> {
     marketIdSchema.parse(marketId);
     if (provider !== providerFor(marketId))
       throw new Error(`Watchlist provider does not belong to ${marketId}`);
+    if (
+      guard &&
+      (guard.marketId !== marketId ||
+        guard.tradingDate !== tradingDate ||
+        operation !== "ADD")
+    )
+      throw new Error("DAILY_SEED_RESCAN_IDENTITY");
     return this.transaction(async (db) => {
       const mode = (
         await db.query<ModeRow>(
@@ -790,6 +800,64 @@ export class PostgresDiscoveryIntakeRepository implements DiscoveryIntakeReposit
         watchlist.trading_date === tradingDate
           ? parseCandidates(watchlist.candidates)
           : [];
+      if (guard) {
+        if (watchlist.trading_date > tradingDate)
+          throw new Error("DAILY_SEED_RESCAN_IDENTITY");
+        const symbols =
+          watchlist.trading_date === tradingDate &&
+          Array.isArray(watchlist.symbols)
+            ? watchlist.symbols
+            : [];
+        const owned = new Map(
+          oldCandidates.map((value) => [value.normalizedSymbol, value]),
+        );
+        if (guard.phase === "SEED" && symbols.length > 0)
+          throw new Error("DAILY_SEED_LIST_NOT_EMPTY");
+        if (
+          guard.phase === "RESCAN" &&
+          (symbols.length === 0 ||
+            symbols.some((symbol) => {
+              const candidate = owned.get(String(symbol));
+              return (
+                !candidate ||
+                candidate.marketId !== marketId ||
+                candidate.tradingDate !== tradingDate ||
+                !candidate.tags.some(
+                  (tag) => tag === "daily-seed-v1" || tag === "daily-seed-v2",
+                )
+              );
+            }))
+        )
+          throw new Error("DAILY_SEED_RESCAN_LIST_NOT_OWNED");
+        // Persisted tags survive an acknowledgement/receipt failure. Never apply
+        // a second batch or manufacture the missing historical measurement.
+        if (
+          guard.phase === "RESCAN" &&
+          oldCandidates.some((value) => value.tags.includes("daily-seed-v2"))
+        )
+          throw new Error(
+            "DAILY_SEED_RESCAN_ALREADY_APPLIED: retained additions exist; original receipt unavailable",
+          );
+        const additions = new Set(
+          candidates
+            .filter((value) => !owned.has(value.normalizedSymbol))
+            .map((value) => value.normalizedSymbol),
+        );
+        if (
+          !Number.isInteger(guard.maxAdds) ||
+          guard.maxAdds < 1 ||
+          additions.size > guard.maxAdds ||
+          candidates.some(
+            (value) =>
+              !value.tags.includes(
+                guard.phase === "SEED" ? "daily-seed-v1" : "daily-seed-v2",
+              ) ||
+              value.marketId !== marketId ||
+              value.tradingDate !== tradingDate,
+          )
+        )
+          throw new Error("DAILY_SEED_RESCAN_LIMIT");
+      }
       const activeOutbox = await db.query<{
         normalized_symbol: string;
         instrument_id: string | null;

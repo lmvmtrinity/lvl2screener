@@ -33,6 +33,7 @@ const event = (overrides: Partial<StrategyStateEvent> = {}) =>
     kind: "SETUP",
     eventId: "10000000-0000-4000-8000-000000000083",
     eventType: "STRATEGY_STATE_CHANGED",
+    marketId: "CA_TSX",
     previousState: "FORMING",
     state: "READY",
     instrumentId,
@@ -180,6 +181,55 @@ describe("authoritative historical backtest executor", () => {
       eligibleSignals: 0,
       fills: 0,
       closedTrades: 0,
+    });
+    expect(result.opportunityCaptures[0]).toMatchObject({
+      marketId: "CA_TSX",
+      strategy: "ORB_RETEST",
+      profileId,
+      profileName: "ORB",
+      replayId: runId,
+      evidenceId: "10000000-0000-4000-8000-000000000083",
+      opportunityId: "10000000-0000-4000-8000-000000000084",
+      baselineSelected: false,
+      decisionTimestamp: "2026-08-25T14:00:00.000Z",
+      score: 69,
+      features: { atrPct: 2.5, rvolAtTime: 2 },
+      outcome: { status: "INVALID", reason: "BASELINE_NOT_SELECTED" },
+    });
+  });
+
+  it("captures closed and no-fill outcomes with stable source and replay identities", () => {
+    const result = executeAuthoritativeBacktest({
+      runId,
+      configVersion: "config-v1",
+      request,
+      sessions: [
+        session([
+          quote("2026-08-25T14:00:00.000Z", 9.99, 10),
+          quote("2026-08-25T14:30:00.000Z", 11, 11.01),
+        ]),
+      ],
+      signalReplay: signals([
+        event(),
+        event({
+          eventId: "10000000-0000-4000-8000-000000000085",
+          setupInstanceId: null,
+          symbol: "XYZ.TO",
+          instrumentId: "10000000-0000-4000-8000-000000000086",
+        }),
+      ]),
+    });
+
+    expect(result.opportunityCaptures).toHaveLength(2);
+    expect(result.opportunityCaptures[0]).toMatchObject({
+      outcome: { status: "CLOSED", netPnl: expect.any(Number) },
+      baselineSelected: true,
+    });
+    expect(result.opportunityCaptures[1]).toMatchObject({
+      evidenceId: "10000000-0000-4000-8000-000000000085",
+      opportunityId: "10000000-0000-4000-8000-000000000085",
+      outcome: { status: "NO_FILL", reason: expect.any(String) },
+      labelAvailableAt: "2026-08-25T14:00:00.000Z",
     });
   });
 

@@ -164,6 +164,123 @@ describe("PaperEvidenceTrainingScheduler", () => {
     );
   });
 
+  it("measures new outcomes from the frozen raw cohort count", async () => {
+    let qualified = false;
+    const scheduler = new PaperEvidenceTrainingScheduler(
+      {
+        listCohorts: async () => [
+          {
+            strategy: "ORB_RETEST",
+            marketId: "CA_TSX",
+            closedQuoteCount: 300,
+            positives: 150,
+            negatives: 150,
+          },
+        ],
+        latestDatasetFor: async () => ({
+          sourceRowCount: 220,
+          cohort: { closedQuoteCount: 300 },
+        }),
+        qualify: async () => {
+          qualified = true;
+          throw new Error("qualification must not run");
+        },
+        materialize: async () => {
+          throw new Error("materialize must not run");
+        },
+      } as never,
+      { createJob: async () => ({ status: "QUEUED" }) } as never,
+    );
+
+    await expect(scheduler.run()).resolves.toBe(0);
+    expect(qualified).toBe(false);
+  });
+
+  it("resumes a pending preparation and submits its frozen cohort", async () => {
+    const frozenCohort = {
+      marketId: "CA_TSX",
+      strategy: "ORB_RETEST",
+      closedQuoteCount: 300,
+      positives: 150,
+      negatives: 150,
+    };
+    let submittedPayload: any;
+    const scheduler = new PaperEvidenceTrainingScheduler(
+      {
+        listCohorts: async () => [
+          {
+            marketId: "CA_TSX",
+            strategy: "ORB_RETEST",
+            closedQuoteCount: 100,
+            positives: 0,
+            negatives: 100,
+          },
+        ],
+        pendingPreparationFor: async () => true,
+        prepareAndMaterialize: async () => ({
+          pending: false,
+          dataset: {
+            id: "10000000-0000-4000-8000-000000000011",
+            marketId: "CA_TSX",
+            cohort: frozenCohort,
+            effectiveCutoff: "2026-08-31T00:00:00.000Z",
+            sourceDigest: "digest-frozen",
+            researchQualification: { qualified: true, reasons: [] },
+          },
+        }),
+      } as never,
+      {
+        createJob: async (_type: string, payload: unknown) => {
+          submittedPayload = payload;
+          return { status: "QUEUED" };
+        },
+      } as never,
+    );
+
+    await expect(scheduler.run()).resolves.toBe(1);
+    expect(submittedPayload.cohort).toEqual(frozenCohort);
+    expect(submittedPayload.cohort.closedQuoteCount).toBe(300);
+  });
+
+  it("resumes a pending preparation even when the fresh cohort list is empty", async () => {
+    let createJobCalls = 0;
+    const frozenCohort = {
+      marketId: "US_EQUITIES",
+      strategy: "ORB_RETEST",
+      strategyVersion: "v1",
+      profileConfigId: "10000000-0000-4000-8000-000000000012",
+      configVersion: "1",
+      executionModelVersion: "1",
+      assumptions: {},
+      closedQuoteCount: 220,
+      positives: 110,
+      negatives: 110,
+      firstSignalAt: "2026-08-31T14:00:00.000Z",
+      lastSignalAt: "2026-08-31T14:00:00.000Z",
+      missingFeatureCount: 0,
+    };
+    const scheduler = new PaperEvidenceTrainingScheduler(
+      {
+        listCohorts: async () => [],
+        pendingPreparations: async () => [{ cohort: frozenCohort }],
+        pendingPreparationFor: async () => true,
+        prepareAndMaterialize: async () => ({
+          pending: true,
+          dataset: undefined,
+        }),
+      } as never,
+      {
+        createJob: async () => {
+          createJobCalls += 1;
+          return { status: "QUEUED" };
+        },
+      } as never,
+    );
+
+    await expect(scheduler.run()).resolves.toBe(0);
+    expect(createJobCalls).toBe(0);
+  });
+
   it("reports NO_COHORTS_AVAILABLE when no compatible cohort exists", async () => {
     const run = await runNoop([]);
     expect(run?.noopReason).toBe("NO_COHORTS_AVAILABLE");

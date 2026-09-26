@@ -39,6 +39,45 @@ describe("derivePaperBotIndicator", () => {
     expect(result.label).toBe("CATCHING UP");
     expect(result.detail.join(" ")).toContain("40 funded facts pending");
   });
+  it("surfaces a sequential funded wait without presenting it as an error", () => {
+    const result = derivePaperBotIndicator(
+      healthy({
+        fundedBindingState: "WAITING_FOR_PRIOR_RUN",
+        priorClosePendingExecutions: 1,
+        oldestPriorClosePendingAgeMs: 120000,
+      }),
+    );
+    expect(result.tone).toBe("attention");
+    expect(result.label).toBe("WAITING");
+    expect(result.summary).toContain(
+      "waiting for the previous session to finish closing",
+    );
+    expect(result.detail.join(" ")).toContain(
+      "1 prior close-pending execution",
+    );
+  });
+
+  it("keeps a stuck event above an expected funded wait", () => {
+    const result = derivePaperBotIndicator(
+      healthy({
+        fundedBindingState: "WAITING_FOR_PRIOR_RUN",
+        unreconcilableEvents: 1,
+      }),
+    );
+    expect(result.label).toBe("STUCK");
+    expect(result.tone).toBe("error");
+  });
+
+  it("keeps an orphaned coordinated position above an expected funded wait", () => {
+    const result = derivePaperBotIndicator(
+      healthy({
+        fundedBindingState: "WAITING_FOR_PRIOR_RUN",
+        completedRunsWithUnresolvedCoordinatedPositions: 1,
+      }),
+    );
+    expect(result.label).toBe("ORPHAN");
+    expect(result.tone).toBe("error");
+  });
   it("reports OFF when the bot is not wired into the process", () => {
     const indicator = derivePaperBotIndicator(undefined);
     expect(indicator.tone).toBe("idle");

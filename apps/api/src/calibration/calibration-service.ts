@@ -451,6 +451,17 @@ export function combinations(
         rsiDivergenceVolumeContractionMaxRatio: 0.8,
         rsiSetupTimeoutMinutes: 30,
         dailyEmaFilterEnabled: 0,
+        spreadConfirmQuotes: 1,
+        latestReadyTime: null,
+        maxVwapDistanceAtr: 0,
+        maxChangeFromOpenAtr: 0,
+        minSectorRelativeStrengthPct: 0,
+        spreadConfirmSeconds: 0,
+        spreadRecoveryPct: 100,
+        spreadMinTicks: 0,
+        stopMinAtrFraction: 0,
+        stopMinSpreads: 0,
+        targetMinR: 0,
       } as Parameters);
       return;
     }
@@ -501,6 +512,17 @@ const strategyParameters = (value: Parameters) => ({
     value.rsiDivergenceVolumeContractionMaxRatio,
   rsiSetupTimeoutMinutes: value.rsiSetupTimeoutMinutes,
   dailyEmaFilterEnabled: value.dailyEmaFilterEnabled,
+  spreadConfirmQuotes: value.spreadConfirmQuotes,
+  latestReadyTime: value.latestReadyTime,
+  maxVwapDistanceAtr: value.maxVwapDistanceAtr,
+  maxChangeFromOpenAtr: value.maxChangeFromOpenAtr,
+  minSectorRelativeStrengthPct: value.minSectorRelativeStrengthPct,
+  spreadConfirmSeconds: value.spreadConfirmSeconds,
+  spreadRecoveryPct: value.spreadRecoveryPct,
+  spreadMinTicks: value.spreadMinTicks,
+  stopMinAtrFraction: value.stopMinAtrFraction,
+  stopMinSpreads: value.stopMinSpreads,
+  targetMinR: value.targetMinR,
 });
 const versionFor = (value: Parameters) =>
   `phase9-${createHash("sha256").update(JSON.stringify(value)).digest("hex").slice(0, 12)}`;

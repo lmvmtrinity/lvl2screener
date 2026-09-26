@@ -58,6 +58,33 @@ check("default profile publishes no host port for scanner", () => {
   assert.deepEqual(publishedPorts(defaultConfig.services.scanner), []);
 });
 
+check("research scanner has the live scanner's hardening and token", () => {
+  const live = defaultConfig.services.scanner;
+  const research = defaultConfig.services["scanner-research"];
+  assert.ok(research);
+  assert.equal(research.image, live.image);
+  assert.equal(research.build, undefined);
+  assert.deepEqual(publishedPorts(research), []);
+  for (const key of [
+    "read_only",
+    "tmpfs",
+    "cap_drop",
+    "security_opt",
+    "healthcheck",
+    "restart",
+  ])
+    assert.deepEqual(research[key], live[key], `${key} differs`);
+  assert.equal(
+    research.environment.SCANNER_SERVICE_TOKEN,
+    live.environment.SCANNER_SERVICE_TOKEN,
+  );
+  for (const name of ["api", "worker"])
+    assert.equal(
+      defaultConfig.services[name].environment.RESEARCH_SCANNER_URL,
+      "http://scanner-research:8000",
+    );
+});
+
 check("default profile publishes no host port for api", () => {
   assert.deepEqual(publishedPorts(defaultConfig.services.api), []);
 });
@@ -105,7 +132,13 @@ check(
 );
 
 check("remote profile still keeps postgres/scanner/api off the host", () => {
-  for (const name of ["postgres", "scanner", "api", "worker"]) {
+  for (const name of [
+    "postgres",
+    "scanner",
+    "scanner-research",
+    "api",
+    "worker",
+  ]) {
     assert.deepEqual(publishedPorts(remoteConfig.services[name]), []);
   }
 });

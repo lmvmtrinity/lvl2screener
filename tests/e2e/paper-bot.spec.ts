@@ -143,6 +143,13 @@ test.describe("paper bot: observation and execution lifecycle", () => {
   test("fills the canonical quote model from the decision-time ask", async ({
     request,
   }) => {
+    // API readiness precedes the asynchronous startup quote collection. Wait
+    // for its durable close before checking the recovered execution snapshot.
+    await expect
+      .poll(async () => (await executionsFor(request, "01")).quote?.status, {
+        timeout: 20_000,
+      })
+      .toBe("CLOSED");
     const { quote } = await executionsFor(request, "01");
     // v4 sizes from the configured risk budget against the cost-inclusive stop.
     expect(Number(quote?.entryPrice)).toBeCloseTo(7.90158, 5);
@@ -539,16 +546,16 @@ test.describe("paper bot: at-a-glance status indicator", () => {
     // Startup reconciliation repaired the durable fixture, but this closed
     // mock session never receives a live quote cycle. The status must stay at
     // STARTING rather than claiming the bot is live.
-    await expect(indicator).toContainText("BOT · STARTING");
+    await expect(indicator).toContainText("Bot · STARTING");
     await expect(indicator.locator(".bot-dot.idle")).toHaveCount(1);
 
     // The nav is chrome, not a view: it has to stay put when the operator
     // moves elsewhere, which is what makes it at-a-glance.
-    await page.getByRole("button", { name: /^DAILY LIST/ }).click();
+    await page.getByRole("button", { name: /^Daily list/ }).click();
     await expect(
       page.getByRole("heading", { name: "Daily candidate list" }),
     ).toBeVisible();
-    await expect(indicator).toContainText("BOT · STARTING");
+    await expect(indicator).toContainText("Bot · STARTING");
   });
 
   test("carries the run's cohort identity and counts in its tooltip", async ({
@@ -572,7 +579,7 @@ test.describe("paper bot: BOT dashboard", () => {
     await expect(
       page.getByRole("heading", { name: "Live candidates" }),
     ).toBeVisible();
-    await page.getByRole("button", { name: /^BOT ·/ }).click();
+    await page.getByRole("button", { name: /^Bot ·/ }).click();
     await expect(
       page.getByRole("heading", { name: "BOT evidence", exact: true }),
     ).toBeVisible();

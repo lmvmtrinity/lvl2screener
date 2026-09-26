@@ -20,6 +20,11 @@ type RequestRow = {
   latest_job_id: string | null;
 };
 
+type PreparationRequestRow = RequestRow & {
+  request: unknown;
+  job_status: string | null;
+};
+
 export class PostgresCoverageRequestRepository {
   constructor(private readonly pool: Pool) {}
 
@@ -155,6 +160,41 @@ export class PostgresCoverageRequestRepository {
       ...mapRequest(result.rows[0]),
       reportHash: report.rows[0]?.report_hash ?? null,
       coverageStatus: report.rows[0]?.status ?? null,
+    };
+  }
+
+  async findByPreparationId(
+    preparationId: string,
+    marketId: "CA_TSX" | "US_EQUITIES",
+  ): Promise<
+    (CoverageRequestRecord & { request: CreateCoverageRequest }) | null
+  > {
+    const result = await this.pool.query<PreparationRequestRow>(
+      `SELECT r.id,r.market_id,r.request_hash,r.request,r.created_at,
+              r.latest_job_id,j.status AS job_status
+         FROM research_coverage_request r
+         LEFT JOIN research_job j ON j.id=r.latest_job_id
+        WHERE r.market_id=$1
+          AND r.request->'manifest'->'manifest'->'purpose'->>'preparationId'=$2
+        ORDER BY r.created_at,r.id LIMIT 1`,
+      [marketId, preparationId],
+    );
+    const row = result.rows[0];
+    if (!row) return null;
+    const record = mapRequest(row);
+    const request = createCoverageRequestSchema.parse(row.request);
+    const current = await this.get(record.id, marketId);
+    return {
+      ...record,
+      reportHash: current?.reportHash,
+      coverageStatus:
+        current?.coverageStatus ??
+        (row.job_status === "FAILED" ||
+        row.job_status === "CANCELLED" ||
+        row.job_status === "INTERRUPTED"
+          ? "UNKNOWN"
+          : null),
+      request,
     };
   }
 

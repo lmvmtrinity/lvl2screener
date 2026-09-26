@@ -321,6 +321,7 @@ function setup(
   });
   return {
     scheduler,
+    store,
     control,
     records,
     getCompleted: () => completed,
@@ -337,6 +338,19 @@ function setup(
 afterEach(() => vi.useRealTimers());
 
 describe("discovery shadow scheduler", () => {
+  it("uses the catalog header and reuses it for status polls within 20 seconds", async () => {
+    const f = setup();
+    const header = vi.fn(async () => null);
+    f.store.loadLatestHeader = header;
+    const full = vi.spyOn(f.store, "loadLatest");
+    await f.scheduler.getStatus();
+    await f.scheduler.getStatus();
+    expect(header).toHaveBeenCalledTimes(1);
+    expect(full).not.toHaveBeenCalled();
+    f.advanceClock(20_001);
+    await f.scheduler.getStatus();
+    expect(header).toHaveBeenCalledTimes(2);
+  });
   it("labels a known recovery whose load rejects without persisting an unloaded run diagnostic", async () => {
     const f = setup({
       failRecoveryLoad: true,

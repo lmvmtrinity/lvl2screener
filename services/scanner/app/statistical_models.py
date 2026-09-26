@@ -12,6 +12,8 @@ from .models import (
     StatisticalPredictionInput,
     StatisticalRegime,
     StatisticalTrainingRequest,
+    SignalModelResearchTrainingRequest,
+    SignalModelResearchTrainingExample,
     StatisticalTrainingResult,
 )
 
@@ -89,6 +91,51 @@ def train(request: StatisticalTrainingRequest) -> StatisticalTrainingResult:
     )
 
 
+def train_signal_model_research(request: SignalModelResearchTrainingRequest) -> StatisticalTrainingResult:
+    """Fit an inactive model on exact capture labels, without an activation holdout."""
+    rows = sorted(request.training_rows, key=lambda value: value.entry_time)
+    warnings = ["INACTIVE_RESEARCH_ONLY", "TRAIN_METRICS_ARE_IN_SAMPLE"]
+    if any(row.strategy != request.strategy for row in rows):
+        return _research_insufficient(rows, warnings + ["TRAINING_STRATEGY_MISMATCH"])
+    keys = [row.source_key for row in rows]
+    if len(set(keys)) != len(keys):
+        return _research_insufficient(rows, warnings + ["DUPLICATE_SOURCE_KEY"])
+    labels = [1 if row.r_multiple > 0 else 0 for row in rows]
+    if len(rows) < request.minimum_samples or len(set(labels)) < 2:
+        return _research_insufficient(rows, warnings + ["TRAINING_LABELS_INSUFFICIENT"])
+
+    raw_training = [_raw_features(row, request.market_id) for row in rows]
+    medians = [_median_present(raw_training, index) for index in range(len(FEATURE_NAMES))]
+    if any(row.atr_pct is None or row.rvol_at_time is None for row in rows):
+        warnings.append("Missing ATR/RVOL values were imputed from training medians and are disclosed per prediction.")
+    complete_training = [_impute(value, medians) for value in raw_training]
+    means = [fmean(row[index] for row in complete_training) for index in range(len(FEATURE_NAMES))]
+    scales = [max(sqrt(fmean((row[index] - means[index]) ** 2 for row in complete_training)), 1e-9) for index in range(len(FEATURE_NAMES))]
+    x_train = [_standardize(row, means, scales) for row in complete_training]
+    coefficients, intercept = _fit(x_train, labels, request.l2_penalty)
+    artifact = StatisticalModelArtifact(
+        feature_names=FEATURE_NAMES, intercept=intercept, coefficients=coefficients, means=means, scales=scales,
+        medians=medians, atr_median=medians[1], rvol_median=max(0, exp(medians[2]) - 1),
+    )
+    probabilities = [_probability(artifact, _raw_features(row, request.market_id))[0] for row in rows]
+    return StatisticalTrainingResult(
+        status="COMPLETED", artifact=artifact, train=_metrics(labels, probabilities, fmean(labels)),
+        test=None, calibration=[], eligible_for_activation=False, warnings=warnings,
+        training_start=rows[0].entry_time, training_end=rows[-1].entry_time,
+        test_start=None, test_end=None,
+    )
+
+
+def _research_insufficient(rows: list[SignalModelResearchTrainingExample], warnings: list[str]) -> StatisticalTrainingResult:
+    return StatisticalTrainingResult(
+        status="INSUFFICIENT_DATA", artifact=None, train=None, test=None, calibration=[],
+        eligible_for_activation=False, warnings=warnings,
+        training_start=rows[0].entry_time if rows else None,
+        training_end=rows[-1].entry_time if rows else None,
+        test_start=None, test_end=None,
+    )
+
+
 def predict(artifact: StatisticalModelArtifact, value: StatisticalPredictionInput) -> StatisticalPrediction:
     raw = [value.deterministic_score / 100, value.atr_pct, None if value.rvol_at_time is None else log1p(max(0, value.rvol_at_time)), _minutes(value.timestamp, value.market_id)]
     probability, contributions = _probability(artifact, raw)
@@ -118,7 +165,7 @@ def _insufficient(trades: list[BacktestTrade], warnings: list[str], training: li
     )
 
 
-def _raw_features(trade: BacktestTrade, market_id: str) -> list[float | None]:
+def _raw_features(trade: BacktestTrade | SignalModelResearchTrainingExample, market_id: str) -> list[float | None]:
     return [trade.score / 100, trade.atr_pct, None if trade.rvol_at_time is None else log1p(max(0, trade.rvol_at_time)), _minutes(trade.entry_time, market_id)]
 
 

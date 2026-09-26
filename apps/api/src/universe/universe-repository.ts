@@ -9,6 +9,8 @@ import {
   type UniverseRefreshRun,
 } from "@tsx-scanner/contracts";
 import type { Pool, PoolClient } from "pg";
+import type { DailySeedIntakeGuard } from "./daily-seed-intake-guard.js";
+import { PostgresDiscoveryIntakeRepository } from "./discovery-intake-repository.js";
 import type { PersistedInstrument } from "../market-data/repository.js";
 import type {
   UniverseEvaluation,
@@ -21,6 +23,7 @@ interface RunRow {
   market_id: UniverseRefreshRun["marketId"];
   provider: string;
   policy_version: string;
+  refresh_kind: UniverseRefreshRun["refreshKind"] | null;
   status: UniverseRefreshRun["status"];
   discovered_count: number;
   evaluated_count: number;
@@ -90,16 +93,18 @@ export class PostgresUniverseStore
     provider: string,
     policy: UniversePolicy,
     startedAt: Date,
+    refreshKind: UniverseRefreshRun["refreshKind"] = "FULL",
   ): Promise<UniverseRefreshRun> {
     const result = await this.pool.query<RunRow>(
-      `INSERT INTO universe_refresh_run(market_id,provider,policy_version,policy,status,started_at)
-       VALUES($1,$2,$3,$4,'RUNNING',$5) RETURNING *`,
+      `INSERT INTO universe_refresh_run(market_id,provider,policy_version,policy,status,started_at,refresh_kind)
+       VALUES($1,$2,$3,$4,'RUNNING',$5,$6) RETURNING *`,
       [
         policy.marketId,
         provider,
         policy.version,
         JSON.stringify(policy),
         startedAt,
+        refreshKind,
       ],
     );
     return mapRun(result.rows[0]!);
@@ -111,6 +116,7 @@ export class PostgresUniverseStore
     warnings: string[],
     completedAt: Date,
     minimumSize: number,
+    evaluatedCount = evaluations.length,
   ): Promise<{
     run: UniverseRefreshRun;
     instruments: PersistedInstrument[];
@@ -219,7 +225,7 @@ export class PostgresUniverseStore
         [
           runId,
           evaluations.length,
-          evaluations.length,
+          evaluatedCount,
           eligibleCount,
           eligibleIds.length,
           JSON.stringify(warnings),
@@ -349,6 +355,26 @@ export class PostgresUniverseStore
     );
   }
 
+  applyManualCandidates(
+    provider: string,
+    operation: "ADD" | "REPLACE",
+    tradingDate: string,
+    candidates: CandidateIntakeEntry[],
+    marketId: "CA_TSX" | "US_EQUITIES" = "CA_TSX",
+    guard?: DailySeedIntakeGuard,
+  ): Promise<CandidateIntakeEntry[]> {
+    return new PostgresDiscoveryIntakeRepository(
+      this.pool,
+    ).applyManualCandidates(
+      provider,
+      operation,
+      tradingDate,
+      candidates,
+      marketId,
+      guard,
+    );
+  }
+
   listCandidateIntakeStatuses(
     provider: string,
     tradingDate: string,
@@ -403,6 +429,7 @@ function mapRun(row: RunRow): UniverseRefreshRun {
     marketId: row.market_id,
     provider: row.provider,
     policyVersion: row.policy_version,
+    refreshKind: row.refresh_kind ?? "FULL",
     status: row.status,
     discoveredCount: row.discovered_count,
     evaluatedCount: row.evaluated_count,

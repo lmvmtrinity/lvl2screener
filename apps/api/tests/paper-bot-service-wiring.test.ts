@@ -29,6 +29,8 @@ import type {
 import type { PaperExecutionStore } from "../src/paper-bot/paper-execution-repository.js";
 import type { ProfileLookup } from "../src/paper-bot/paper-bot-live-processor.js";
 import type { AssumptionsSnapshot } from "../src/paper-bot/types.js";
+import { FundedLiveAdapter } from "../src/paper-bot/funded-live-adapter.js";
+import { FundedPriorRunActiveError } from "../src/paper-bot/funded-order-service.js";
 
 class MemoryRepository implements MarketDataRepository {
   async markBenchmarks(): Promise<void> {}
@@ -227,6 +229,283 @@ const fakeProfiles: ProfileLookup = {
 };
 
 describe("QuestradeDataService paper-bot wiring", () => {
+  it("collects recovery candles without sending them to scanner features", async () => {
+    const active = { id: "active", symbolId: 1 } as PersistedInstrument;
+    const recovery = { id: "recovery", symbolId: 2 } as PersistedInstrument;
+    const at = new Date("2026-08-25T20:01:00Z");
+    const candles = [active, recovery].map(
+      (instrument) =>
+        ({
+          symbolId: instrument.symbolId,
+          interval: "OneMinute",
+          start: new Date("2026-08-25T19:59:00Z"),
+          end: new Date("2026-08-25T20:00:00Z"),
+        }) as Candle,
+    );
+    const collect = vi.fn(async (instruments: PersistedInstrument[]) =>
+      instruments.map((instrument) =>
+        candles.find((candle) => candle.symbolId === instrument.symbolId)!,
+      ),
+    );
+    const ingestFeatureCandles = vi.fn(async () => {});
+    const service = Object.create(
+      QuestradeDataService.prototype,
+    ) as QuestradeDataService;
+    Object.assign(service, {
+      instruments: [active],
+      benchmarkSnapshot: { instruments: [] },
+      paperBotStore: {},
+      quotes: { recoveryInstruments: vi.fn(async () => [recovery]) },
+      candles: { collect, reset: vi.fn() },
+      sessions: {
+        getMarketId: () => "CA_TSX",
+        getMarket: () => ({
+          startTime: new Date("2026-08-25T13:30:00Z"),
+          endTime: at,
+        }),
+      },
+      clock: () => at,
+      ingestFeatureCandles,
+    });
+
+    await (
+      service as unknown as {
+        collectCandles: (intervals: string[]) => Promise<void>;
+      }
+    ).collectCandles(["OneMinute"]);
+
+    expect(collect.mock.calls.map(([instruments]) => instruments)).toEqual([
+      [active],
+      [recovery],
+    ]);
+    expect(ingestFeatureCandles).toHaveBeenCalledWith([candles[0]]);
+  });
+
+  it("keeps scanner and other recovery candles when one recovery fetch fails", async () => {
+    const active = { id: "active", symbolId: 1 } as PersistedInstrument;
+    const failed = { id: "failed", symbolId: 2 } as PersistedInstrument;
+    const recovered = { id: "recovered", symbolId: 3 } as PersistedInstrument;
+    const at = new Date("2026-08-25T20:01:00Z");
+    const candle = (symbolId: number) =>
+      ({
+        symbolId,
+        interval: "OneMinute",
+        start: new Date("2026-08-25T19:59:00Z"),
+        end: new Date("2026-08-25T20:00:00Z"),
+      }) as Candle;
+    const collect = vi.fn(async (instruments: PersistedInstrument[]) => {
+      if (instruments.some((instrument) => instrument.id === failed.id))
+        throw new Error("provider unavailable after retries");
+      return instruments.map((instrument) => candle(instrument.symbolId));
+    });
+    const ingestFeatureCandles = vi.fn(async () => {});
+    const logger = { error: vi.fn() };
+    const service = Object.create(
+      QuestradeDataService.prototype,
+    ) as QuestradeDataService;
+    Object.assign(service, {
+      instruments: [active],
+      benchmarkSnapshot: { instruments: [] },
+      paperBotStore: {},
+      quotes: { recoveryInstruments: vi.fn(async () => [failed, recovered]) },
+      candles: { collect },
+      sessions: {
+        getMarketId: () => "CA_TSX",
+        getMarket: () => ({
+          startTime: new Date("2026-08-25T13:30:00Z"),
+          endTime: at,
+        }),
+      },
+      clock: () => at,
+      ingestFeatureCandles,
+      logger,
+    });
+
+    await expect(
+      (
+        service as unknown as {
+          collectCandles: (intervals: string[]) => Promise<boolean>;
+        }
+      ).collectCandles(["OneMinute"]),
+    ).resolves.toBe(false);
+
+    expect(ingestFeatureCandles).toHaveBeenCalledWith([
+      candle(active.symbolId),
+    ]);
+    expect(
+      collect.mock.calls.map(([instruments]) =>
+        instruments.map(({ id }) => id),
+      ),
+    ).toEqual([["active"], ["failed"], ["recovered"]]);
+    expect(logger.error).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: "PAPER_BOT_RECOVERY_CANDLE_COLLECTION_FAILED",
+        instrumentId: failed.id,
+      }),
+    );
+  });
+
+  it("still fetches recovery candles when scanner ingestion fails", async () => {
+    const active = { id: "active", symbolId: 1 } as PersistedInstrument;
+    const recovery = { id: "recovery", symbolId: 2 } as PersistedInstrument;
+    const at = new Date("2026-08-25T20:01:00Z");
+    const collect = vi.fn(async (instruments: PersistedInstrument[]) =>
+      instruments.map(
+        ({ symbolId }) =>
+          ({
+            symbolId,
+            interval: "OneMinute",
+            start: new Date("2026-08-25T19:59:00Z"),
+            end: new Date("2026-08-25T20:00:00Z"),
+          }) as Candle,
+      ),
+    );
+    const scannerError = new Error("scanner upload failed");
+    const service = Object.create(
+      QuestradeDataService.prototype,
+    ) as QuestradeDataService;
+    Object.assign(service, {
+      instruments: [active],
+      benchmarkSnapshot: { instruments: [] },
+      paperBotStore: {},
+      quotes: { recoveryInstruments: vi.fn(async () => [recovery]) },
+      candles: { collect, reset: vi.fn() },
+      sessions: {
+        getMarketId: () => "CA_TSX",
+        getMarket: () => ({ startTime: at, endTime: at }),
+      },
+      clock: () => at,
+      ingestFeatureCandles: vi.fn(async () => {
+        throw scannerError;
+      }),
+    });
+
+    await expect(
+      (
+        service as unknown as {
+          collectCandles: (intervals: string[]) => Promise<boolean>;
+        }
+      ).collectCandles(["OneMinute"]),
+    ).rejects.toBe(scannerError);
+    expect(collect.mock.calls.map(([instruments]) => instruments)).toEqual([
+      [active],
+      [recovery],
+    ]);
+  });
+
+  it("does not post an empty candle delta to the scanner", async () => {
+    const at = new Date("2026-08-25T14:00:00Z");
+    const ingestFeatureCandles = vi.fn(async () => {});
+    const service = Object.create(
+      QuestradeDataService.prototype,
+    ) as QuestradeDataService;
+    Object.assign(service, {
+      instruments: [],
+      benchmarkSnapshot: { instruments: [] },
+      candles: { collect: vi.fn(async () => []) },
+      sessions: {
+        getMarket: () => ({ startTime: at, endTime: at }),
+        getMarketId: () => "CA_TSX",
+      },
+      clock: () => at,
+      ingestFeatureCandles,
+      quoteCollectionInstruments: vi.fn(async () => []),
+    });
+    await (
+      service as unknown as {
+        collectCandles(intervals: string[]): Promise<boolean>;
+      }
+    ).collectCandles(["OneMinute"]);
+    expect(ingestFeatureCandles).not.toHaveBeenCalled();
+  });
+
+  it("retries a failed late close collection on the next minute", async () => {
+    let now = new Date("2026-08-25T21:00:00Z");
+    const closeAt = new Date("2026-08-25T20:00:00Z");
+    const collectCandles = vi
+      .fn<() => Promise<boolean>>()
+      .mockResolvedValueOnce(false)
+      .mockResolvedValue(true);
+    const logger = { error: vi.fn(), info: vi.fn() };
+    const service = Object.create(
+      QuestradeDataService.prototype,
+    ) as QuestradeDataService;
+    Object.assign(service, {
+      cycleMutex: {
+        isLocked: false,
+        runExclusive: async (run: () => Promise<void>) => run(),
+      },
+      refreshMarketIfDue: vi.fn(async () => {}),
+      quoteCollectionInstruments: vi.fn(async () => []),
+      collectCandles,
+      sessions: {
+        getSnapshot: () => ({ marketStatus: "CLOSED", endTime: closeAt }),
+      },
+      quotes: { collect: vi.fn(async () => []) },
+      quotesByInstrumentId: vi.fn(() => new Map()),
+      scheduleFundedPaperBot: vi.fn(),
+      paperBotProcessor: {},
+      clock: () => now,
+      activeMonitoringCycleLatencies: { record: vi.fn() },
+      logger,
+    });
+
+    await service.runCycle();
+    now = new Date("2026-08-25T21:00:30Z");
+    await service.runCycle();
+    expect(collectCandles).toHaveBeenCalledTimes(1);
+    now = new Date("2026-08-25T21:01:00Z");
+    await service.runCycle();
+    expect(collectCandles).toHaveBeenCalledTimes(2);
+    now = new Date("2026-08-25T21:02:00Z");
+    await service.runCycle();
+    expect(collectCandles).toHaveBeenCalledTimes(2);
+    expect(logger.error).not.toHaveBeenCalled();
+  });
+
+  it("throttles closed funded cycles while keeping pending facts on the fast cadence", async () => {
+    let now = new Date("2026-08-25T22:00:00Z");
+    const quoteCollectionInstruments = vi.fn(async () => []);
+    const scheduleFundedPaperBot = vi.fn();
+    const service = Object.create(
+      QuestradeDataService.prototype,
+    ) as QuestradeDataService;
+    Object.assign(service, {
+      cycleMutex: {
+        isLocked: false,
+        runExclusive: async (run: () => Promise<void>) => run(),
+      },
+      refreshMarketIfDue: vi.fn(async () => {}),
+      sessions: {
+        getSnapshot: () => ({
+          marketStatus: "CLOSED",
+          endTime: new Date("2026-08-25T20:00:00Z"),
+        }),
+      },
+      quoteCollectionInstruments,
+      quotesByInstrumentId: vi.fn(() => new Map()),
+      requestPaperBotSessionCloseIfDue: vi.fn(async () => {}),
+      scheduleFundedPaperBot,
+      paperFundedAdapter: {},
+      paperFundedOperational: { pendingFacts: 0, closePendingOrders: 0 },
+      closedFundedLastCycleAt: 0,
+      paperBotLastSweepAt: 0,
+      clock: () => now,
+      activeMonitoringCycleLatencies: { record: vi.fn() },
+      logger: { error: vi.fn(), info: vi.fn() },
+    });
+    await service.runCycle();
+    now = new Date(now.getTime() + 2_000);
+    await service.runCycle();
+    expect(quoteCollectionInstruments).toHaveBeenCalledTimes(1);
+    expect(scheduleFundedPaperBot).toHaveBeenCalledTimes(1);
+    (
+      service as unknown as { paperFundedOperational: { pendingFacts: number } }
+    ).paperFundedOperational = { pendingFacts: 1 };
+    await service.runCycle();
+    expect(scheduleFundedPaperBot).toHaveBeenCalledTimes(2);
+  });
+
   it("pauses backlog catch-up when a full funded cycle is waiting", async () => {
     const { service } = fixture();
     let releaseDrain!: () => void;
@@ -549,6 +828,110 @@ describe("QuestradeDataService paper-bot wiring", () => {
     expect(new Date(call!.scheduledCloseAt).getTime()).toBeGreaterThan(
       Date.parse(call!.sessionDate),
     );
+  });
+
+  it("keeps startup binding unbound until the funded adapter proves ownership", () => {
+    const { service } = fixture();
+    const paperBotStore = new FakePaperBotStore();
+    service.setPaperBot(
+      paperBotStore,
+      fakeExecutionStore,
+      fakeProfiles,
+      assumptions,
+      "v1",
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {
+        pool: {} as never,
+        accountId: "account-1",
+        currency: "CAD",
+        initialCash: 2_000,
+        dailyLossLimit: 500,
+      },
+    );
+    expect(
+      (service as unknown as Record<string, unknown>).paperFundedBindingState,
+    ).toBe("UNBOUND");
+  });
+
+  it.each([
+    "Funded account has unresolved prior orders",
+    "Funded account policy is immutable",
+  ])(
+    "marks genuine startup binding error %s failed instead of treating it as a wait",
+    async (message) => {
+      const { service } = fixture();
+      const paperBotStore = new FakePaperBotStore();
+      const binding = vi
+        .spyOn(FundedLiveAdapter.prototype, "bind")
+        .mockRejectedValueOnce(new Error(message));
+      service.setPaperBot(
+        paperBotStore,
+        fakeExecutionStore,
+        fakeProfiles,
+        assumptions,
+        "v1",
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        {
+          pool: {} as never,
+          accountId: "account-1",
+          currency: "CAD",
+          initialCash: 2_000,
+          dailyLossLimit: 500,
+        },
+      );
+      try {
+        await expect(service.initialize()).rejects.toThrow(message);
+        expect(
+          (service as unknown as Record<string, unknown>)
+            .paperFundedBindingState,
+        ).toBe("FAILED");
+      } finally {
+        binding.mockRestore();
+      }
+    },
+  );
+
+  it("records a precise prior-run wait during startup and keeps initialization alive", async () => {
+    const { service } = fixture();
+    const paperBotStore = new FakePaperBotStore();
+    const binding = vi
+      .spyOn(FundedLiveAdapter.prototype, "bind")
+      .mockRejectedValueOnce(new FundedPriorRunActiveError("prior-run"));
+    service.setPaperBot(
+      paperBotStore,
+      fakeExecutionStore,
+      fakeProfiles,
+      assumptions,
+      "v1",
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {
+        pool: {} as never,
+        accountId: "account-1",
+        currency: "CAD",
+        initialCash: 2_000,
+        dailyLossLimit: 500,
+      },
+    );
+    try {
+      await expect(service.initialize()).resolves.toBeUndefined();
+      expect(
+        (service as unknown as Record<string, unknown>).paperFundedBindingState,
+      ).toBe("WAITING_FOR_PRIOR_RUN");
+    } finally {
+      binding.mockRestore();
+    }
   });
 
   it("does not start a second run on a same-session refresh", async () => {

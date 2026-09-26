@@ -53,6 +53,7 @@ function row(
       ? {
           status: "CLOSED",
           rMultiple: 1,
+          netPnl: 12.5,
           labelAvailableAt: "2026-09-10T13:31:00.000Z",
         }
       : null,
@@ -78,6 +79,7 @@ describe("buildChallengerObservationReport", () => {
   it("keeps all five attempt states in the denominator and scores only closed timely predictions", () => {
     const report = buildChallengerObservationReport({
       experimentId: UUID,
+      currency: "CAD",
       asOf: "2026-09-10T14:00:00.000Z",
       attempts: [
         row(
@@ -115,6 +117,23 @@ describe("buildChallengerObservationReport", () => {
     expect(report.population.engineFailed).toBe(1);
     expect(report.population.pending).toBe(1);
     expect(report.closedQuoteOutcomes).toBe(1);
+    expect(report.prospectiveEconomics).toMatchObject({
+      unit: "CAD",
+      status: "BASELINE_LABELS_AVAILABLE",
+      observedBaselineLabelDenominator: 1,
+      observedBaselineNetPnlAfterCosts: 12.5,
+      decisionCounts: {
+        selected: null,
+        rejected: null,
+        noFill: null,
+        invalid: null,
+        missedWinner: null,
+      },
+      riskDiagnostics: { drawdown: null, concentration: null },
+    });
+    expect(report.comparison).toBeNull();
+    expect(report.comparisonUnavailableReason).toBe("PAIRED_INPUTS_MISSING");
+    expect(report.promotionAuthorized).toBe(false);
     expect(report.prospectiveBrierScore).toBeCloseTo(0.16);
     expect(report.comparison).toBeNull();
     expect(report.comparisonUnavailableReason).toBe("PAIRED_INPUTS_MISSING");

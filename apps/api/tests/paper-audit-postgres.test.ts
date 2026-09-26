@@ -8,6 +8,7 @@ import { FundedOrderService } from "../src/paper-bot/funded-order-service.js";
 import { FundedReportingService } from "../src/paper-bot/funded-reporting-service.js";
 import { FundedFactAdapter } from "../src/paper-bot/funded-fact-adapter.js";
 import { QuestradeDataService } from "../src/market-data/service.js";
+import { PostgresMarketDataRepository } from "../src/market-data/repository.js";
 import {
   buildFundedSignalEnvelope,
   FundedLiveAdapter,
@@ -33,6 +34,8 @@ import {
 import {
   applyQuoteFact,
   createQuoteExecution,
+  createCandleExecution,
+  requestCandleSessionClose,
 } from "../src/paper-bot/execution-core.js";
 import { COORDINATION_POLICY_VERSION } from "../src/paper-bot/coordination-policy.js";
 import { AUTHORITATIVE_EXECUTION_MODEL_VERSION } from "../src/backtests/execution-provenance.js";
@@ -1946,6 +1949,227 @@ describe.skipIf(!databaseUrl)(
       expect(snapshot.oldestClosePendingAgeMs).not.toBeNull();
     });
 
+    it("waits for an independent prior CANDLE close without binding or mutating funded economics", async () => {
+      const store = new PostgresPaperBotStore(pool);
+      const prior = await store.startOrResumeLiveRun({
+        source: "LIVE",
+        marketId: "CA_TSX",
+        sessionDate: "2099-02-15",
+        sessionTimezone: assumptions.sessionTimezone,
+        scheduledCloseAt: "2099-02-15T21:00:00Z",
+        executionModelVersion: AUTHORITATIVE_EXECUTION_MODEL_VERSION,
+        assumptions,
+      });
+      const accountId = randomUUID();
+      await new PostgresFundedLedgerStore(pool).create(accountId, [
+        "CAD",
+        2_000,
+        "2099-02-15",
+        "2099-02-15T14:30:00Z",
+        500,
+      ]);
+      await new FundedOrderService(pool, prior.id, accountId, "CAD").bind();
+
+      const source = await store.findObservationById(observationId);
+      if (!source) throw new Error("Audit observation missing");
+      const {
+        id: _sourceId,
+        marketId: _sourceMarket,
+        createdAt: _sourceCreatedAt,
+        ...observationInput
+      } = source;
+      const observed = await store.insertObservation({
+        ...observationInput,
+        runId: prior.id,
+        sourceEventId: randomUUID(),
+        setupInstanceId: randomUUID(),
+        signalTimestamp: "2099-02-15T14:30:00Z",
+      });
+      const candleState = createCandleExecution(
+        { ...signal, signalTimestamp: "2099-02-15T14:30:00Z" },
+        assumptions,
+      );
+      const candlePending = requestCandleSessionClose(
+        candleState,
+        null,
+        assumptions,
+      );
+      expect(candlePending.state.status).toBe("CLOSE_PENDING");
+      const executions = new PostgresPaperExecutionStore(pool);
+      await executions.insertInitialExecutions(
+        observed.observation.id,
+        createQuoteExecution(
+          { ...signal, signalTimestamp: "2099-02-15T14:30:00Z" },
+          null,
+          assumptions,
+        ),
+        candleState,
+      );
+      await executions.upsertCandleExecution(
+        observed.observation.id,
+        candlePending.state,
+      );
+      expect(await store.settleRunAfterCloseRequest(prior.id)).toBe(
+        "CLOSE_PENDING",
+      );
+      expect(
+        (
+          await new PostgresMarketDataRepository(pool).listRecoveryInstruments(
+            "CA_TSX",
+          )
+        ).map((instrument) => instrument.id),
+      ).toContain(instrumentId);
+
+      const current = await store.startOrResumeLiveRun({
+        source: "LIVE",
+        marketId: "CA_TSX",
+        sessionDate: "2099-02-16",
+        sessionTimezone: assumptions.sessionTimezone,
+        scheduledCloseAt: "2099-02-16T21:00:00Z",
+        executionModelVersion: AUTHORITATIVE_EXECUTION_MODEL_VERSION,
+        assumptions,
+      });
+      const nextAdapter = new FundedLiveAdapter({
+        pool,
+        runId: current.id,
+        accountId,
+        currency: "CAD",
+        marketId: "CA_TSX",
+        assumptions,
+      });
+      const initialLedger = await new PostgresFundedLedgerStore(pool).read(
+        accountId,
+      );
+      await expect(
+        nextAdapter.bind("2099-02-16", "2099-02-16T14:30:00Z", 2_000, 500),
+      ).rejects.toMatchObject({ code: "FUNDED_PRIOR_RUN_ACTIVE" });
+      expect(
+        (
+          await pool.query("SELECT 1 FROM paper_funded_run WHERE run_id=$1", [
+            current.id,
+          ])
+        ).rows,
+      ).toHaveLength(0);
+      expect(
+        (await new PostgresFundedLedgerStore(pool).read(accountId)).session,
+      ).toBe(initialLedger.session);
+
+      const priorHealth = await (store as any).findPriorClosePendingHealth(
+        "CA_TSX",
+        current.id,
+      );
+      expect(priorHealth.closePending).toBe(1);
+      expect(priorHealth.oldestClosePendingAt).not.toBeNull();
+      const closePendingActivity = await pool.query<{ occurred_at: Date }>(
+        `SELECT occurred_at FROM paper_bot_activity
+         WHERE observation_id=$1 AND event_type='EXECUTION_CLOSE_PENDING'
+         ORDER BY occurred_at LIMIT 1`,
+        [observed.observation.id],
+      );
+      expect(priorHealth.oldestClosePendingAt).toBe(
+        closePendingActivity.rows[0]?.occurred_at.toISOString(),
+      );
+      const otherMarketHealth = await (
+        store as any
+      ).findPriorClosePendingHealth("US_EQUITIES", current.id);
+      expect(otherMarketHealth).toEqual({
+        closePending: 0,
+        oldestClosePendingAt: null,
+      });
+    });
+
+    it("keeps prior close-pending age unknown when any counted execution lacks transition proof", async () => {
+      const store = new PostgresPaperBotStore(pool);
+      const executions = new PostgresPaperExecutionStore(pool);
+      const source = await store.findObservationById(observationId);
+      if (!source) throw new Error("Audit observation missing");
+      const {
+        id: _id,
+        marketId: _marketId,
+        createdAt: _createdAt,
+        ...base
+      } = source;
+      const run = async (sessionDate: string) =>
+        store.startOrResumeLiveRun({
+          source: "LIVE",
+          marketId: "CA_TSX",
+          sessionDate,
+          sessionTimezone: assumptions.sessionTimezone,
+          scheduledCloseAt: `${sessionDate}T21:00:00Z`,
+          executionModelVersion: AUTHORITATIVE_EXECUTION_MODEL_VERSION,
+          assumptions,
+        });
+      const observation = async (runId: string, at: string) =>
+        store.insertObservation({
+          ...base,
+          runId,
+          sourceEventId: randomUUID(),
+          setupInstanceId: randomUUID(),
+          signalTimestamp: at,
+        });
+      const pending = async (runId: string, at: string) => {
+        const observed = await observation(runId, at);
+        const pendingState = requestCandleSessionClose(
+          createCandleExecution(
+            { ...signal, signalTimestamp: at },
+            assumptions,
+          ),
+          null,
+          assumptions,
+        );
+        await executions.insertInitialExecutions(
+          observed.observation.id,
+          createQuoteExecution(
+            { ...signal, signalTimestamp: at },
+            null,
+            assumptions,
+          ),
+          pendingState.state,
+        );
+        await executions.upsertCandleExecution(
+          observed.observation.id,
+          pendingState.state,
+        );
+        const row = await pool.query<{ id: string }>(
+          "SELECT id FROM paper_execution WHERE observation_id=$1 AND model='CANDLE'",
+          [observed.observation.id],
+        );
+        return {
+          observation: observed.observation,
+          executionId: row.rows[0]!.id,
+        };
+      };
+
+      const knownRun = await run("2099-02-20");
+      const missingRun = await run("2099-02-21");
+      const abandonedRun = await run("2099-02-22");
+      const currentRun = await run("2099-02-23");
+      const baseline = await store.findPriorClosePendingHealth(
+        "CA_TSX",
+        currentRun.id,
+      );
+      await pending(knownRun.id, "2099-02-20T14:30:00Z");
+      const missing = await pending(missingRun.id, "2099-02-21T14:30:00Z");
+      await pool.query(
+        `DELETE FROM paper_bot_activity
+         WHERE execution_id=$1 AND event_type='EXECUTION_CLOSE_PENDING'`,
+        [missing.executionId],
+      );
+      await pending(abandonedRun.id, "2099-02-22T14:30:00Z");
+      await executions.abandonUnresolvedExecutions(
+        abandonedRun.id,
+        "bounded audit fixture",
+      );
+      await pending(currentRun.id, "2099-02-23T14:30:00Z");
+
+      await expect(
+        store.findPriorClosePendingHealth("CA_TSX", currentRun.id),
+      ).resolves.toEqual({
+        closePending: baseline.closePending + 2,
+        oldestClosePendingAt: null,
+      });
+    });
+
     it("recovers a funded inbox after effects commit but acknowledgement fails", async () => {
       const run = await new PostgresPaperBotStore(pool).startBacktestRun({
         source: "BACKTEST",
@@ -2380,7 +2604,7 @@ describe.skipIf(!databaseUrl)(
         new Map([[instrumentId, recoveryQuote]]),
         [],
       );
-      expect(recovered, service.paperBotLastError).toBe(true);
+      expect(recovered, service.paperBotLastError).toBe("PROCESSED");
       expect(service.paperFundedBound).toBe(true);
       const rolled = await new PostgresFundedLedgerStore(pool).read(accountId);
       expect(rolled.positions).toEqual({});

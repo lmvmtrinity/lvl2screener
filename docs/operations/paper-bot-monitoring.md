@@ -86,6 +86,7 @@ then confirm receipt before relying on delivery. A valid config does not prove t
 Gmail accepted mail. Monitoring on the deployment host cannot email during a complete
 workstation or outbound-network outage; that requires an external monitor.
 
+
 ## Optional monitoring overlay with webhook delivery
 
 Set `ALERTMANAGER_WEBHOOK_URL` to the approved HTTPS receiver, then start only the monitoring
@@ -123,3 +124,13 @@ validates Alertmanager-to-webhook delivery only; it does not commission the prod
 or prove that the deployment's Prometheus scrape is healthy.
 
 Funded metrics are emitted only when an opt-in funded account is configured. Migration 076 persists `paper_entry_order.close_pending_at`; migration 077 protects funded account and run provenance; migration 079 adds temporal reporting boundaries. The funded live adapter reports account-scoped close-pending count/age across current and recovery runs, plus veto/late-fact totals, process-lifetime recovery failures and skipped-input coverage gaps. Use the explicit `marketId` scrapes for market-scoped funded labels; the local smoke harness verifies webhook delivery, while production receiver commissioning remains required. Retention-job success is not evidence that a requested replay interval is complete. An overdue-run alert is not a count of recovery failures.
+
+The independent paper gauges `scanner_paper_bot_prior_close_pending_executions` and
+`scanner_paper_bot_oldest_prior_close_pending_age_ms` cover prior `LIVE` runs in the selected
+market, excluding the current run and rows already marked abandoned. The age uses the first
+durable `EXECUTION_CLOSE_PENDING` activity record; if that historical transition is unavailable,
+the count remains visible and the age is null. The current-run close-pending count and the funded
+account gauges retain their existing scopes. A funded account that is waiting for the prior
+sequential run is exposed by `fundedBindingState=WAITING_FOR_PRIOR_RUN` and the
+`scanner_paper_bot_funded_waiting_for_prior_run` gauge; this is an ownership wait, not a funded
+recovery failure or a new funded economic cycle.

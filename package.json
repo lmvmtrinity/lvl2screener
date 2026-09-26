@@ -1,6 +1,6 @@
 {
   "name": "tsx-intraday-scanner",
-  "version": "1.0.4",
+  "version": "1.1.0",
   "private": true,
   "packageManager": "pnpm@10.12.4",
   "scripts": {
@@ -25,12 +25,15 @@
     "test:e2e": "node scripts/run-e2e.mjs",
     "test:e2e:headed": "node scripts/run-e2e.mjs --headed",
     "test:node": "pnpm -r --if-present test",
-    "test:scanner": "python -m pytest services/scanner/tests",
+    "test:scanner": "cd services/scanner && python -m pytest tests",
     "typecheck": "pnpm -r --if-present typecheck",
     "verify:docs": "node scripts/verify-docs.mjs",
     "verify:market-boundaries": "node scripts/verify-market-boundaries.mjs",
     "verify:compose": "node scripts/verify-compose-trust-boundary.mjs",
     "verify:paper-bot": "node scripts/verify-paper-bot-deployment.mjs",
+    "deployment:build": "node scripts/deployment/build-candidate.mjs",
+    "deployment:capture-rollback": "node scripts/deployment/capture-rollback.mjs",
+    "deployment:preflight": "node scripts/deployment/preflight.mjs",
     "visual:fixtures": "node scripts/visual/validate-fixtures.mjs",
     "visual:screenshots": "node scripts/visual/screenshot.mjs"
   },

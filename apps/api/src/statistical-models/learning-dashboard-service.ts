@@ -18,6 +18,8 @@ import type {
 import { PAPER_EVIDENCE_TRAINING_POLICY } from "./paper-evidence-training-scheduler.js";
 import { nextLearningCheck } from "./daily-learning-schedule.js";
 import type { EvidenceAutomationService } from "./evidence-automation-service.js";
+import type { StrategyLearningScope } from "@tsx-scanner/contracts";
+import type { StrategyLearningReadinessService } from "../backtests/strategy-learning-readiness.js";
 
 export class LearningDashboardService implements LearningDashboardApi {
   constructor(
@@ -32,7 +34,31 @@ export class LearningDashboardService implements LearningDashboardApi {
     private readonly evidenceAutomationService?: EvidenceAutomationService,
     /** Explicit interval override; null uses the daily Eastern schedule. */
     private readonly trainingCheckMs: number | null = null,
+    private readonly strategyReadiness?: StrategyLearningReadinessService,
   ) {}
+
+  async strategyLearningReadiness(
+    scope: StrategyLearningScope,
+    cutoff?: string,
+  ) {
+    if (!this.strategyReadiness)
+      throw new Error("STRATEGY_READINESS_UNAVAILABLE");
+    return this.strategyReadiness.getReadiness(scope, cutoff);
+  }
+
+  async backtestStrategyLearningReadiness(
+    runId: string,
+    strategyKey: string,
+    marketId: MarketId,
+  ) {
+    if (!this.strategyReadiness)
+      throw new Error("STRATEGY_READINESS_UNAVAILABLE");
+    return this.strategyReadiness.getReadinessForBacktest(
+      runId,
+      strategyKey,
+      marketId,
+    );
+  }
 
   /** Configured next check plus an honest estimate/overdue verdict.
    *
@@ -148,7 +174,12 @@ export class LearningDashboardService implements LearningDashboardApi {
           Math.round((cohort.closedQuoteCount / threshold) * 100),
         );
         const newOutcomesSinceLastDataset = latestDataset
-          ? Math.max(0, cohort.closedQuoteCount - latestDataset.sourceRowCount)
+          ? Math.max(
+              0,
+              cohort.closedQuoteCount -
+                (latestDataset.cohort?.closedQuoteCount ??
+                  latestDataset.sourceRowCount),
+            )
           : cohort.closedQuoteCount;
         const qualifies =
           cohort.closedQuoteCount >= threshold &&

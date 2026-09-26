@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import {
+  type BacktestEconomics,
   AUTHORITATIVE_EXECUTION_MODEL_VERSION,
   type BacktestAutomationAuthorizationScope,
   type BacktestAutomationBlockerReason,
@@ -192,6 +193,7 @@ export interface BacktestAutomationInputs {
     marketId: MarketId,
     now?: Date,
     membership?: string,
+    cycleToken?: object,
   ): Promise<string>;
   /** Frozen candidate selection for one replay range. Its digest participates
    * in input freshness, so resolving missing membership reopens affected work
@@ -239,6 +241,8 @@ export interface BacktestAutomationOptions {
   readonly jobs: BacktestAutomationDispatcher;
   readonly clock?: () => Date;
   readonly retry?: BacktestAutomationRetryPolicy;
+  /** Paper-bot entry economics applied to qualification replays. */
+  readonly economics?: BacktestEconomics;
   /** A2 follow-on catalog. Only workers pass definitions; API reads persisted
    * stage state without evaluating anything. */
   readonly stageDefinitions?: readonly BacktestAutomationStageDefinition[];
@@ -390,9 +394,20 @@ export class BacktestAutomationService {
         profile.marketId === marketId && profile.analysisKind === "SETUP",
     );
     const bounded = options.limit ? profiles.slice(0, options.limit) : profiles;
+    const cycleInputs = {
+      availability: undefined as CapturedHistoryAvailability | undefined,
+      candidatePlans: new Map<string, ReplayCandidatePlan>(),
+      fingerprints: new Map<string, string>(),
+      now,
+    };
     for (const profile of bounded) {
       counts.evaluated += 1;
-      const result = await this.evaluateProfile(profile, origin, options);
+      const result = await this.evaluateProfile(
+        profile,
+        origin,
+        options,
+        cycleInputs,
+      );
       switch (result.kind) {
         case "DISPATCHED":
           counts.dispatched += 1;
@@ -1047,35 +1062,57 @@ export class BacktestAutomationService {
     profile: ScannerProfile,
     origin: BacktestAutomationTriggerOrigin,
     options: BacktestAutomationEvaluationOptions,
+    cycleInputs?: {
+      availability: CapturedHistoryAvailability | undefined;
+      candidatePlans: Map<string, ReplayCandidatePlan>;
+      fingerprints: Map<string, string>;
+      now: Date;
+    },
   ): Promise<BacktestAutomationEvaluation> {
     if (profile.analysisKind !== "SETUP")
       return { kind: "SKIPPED", reason: "NOT_A_SETUP_PROFILE" };
-    const now = this.clock();
+    const now = cycleInputs?.now ?? this.clock();
     const identity = BacktestAutomationService.workIdentityFor(profile);
     const workKey = BacktestAutomationService.workKeyFor(identity);
     const availability =
-      await this.options.inputs.getCapturedHistoryAvailability(
+      cycleInputs?.availability ??
+      (await this.options.inputs.getCapturedHistoryAvailability(
         profile.marketId,
-      );
+      ));
+    if (cycleInputs) cycleInputs.availability = availability;
     const emptyHistory =
       !availability.replay.earliestDate || !availability.replay.latestDate;
     const qualification = emptyHistory
       ? null
-      : profileQualificationInput(profile, availability);
-    const candidatePlan =
-      qualification && !qualification.violation
-        ? await this.options.inputs.resolveReplayCandidatePlan(
-            qualification.input,
-          )
-        : null;
+      : profileQualificationInput(
+          profile,
+          availability,
+          this.options.economics,
+        );
+    let candidatePlan: ReplayCandidatePlan | null = null;
+    if (qualification && !qualification.violation) {
+      const { marketId, startDate, endDate, symbols } = qualification.input;
+      const key = JSON.stringify([marketId, startDate, endDate, symbols]);
+      candidatePlan =
+        cycleInputs?.candidatePlans.get(key) ??
+        (await this.options.inputs.resolveReplayCandidatePlan(
+          qualification.input,
+        ));
+      cycleInputs?.candidatePlans.set(key, candidatePlan);
+    }
     // Membership identity participates in freshness: resolving missing evidence
     // changes the fingerprint and reopens blocked or completed work, while
     // repeated unresolved membership stays on one stable fingerprint.
-    const fingerprint = await this.options.inputs.captureInputFingerprint(
-      profile.marketId,
-      now,
-      candidatePlan?.digest,
-    );
+    const membership = candidatePlan?.digest;
+    const fingerprint =
+      cycleInputs?.fingerprints.get(membership ?? "") ??
+      (await this.options.inputs.captureInputFingerprint(
+        profile.marketId,
+        now,
+        membership,
+        cycleInputs,
+      ));
+    cycleInputs?.fingerprints.set(membership ?? "", fingerprint);
     const existing = await this.options.store.getWork(workKey);
     let work: BacktestAutomationWorkRecord =
       existing ??

@@ -3,9 +3,11 @@ import {
   marketIdSchema,
   evidenceAutomationStageKeySchema,
   paperEvidenceFiltersSchema,
+  strategyLearningScopeSchema,
 } from "@tsx-scanner/contracts";
 import type { BuildAppOptions } from "../api-types.js";
-import { parseLimit, requireService } from "./shared.js";
+import { isValidUuid, parseLimit, requireService } from "./shared.js";
+import { sendDomainError } from "../errors.js";
 
 type Query = Record<string, string | undefined> & { limit?: string };
 
@@ -26,6 +28,86 @@ export function registerLearningRoutes(
   app: FastifyInstance,
   options: BuildAppOptions,
 ): void {
+  app.get<{
+    Params: { runId: string };
+    Querystring: { strategyKey?: string; marketId?: string };
+  }>(
+    "/api/learning/backtest-runs/:runId/strategy-readiness",
+    async (request, reply) => {
+      const service = options.learningDashboardService;
+      if (!service?.backtestStrategyLearningReadiness)
+        return reply
+          .code(501)
+          .send({ error: "Strategy readiness unavailable" });
+      const market = marketIdSchema.safeParse(request.query.marketId);
+      const strategyKey = request.query.strategyKey?.trim();
+      if (!isValidUuid(request.params.runId) || !market.success || !strategyKey)
+        return reply.code(400).send({
+          error:
+            "A valid run ID, strategyKey and concrete marketId are required",
+        });
+      try {
+        return await service.backtestStrategyLearningReadiness(
+          request.params.runId,
+          strategyKey,
+          market.data,
+        );
+      } catch (error) {
+        return sendDomainError(reply, error);
+      }
+    },
+  );
+
+  app.get<{
+    Querystring: {
+      marketId?: string;
+      strategyKey?: string;
+      profileConfigId?: string;
+      strategyVersion?: string;
+      configVersion?: string;
+      executionModelVersion?: string;
+      executionAssumptions?: string;
+      cutoff?: string;
+    };
+  }>("/api/learning/strategy-readiness", async (request, reply) => {
+    let assumptions: unknown;
+    try {
+      assumptions = JSON.parse(request.query.executionAssumptions ?? "");
+    } catch {
+      return reply
+        .code(400)
+        .send({ error: "executionAssumptions must be JSON" });
+    }
+    const parsed = strategyLearningScopeSchema.safeParse({
+      marketId: request.query.marketId,
+      strategyKey: request.query.strategyKey,
+      profileConfigId: request.query.profileConfigId,
+      strategyVersion: request.query.strategyVersion,
+      configVersion: request.query.configVersion,
+      executionModelVersion: request.query.executionModelVersion,
+      executionAssumptions: assumptions,
+    });
+    const cutoff = request.query.cutoff;
+    if (
+      !parsed.success ||
+      (cutoff !== undefined && !Number.isFinite(Date.parse(cutoff)))
+    )
+      return reply.code(400).send({
+        error: "A complete strategy scope and valid cutoff are required",
+        issues: parsed.success ? undefined : parsed.error.issues,
+      });
+    const service = requireService(
+      reply,
+      options.learningDashboardService,
+      "Learning dashboard service",
+    );
+    if (!service) return;
+    if (!service.strategyLearningReadiness) {
+      return reply.code(501).send({ error: "Strategy readiness unavailable" });
+    }
+    return service.strategyLearningReadiness(parsed.data, cutoff);
+  });
+
   app.get<{
     Params: { kind: string; id: string };
     Querystring: { marketId?: string };

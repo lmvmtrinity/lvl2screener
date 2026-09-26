@@ -59,6 +59,10 @@ const defaultApiEnvironment = JSON.parse(
     templateEnvironment,
   ),
 ).services.api.environment;
+const workerEntry = await readFile(
+  resolve(root, "apps/api/src/worker.ts"),
+  "utf8",
+);
 
 check("default Compose configuration resolves", () => {
   assert.ok(composeConfig.services?.api);
@@ -89,6 +93,34 @@ check("funded identities are disabled by default", () => {
   assert.equal(defaultApiEnvironment.PAPER_FUNDED_USD_ACCOUNT_ID, "");
 });
 
+check("FP04 shadow observation gate is wired and disabled by default", () => {
+  assert.equal(
+    defaultApiEnvironment.FUNDED_SHADOW_OBSERVATION_ENABLED,
+    "false",
+    "the repository default must keep FP04 observation disabled",
+  );
+  for (const [service, environment] of [
+    ["api", apiEnvironment],
+    ["worker", workerEnvironment],
+  ]) {
+    const value = environment.FUNDED_SHADOW_OBSERVATION_ENABLED;
+    assert.ok(
+      value === undefined || value === "true" || value === "false",
+      `${service} FUNDED_SHADOW_OBSERVATION_ENABLED must be an explicit boolean string`,
+    );
+  }
+  assert.equal(
+    apiEnvironment.FUNDED_SHADOW_OBSERVATION_ENABLED ?? "false",
+    workerEnvironment.FUNDED_SHADOW_OBSERVATION_ENABLED ?? "false",
+    "api and worker must agree on the FP04 observation gate",
+  );
+  assert.match(
+    workerEntry,
+    /FUNDED_SHADOW_OBSERVATION_ENABLED/,
+    "worker startup must consult the FP04 gate",
+  );
+});
+
 const migrationFiles = (await readdir(resolve(root, "database/init")))
   .filter((name) => /^\d{3}-.+\.sql$/.test(name))
   .map((name) => ({ name, version: Number(name.slice(0, 3)) }))
@@ -102,7 +134,7 @@ const latestMigration = Math.max(...migrationVersions);
 check(
   "database migrations include funded lookup indexes and research lineage",
   () => {
-    assert.equal(latestMigration, 132);
+    assert.equal(latestMigration, 156);
     for (let version = 1; version <= latestMigration; version += 1)
       // 105 was reserved and never created; later applied migrations retain their numbers.
       if (version !== 105)
@@ -173,6 +205,28 @@ check(
       "130-funded-execution-datasets.sql",
       "131-funded-causal-provenance.sql",
       "132-funded-comparison-records.sql",
+      "133-strategy-signal-snapshot-json-nullable.sql",
+      "134-drop-superseded-indexes.sql",
+      "135-funded-signal-fact-partial-index.sql",
+      "136-funded-shadow-observation.sql",
+      "137-funded-shadow-boundary-hardening.sql",
+      "138-statistical-dataset-preparation.sql",
+      "139-strategy-learning-trial-ledger.sql",
+      "140-signal-model-experiments.sql",
+      "141-backtest-opportunity-capture.sql",
+      "142-signal-model-research-plan-v2.sql",
+      "143-strategy-study-test-session-claims.sql",
+      "144-signal-model-prospective-candidate.sql",
+      "145-funded-inbox-analyze-cadence.sql",
+      "146-funded-fact-processed-revision-index.sql",
+      "147-universe-refresh-kind.sql",
+      "148-drop-strategy-signal-snapshot-json.sql",
+      "149-deduplicate-research-coverage-payload.sql",
+      "150-quote-candle-columnstore-retention.sql",
+      "151-questrade-budget-acquire.sql",
+      "152-execution-diagnostics-request-index.sql",
+      "153-spread-gate-stabilization.sql",
+      "154-trade-reference-floors.sql",
     ])
       assert.ok(
         migrationFiles.some((file) => file.name === required),
@@ -204,7 +258,7 @@ check("funded monitoring rules and market scrapes are present", () => {
   const alertNames = [...alerts.matchAll(/^\s+- alert: (\S+)/gm)].map(
     (match) => match[1],
   );
-  assert.equal(alertNames.length, 28);
+  assert.equal(alertNames.length, 33);
   for (const name of [
     "ScannerMetricsUnavailable",
     "PaperProcessingStalled",
@@ -227,6 +281,11 @@ check("funded monitoring rules and market scrapes are present", () => {
     "ScannerDiscoveryRunFailed",
     "BacktestAutomationWorkFailed",
     "BacktestAutomationQueueStalled",
+    "FundedShadowObserverBacklog",
+    "FundedShadowPredictionDeadlineMissed",
+    "FundedShadowReconciliationFailed",
+    "FundedShadowOwnershipRefused",
+    "FundedShadowFallback",
   ])
     assert.ok(alertNames.includes(name), `missing ${name}`);
   assert.match(prometheus, /marketId: \[CA_TSX\]/);

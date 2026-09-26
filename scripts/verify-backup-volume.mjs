@@ -4,12 +4,17 @@ import { createHash } from "node:crypto";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { pipeArchiveToChild } from "./backup-restore-stream.mjs";
+import {
+  compareTableRowCounts,
+  describeTableRowCountMismatch,
+} from "./backup-manifest.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 function usage() {
   console.log(
-    "Usage: node scripts/verify-backup-volume.mjs backups/postgres-YYYYMMDDTHHMMSS.dump",
+    "Usage: node scripts/verify-backup-volume.mjs backups/postgres-YYYYMMDDTHHMMSS.dump [--keep-restore]",
   );
 }
 
@@ -50,6 +55,32 @@ function commandStatus(command, args) {
   });
 }
 
+function quoteIdentifier(value) {
+  return `"${String(value).replaceAll('"', '""')}"`;
+}
+
+function isTimescaleInternalForeignKey(schema) {
+  return /^_timescaledb_/.test(schema);
+}
+
+function hypertableForeignKeySql(foreignKeys) {
+  return `${foreignKeys
+    .map((value) => {
+      if (
+        typeof value?.schema !== "string" ||
+        typeof value.table !== "string" ||
+        typeof value.name !== "string" ||
+        typeof value.definition !== "string" ||
+        typeof value.validated !== "boolean" ||
+        value.definition.trim() === ""
+      )
+        throw new Error("Backup manifest contains an invalid foreign key.");
+      const definition = value.definition.trim().replace(/\s+NOT VALID$/i, "");
+      return `ALTER TABLE ${quoteIdentifier(value.schema)}.${quoteIdentifier(value.table)} ADD CONSTRAINT ${quoteIdentifier(value.name)} ${definition}${value.validated ? "" : " NOT VALID"};`;
+    })
+    .join("\n")}\n`;
+}
+
 function restoreSection(archive, container, database, user, section) {
   return new Promise((resolveRestore, rejectRestore) => {
     const child = spawn(
@@ -73,19 +104,17 @@ function restoreSection(archive, container, database, user, section) {
         stdio: ["pipe", "inherit", "inherit"],
       },
     );
-    const input = createReadStream(archive);
-    input.pipe(child.stdin);
-    input.on("error", rejectRestore);
-    child.on("error", rejectRestore);
-    child.on("close", (code) =>
-      code === 0
-        ? resolveRestore()
-        : rejectRestore(
-            new Error(
-              `pg_restore --section=${section} exited with status ${code}`,
+    pipeArchiveToChild(archive, child)
+      .then((code) =>
+        code === 0
+          ? resolveRestore()
+          : rejectRestore(
+              new Error(
+                `pg_restore --section=${section} exited with status ${code}`,
+              ),
             ),
-          ),
-    );
+      )
+      .catch(rejectRestore);
   });
 }
 
@@ -111,27 +140,31 @@ async function buildPostDataLists(archive, container, manifest) {
     let stderr = "";
     child.stdout.on("data", (chunk) => chunks.push(chunk));
     child.stderr.on("data", (chunk) => (stderr += chunk.toString("utf8")));
-    child.on("error", rejectList);
-    child.on("close", (code) =>
-      code === 0
-        ? resolveList(Buffer.concat(chunks).toString("utf8"))
-        : rejectList(
+    pipeArchiveToChild(archive, child)
+      .then((code) => {
+        if (code !== 0)
+          rejectList(
             new Error(
               `pg_restore --list exited with status ${code}: ${stderr.trim()}`,
             ),
-          ),
-    );
-    const input = createReadStream(archive);
-    input.pipe(child.stdin);
-    input.on("error", rejectList);
+          );
+        else resolveList(Buffer.concat(chunks).toString("utf8"));
+      })
+      .catch(rejectList);
   });
-  const foreignKeys = new Set(
-    manifest.foreignKeys.map(
-      (value) => `${value.schema}\t${value.table}\t${value.name}`,
-    ),
+  const foreignKeys = new Map(
+    manifest.foreignKeys.map((value) => [
+      `${value.schema}\t${value.table}\t${value.name}`,
+      value,
+    ]),
   );
+  const hypertables = new Set(
+    manifest.hypertables.map((value) => `${value.schema}\t${value.table}`),
+  );
+  const seenForeignKeys = new Set();
   const phaseA = [];
   const phaseB = [];
+  const hypertableForeignKeys = [];
   const postDataTags = new Set([
     "INDEX",
     "INDEX ATTACH",
@@ -150,10 +183,30 @@ async function buildPostDataLists(archive, container, manifest) {
       continue;
     }
     const tokens = trimmed.split(/\s+/);
-    if (tokens[3] === "FK" && tokens[4] === "CONSTRAINT") {
+    if (tokens[3] === "FK") {
+      if (tokens[4] !== "CONSTRAINT" || !tokens[5] || !tokens[6] || !tokens[7])
+        throw new Error(
+          "Backup archive contains a malformed foreign key TOC entry.",
+        );
       const key = `${tokens[5]}\t${tokens[6]}\t${tokens[7]}`;
-      if (foreignKeys.has(key)) phaseB.push(line);
-      else phaseA.push(line);
+      const foreignKey = foreignKeys.get(key);
+      if (foreignKey) {
+        if (seenForeignKeys.has(key))
+          throw new Error(`Backup archive repeats foreign key ${key}.`);
+        seenForeignKeys.add(key);
+        if (hypertables.has(`${foreignKey.schema}\t${foreignKey.table}`))
+          hypertableForeignKeys.push(foreignKey);
+        else phaseB.push(line);
+      } else if (isTimescaleInternalForeignKey(tokens[5])) {
+        // The manifest intentionally records public foreign keys only. Keep
+        // Timescale's own catalog constraints in the pre/post restore phase;
+        // an unknown public FK must never be restored without validation.
+        phaseA.push(line);
+      } else {
+        throw new Error(
+          `Backup archive foreign key ${key} has no manifest correspondence.`,
+        );
+      }
       continue;
     }
     if (postDataTags.has(tokens[3])) phaseA.push(line);
@@ -161,6 +214,7 @@ async function buildPostDataLists(archive, container, manifest) {
   return {
     phaseA: `${phaseA.join("\n")}\n`,
     phaseB: `${phaseB.join("\n")}\n`,
+    hypertableForeignKeys,
   };
 }
 
@@ -205,17 +259,15 @@ function restoreWithList(archive, container, database, user, listPath, label) {
         stdio: ["pipe", "inherit", "inherit"],
       },
     );
-    const input = createReadStream(archive);
-    input.pipe(child.stdin);
-    input.on("error", rejectRestore);
-    child.on("error", rejectRestore);
-    child.on("close", (code) =>
-      code === 0
-        ? resolveRestore()
-        : rejectRestore(
-            new Error(`${label} restore exited with status ${code}`),
-          ),
-    );
+    pipeArchiveToChild(archive, child)
+      .then((code) =>
+        code === 0
+          ? resolveRestore()
+          : rejectRestore(
+              new Error(`${label} restore exited with status ${code}`),
+            ),
+      )
+      .catch(rejectRestore);
   });
 }
 
@@ -496,6 +548,9 @@ function assertManifest(manifest) {
 
 async function main() {
   const input = process.argv[2];
+  const keepRestore = process.argv[3] === "--keep-restore";
+  if (process.argv.length > (keepRestore ? 4 : 3))
+    throw new Error("Unknown backup verification option.");
   if (input === "--help" || input === "-h") return usage();
   if (!input || input.startsWith("-"))
     throw new Error("A backup archive path is required.");
@@ -514,6 +569,7 @@ async function main() {
   const restoreDatabase = "backup_verification";
   let volumeCreated = false;
   let containerCreated = false;
+  let verified = false;
   try {
     await commandOutput("docker", ["volume", "create", volume]);
     volumeCreated = true;
@@ -613,15 +669,39 @@ async function main() {
       "/tmp/tsx-backup-post-fkeys.list",
       "post-data (foreign keys)",
     );
+    if (lists.hypertableForeignKeys.length > 0) {
+      await writeContainerFile(
+        container,
+        "/tmp/tsx-backup-hypertable-fkeys.sql",
+        hypertableForeignKeySql(lists.hypertableForeignKeys),
+      );
+      await commandOutput("docker", [
+        "exec",
+        container,
+        "psql",
+        "-v",
+        "ON_ERROR_STOP=1",
+        "-U",
+        manifest.user,
+        "-d",
+        restoreDatabase,
+        "-f",
+        "/tmp/tsx-backup-hypertable-fkeys.sql",
+      ]);
+    }
 
     const restoredCounts = await tableRowCounts(
       container,
       restoreDatabase,
       manifest.user,
     );
-    if (signature(restoredCounts) !== signature(manifest.tableRowCounts)) {
+    const rowCountComparison = compareTableRowCounts(
+      manifest.tableRowCounts,
+      restoredCounts,
+    );
+    if (!rowCountComparison.equal) {
       throw new Error(
-        `Restored row counts do not match ${relative(root, manifestPath)}.`,
+        `Restored row counts do not match ${relative(root, manifestPath)}: ${describeTableRowCountMismatch(rowCountComparison)}`,
       );
     }
     const metadata = await restoredMetadata(
@@ -652,10 +732,16 @@ async function main() {
     console.log(
       `Verified ${relative(root, archive)}: schema and data restored with ${Object.keys(restoredCounts).length} public table row counts, ${metadata.hypertables.length} hypertable(s), ${metadata.foreignKeys.length} validated foreign key(s) and ${metadata.jobs.length} Timescale job(s) matching the manifest.`,
     );
+    verified = true;
   } finally {
-    if (containerCreated)
+    if (keepRestore && verified)
+      console.log(
+        `Retained disposable restore container ${container} and volume ${volume} for migration rehearsal.`,
+      );
+    if (containerCreated && !(keepRestore && verified))
       await commandStatus("docker", ["rm", "--force", container]);
-    if (volumeCreated) await commandStatus("docker", ["volume", "rm", volume]);
+    if (volumeCreated && !(keepRestore && verified))
+      await commandStatus("docker", ["volume", "rm", volume]);
   }
 }
 

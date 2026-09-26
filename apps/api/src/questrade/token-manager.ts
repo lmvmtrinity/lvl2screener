@@ -122,9 +122,14 @@ export class InMemoryRefreshTokenStore implements RefreshTokenStore {
   }
 }
 
+export type QuestradeSessionRefreshDisposition =
+  "STARTED_REFRESH" | "JOINED_REFRESH" | "REUSED_NEWER_SESSION";
+
 export class QuestradeTokenManager {
   private session: AuthSession | undefined;
   private refreshInFlight: Promise<AuthSession> | undefined;
+  private sessionGeneration = 0;
+  private lastDisposition: QuestradeSessionRefreshDisposition | undefined;
   /** Read once, before this process marks any rotation of its own, so the marker is only ever
    *  reported as evidence when it was left behind by an earlier process. */
   private priorInterruption: Date | undefined;
@@ -160,6 +165,45 @@ export class QuestradeTokenManager {
     });
 
     return this.refreshInFlight;
+  }
+
+  /**
+   * Conditional 401 boundary. Requests rejected under the same session must
+   * join one refresh; a delayed 401 from an older session reuses the newer
+   * session without rotating again; a genuine 401 against the current session
+   * may start one new refresh. Never logs tokens; diagnostics use only the
+   * non-secret generation number and disposition.
+   */
+  async refreshAfterUnauthorized(
+    rejectedSession: AuthSession,
+  ): Promise<AuthSession> {
+    const rejectedGeneration =
+      typeof rejectedSession.generation === "number"
+        ? rejectedSession.generation
+        : -1;
+    // Join an in-flight rotation first: the in-flight target is newer than any
+    // installed session, including the case where the installed session is
+    // itself known-bad and already being replaced.
+    if (this.refreshInFlight) {
+      this.lastDisposition = "JOINED_REFRESH";
+      return this.refreshInFlight;
+    }
+    if (this.session && this.session.generation > rejectedGeneration) {
+      this.lastDisposition = "REUSED_NEWER_SESSION";
+      return this.session;
+    }
+    this.lastDisposition = "STARTED_REFRESH";
+    return this.refresh();
+  }
+
+  /** Non-secret diagnostic of the last conditional refresh decision. */
+  lastRefreshDisposition(): QuestradeSessionRefreshDisposition | undefined {
+    return this.lastDisposition;
+  }
+
+  /** Non-secret generation of the currently installed session, if any. */
+  currentGeneration(): number | undefined {
+    return this.session?.generation;
   }
 
   /** Resolves once no rotation is in flight. Shutdown awaits this: killing the process between
@@ -250,11 +294,13 @@ export class QuestradeTokenManager {
       throw new Error("Questrade API server must use HTTPS");
     }
 
+    this.sessionGeneration += 1;
     return {
       accessToken: grant.access_token,
       refreshToken: grant.refresh_token,
       expiresAt: new Date(this.clock().getTime() + grant.expires_in * 1_000),
       apiServer,
+      generation: this.sessionGeneration,
     };
   }
 }

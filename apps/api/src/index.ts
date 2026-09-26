@@ -30,6 +30,7 @@ import { RankingResearchService } from "./ranking-research/ranking-research-serv
 import { PostgresStatisticalModelStore } from "./statistical-models/statistical-model-repository.js";
 import { StatisticalModelService } from "./statistical-models/statistical-model-service.js";
 import { PostgresPaperEvidenceTrainingStore } from "./statistical-models/paper-evidence-training-repository.js";
+import { PostgresDatasetPreparationStore } from "./statistical-models/dataset-preparation-repository.js";
 import { PaperEvidenceTrainingService } from "./statistical-models/paper-evidence-training-service.js";
 import { PostgresPredictionSnapshotStore } from "./statistical-models/prediction-snapshot-repository.js";
 import { StatisticalPredictionSnapshotService } from "./statistical-models/prediction-snapshot-service.js";
@@ -39,16 +40,23 @@ import { EvidenceAutomationService } from "./statistical-models/evidence-automat
 import { PostgresEvidenceAutomationRepository } from "./statistical-models/evidence-automation-repository.js";
 import { PostgresEvidenceAutomationReadRepository } from "./statistical-models/evidence-automation-read-repository.js";
 import { PostgresResearchEvidenceStore } from "./backtests/research-evidence-repository.js";
+import {
+  StrategyLearningReadinessRepository,
+  StrategyLearningReadinessService,
+} from "./backtests/strategy-learning-readiness.js";
 import { PostgresCoverageRequestRepository } from "./backtests/coverage-request-repository.js";
 import { CoverageRequestService } from "./backtests/coverage-request-service.js";
 import { PostgresStrategyStudyStore } from "./backtests/strategy-study-repository.js";
 import { PostgresStudyAuthorizationRepository } from "./backtests/study-authorization-repository.js";
 import { StrategyStudyApiService } from "./backtests/strategy-study-api-service.js";
+import { PostgresSignalModelResearchControlStore } from "./backtests/signal-model-research-control.js";
+import { SignalModelResearchApiService } from "./backtests/signal-model-research-api-service.js";
 import { PostgresCalibrationStore } from "./calibration/calibration-repository.js";
 import { CalibrationService } from "./calibration/calibration-service.js";
 import { PostgresPaperEvidenceStore } from "./paper-bot/paper-reporting-repository.js";
 import { PaperReportingService } from "./paper-bot/paper-reporting-service.js";
 import { FundedReportingService } from "./paper-bot/funded-reporting-service.js";
+import { PostgresFundedShadowStore } from "./statistical-models/funded-shadow-repository.js";
 import { FundedHistoricalReadService } from "./paper-bot/funded-historical-read-service.js";
 import { PostgresPaperBotStore } from "./paper-bot/paper-bot-repository.js";
 import { PostgresChallengerExperimentStore } from "./statistical-models/challenger-experiment-repository.js";
@@ -79,6 +87,17 @@ import {
   MockTsxUniverseProvider,
 } from "./universe/universe-service.js";
 import { PostgresUniverseStore } from "./universe/universe-repository.js";
+import {
+  DAILY_SEED_VERSION,
+  DailyListSeeder,
+  PostgresDailySeedPool,
+} from "./universe/daily-list-seeder.js";
+import { PostgresDailySeedRepository } from "./universe/daily-seed-repository.js";
+import {
+  DAILY_SEED_RESCAN_VERSION,
+  DailySeedRescan,
+} from "./universe/daily-seed-rescan.js";
+import type { UniversePolicy } from "@tsx-scanner/contracts";
 import { EodhdCatalogClient } from "./universe/eodhd-catalog.js";
 import { MassiveCatalogClient } from "./universe/massive-catalog.js";
 import {
@@ -199,6 +218,22 @@ const tsxSession = new MarketSessionManager(adapter, clock, "TSX", {
     hardEnd: config.ENTRY_HARD_END,
   },
 });
+const tsxUniversePolicy: UniversePolicy = {
+  version: "tsx-liquid-momentum-v1",
+  marketId: "CA_TSX",
+  exchange: "TSX",
+  currency: "CAD",
+  allowedExchanges: ["TSX"],
+  allowedCurrencies: ["CAD"],
+  securityTypes: ["Stock", "Common Stock"],
+  minimumPrice: config.UNIVERSE_MIN_PRICE,
+  maximumPrice: config.UNIVERSE_MAX_PRICE,
+  minimumMarketCap: config.UNIVERSE_MIN_MARKET_CAP,
+  minimumAverageVolume90d: config.UNIVERSE_MIN_AVERAGE_VOLUME,
+  minimumDollarVolume: config.UNIVERSE_MIN_DOLLAR_VOLUME,
+  minimumAtrPct: config.UNIVERSE_MIN_ATR_PCT,
+  minimumHistoryDays: 20,
+};
 const metadata = new AutomatedUniverseService(
   isLive
     ? new ConfiguredTsxUniverseProvider(
@@ -208,22 +243,7 @@ const metadata = new AutomatedUniverseService(
     : new MockTsxUniverseProvider(),
   adapter,
   universeStore,
-  {
-    version: "tsx-liquid-momentum-v1",
-    marketId: "CA_TSX",
-    exchange: "TSX",
-    currency: "CAD",
-    allowedExchanges: ["TSX"],
-    allowedCurrencies: ["CAD"],
-    securityTypes: ["Stock", "Common Stock"],
-    minimumPrice: config.UNIVERSE_MIN_PRICE,
-    maximumPrice: config.UNIVERSE_MAX_PRICE,
-    minimumMarketCap: config.UNIVERSE_MIN_MARKET_CAP,
-    minimumAverageVolume90d: config.UNIVERSE_MIN_AVERAGE_VOLUME,
-    minimumDollarVolume: config.UNIVERSE_MIN_DOLLAR_VOLUME,
-    minimumAtrPct: config.UNIVERSE_MIN_ATR_PCT,
-    minimumHistoryDays: 20,
-  },
+  tsxUniversePolicy,
   config.UNIVERSE_MINIMUM_SIZE,
   clock,
 );
@@ -298,10 +318,124 @@ const usMarketData = usEnabled
       config.BENCHMARK_MAX_STALENESS_SECONDS,
     )
   : undefined;
+// Pre-market daily-list seed (daily-seed-v1). Separate from ADR-017 discovery,
+// which stays OFF: it only fills an empty daily list through ordinary intake.
+const dailySeedPool = new PostgresDailySeedPool(pool);
+const dailySeedRepository = new PostgresDailySeedRepository(pool, clock);
+const dailySeeders: Partial<Record<"CA_TSX" | "US_EQUITIES", DailyListSeeder>> =
+  {};
+const dailySeedRescans: Partial<
+  Record<"CA_TSX" | "US_EQUITIES", DailySeedRescan>
+> = {};
+const dailySeedLogger = {
+  info: (fields: Record<string, unknown>) =>
+    console.info(JSON.stringify(fields)),
+  warn: (fields: Record<string, unknown>) =>
+    console.warn(JSON.stringify(fields)),
+  error: (fields: Record<string, unknown>) =>
+    console.error(JSON.stringify(fields)),
+};
+if (isLive)
+  for (const [marketId, service, policy, count] of [
+    [
+      "CA_TSX",
+      marketData,
+      tsxUniversePolicy,
+      config.DAILY_LIST_SEED_CA_COUNT,
+    ] as const,
+    ...(usMarketData
+      ? [
+          [
+            "US_EQUITIES",
+            usMarketData,
+            DEFAULT_US_UNIVERSE_POLICY,
+            config.DAILY_LIST_SEED_US_COUNT,
+          ] as const,
+        ]
+      : []),
+  ]) {
+    const currentList = async (tradingDate: string) => {
+      const persisted = await universeStore.loadConfiguredSymbols(
+        marketId === "CA_TSX"
+          ? "CONFIGURED_TSX_LIVE_WATCHLIST"
+          : "CONFIGURED_US_LIVE_WATCHLIST",
+        marketId,
+      );
+      return persisted?.tradingDate === tradingDate ? persisted.symbols : [];
+    };
+    const applyTagged =
+      (tag: string) =>
+      async (symbols: string[], note: string, tradingDate?: string) => {
+        const result = await service.updateUniverseCandidates(
+          {
+            operation: "ADD",
+            source: "MANUAL",
+            inputs: symbols,
+            note,
+            tags: [tag],
+          },
+          tradingDate !== undefined
+            ? {
+                phase: tag === DAILY_SEED_RESCAN_VERSION ? "RESCAN" : "SEED",
+                marketId,
+                tradingDate,
+                maxAdds:
+                  tag === DAILY_SEED_RESCAN_VERSION
+                    ? config.DAILY_LIST_RESCAN_MAX_ADDS
+                    : count,
+              }
+            : undefined,
+        );
+        if (result.refreshError)
+          console.warn(
+            JSON.stringify({
+              event: "DAILY_SEED_REFRESH_FAILED",
+              marketId,
+              error: result.refreshError,
+            }),
+          );
+      };
+    const seeder = new DailyListSeeder({
+      marketId,
+      enabled: config.DAILY_LIST_SEED_ENABLED,
+      runAt: config.DAILY_LIST_SEED_TIME,
+      count,
+      pool: dailySeedPool,
+      marketData: adapter,
+      policy: () => policy,
+      currentList,
+      store: dailySeedRepository,
+      apply: applyTagged(DAILY_SEED_VERSION),
+      clock,
+      logger: dailySeedLogger,
+    });
+    dailySeeders[marketId] = seeder;
+    if (config.DAILY_LIST_RESCAN_MARKETS.includes(marketId)) {
+      const rescan = new DailySeedRescan({
+        marketId,
+        enabled: config.DAILY_LIST_RESCAN_ENABLED,
+        runAt: config.DAILY_LIST_RESCAN_TIME,
+        maxAdds: config.DAILY_LIST_RESCAN_MAX_ADDS,
+        maxCandidates: config.DAILY_LIST_RESCAN_MAX_CANDIDATES,
+        seed: seeder,
+        marketData: adapter,
+        policy: () => policy,
+        currentList,
+        apply: applyTagged(DAILY_SEED_RESCAN_VERSION),
+        store: dailySeedRepository,
+        clock,
+        logger: dailySeedLogger,
+      });
+      seeder.attachRescan(rescan);
+      dailySeedRescans[marketId] = rescan;
+    }
+  }
+
 const scannerClient = new ScannerFeatureClient(
   new URL(config.SCANNER_URL),
   10_000,
   config.SCANNER_SERVICE_TOKEN,
+  new URL(config.RESEARCH_SCANNER_URL ?? config.SCANNER_URL),
 );
 
 // WP4 discovery is API-owned and shares the live adapter's durable broker
@@ -500,6 +634,12 @@ const backtestAutomationService = new BacktestAutomationService({
   profiles: profileStore,
   jobs: new ResearchJobRepository(pool),
   clock,
+  economics: {
+    minNetRewardRisk: config.PAPER_BOT_MIN_NET_REWARD_RISK,
+    minStopFrictionMultiple: config.PAPER_BOT_MIN_STOP_FRICTION_MULTIPLE,
+    minTargetFrictionMultiple: config.PAPER_BOT_MIN_TARGET_FRICTION_MULTIPLE,
+    maxSpreadPct: config.PAPER_BOT_MAX_SPREAD_PCT,
+  },
 });
 const fundedHistoricalPolicyService = new FundedHistoricalAutomationService(
   pool,
@@ -521,14 +661,22 @@ await profileService.initialize();
 marketData.setFeatureEngine(
   scannerClient,
   new PostgresFeatureSnapshotStore(pool, persistenceMetrics),
-  new PostgresStrategySignalStore(pool, persistenceMetrics),
+  new PostgresStrategySignalStore(
+    pool,
+    persistenceMetrics,
+    config.STRATEGY_PERSIST_HEARTBEAT_MS,
+  ),
   new PostgresAlertStore(pool),
 );
 if (usMarketData) {
   usMarketData.setFeatureEngine(
     scannerClient,
     new PostgresFeatureSnapshotStore(pool, persistenceMetrics),
-    new PostgresStrategySignalStore(pool, persistenceMetrics),
+    new PostgresStrategySignalStore(
+      pool,
+      persistenceMetrics,
+      config.STRATEGY_PERSIST_HEARTBEAT_MS,
+    ),
     new PostgresAlertStore(pool),
   );
 }
@@ -830,6 +978,7 @@ const researchLineage = new ResearchLineageService(
 const evidenceTrainingService = new PaperEvidenceTrainingService(
   new PostgresPaperEvidenceTrainingStore(pool),
   researchLineage,
+  new PostgresDatasetPreparationStore(pool),
 );
 const researchEvidenceStore = new PostgresResearchEvidenceStore(pool);
 const coverageRequestService = new CoverageRequestService(
@@ -870,6 +1019,9 @@ const learningDashboardService = new LearningDashboardService(
     : "Daily at 5:00 p.m. Eastern, plus worker startup",
   evidenceAutomationService,
   config.PAPER_MODEL_TRAINING_CHECK_MS ?? null,
+  new StrategyLearningReadinessService(
+    new StrategyLearningReadinessRepository(pool),
+  ),
 );
 const challengerApiService = new PostgresChallengerExperimentApiService(
   new ChallengerExperimentService(
@@ -900,6 +1052,9 @@ const app = await buildApp({
     ...(usMarketData ? { US_EQUITIES: usMarketData } : {}),
   },
   discoveryServices,
+  dailySeeders,
+  dailySeedRescans,
+  dailySeedRepository,
   backtestService: new BacktestService(
     backtestStore,
     scannerClient,
@@ -908,6 +1063,7 @@ const app = await buildApp({
     researchLineage,
   ),
   backtestAutomationService,
+  fundedShadowStatusService: new PostgresFundedShadowStore(pool),
   fundedHistoricalPolicyService,
   fundedHistoricalService: new FundedHistoricalReadService(
     pool,
@@ -943,6 +1099,9 @@ const app = await buildApp({
       createResearchRuntimeIdentityProvider(scannerClient),
     ),
   ),
+  signalModelResearchService: new SignalModelResearchApiService(
+    new PostgresSignalModelResearchControlStore(pool),
+  ),
   challengerExperimentService: challengerApiService,
   brokerMetrics: rateLimiter,
   persistenceMetrics,
@@ -957,6 +1116,8 @@ const app = await buildApp({
 marketData.setLogger(app.log);
 usMarketData?.setLogger(app.log);
 discoveryCompactor.start();
+for (const seeder of Object.values(dailySeeders)) seeder.start();
+for (const rescan of Object.values(dailySeedRescans)) rescan.start();
 
 // A prior process (API or worker) may have died mid-run leaving a legacy *_run/*_model row stuck
 // RUNNING/TRAINING forever; see reconcile-orphaned-research.ts for why this still runs alongside
@@ -976,6 +1137,10 @@ const shutdown = async (signal: string) => {
   shuttingDown = true;
   app.log.info({ event: "SHUTDOWN_STARTED", signal });
   await discoveryCompactor.stop();
+  await Promise.all(Object.values(dailySeeders).map((seeder) => seeder.stop()));
+  await Promise.all(
+    Object.values(dailySeedRescans).map((rescan) => rescan.stop()),
+  );
   await Promise.all(discoveryIntakeWorkers.map((worker) => worker.stop()));
   await Promise.all(discoverySchedulers.map((scheduler) => scheduler.stop()));
   await marketRuntimes.stop();
@@ -1010,19 +1175,38 @@ const startMarketData = async (attempt = 0): Promise<void> => {
       for (const worker of discoveryIntakeWorkers) worker.start();
       discoveryStarted = true;
     }
-    app.log.info({ event: "MARKET_DATA_STARTED", attempt });
+    app.log.info({
+      event: "MARKET_DATA_STARTED",
+      attempt,
+      markets: marketRuntimes.initializedMarkets(),
+    });
   } catch (error) {
     const reauthorize = error instanceof QuestradeReauthorizationRequiredError;
     const delayMs = Math.min(
       MARKET_DATA_RETRY_FLOOR_MS * 2 ** attempt,
       MARKET_DATA_RETRY_CEILING_MS,
     );
+    // Partial initialization must never be reported as globally started. Start
+    // any markets that did initialize so the healthy market stays isolated and
+    // running, then retry only the failed markets explicitly.
+    const initialized = marketRuntimes.initializedMarkets();
+    if (initialized.length > 0) {
+      try {
+        marketRuntimes.start();
+      } catch {
+        // Per-market start failures stay visible through the market error surface.
+      }
+    }
     app.log.error({
       event: reauthorize
         ? "MARKET_DATA_REAUTHORIZATION_REQUIRED"
-        : "MARKET_DATA_START_FAILED",
+        : initialized.length > 0
+          ? "MARKET_DATA_PARTIAL_START_FAILED"
+          : "MARKET_DATA_START_FAILED",
       attempt,
       retryInMs: delayMs,
+      initializedMarkets: initialized,
+      enabledMarkets: marketRuntimes.enabledMarkets(),
       error: error instanceof Error ? error.message : String(error),
       ...(reauthorize
         ? {
@@ -1031,7 +1215,57 @@ const startMarketData = async (attempt = 0): Promise<void> => {
           }
         : {}),
     });
-    const timer = setTimeout(() => void startMarketData(attempt + 1), delayMs);
+    const timer = setTimeout(
+      () => void retryFailedMarkets(attempt + 1),
+      delayMs,
+    );
+    timer.unref?.();
+  }
+};
+
+const retryFailedMarkets = async (attempt: number): Promise<void> => {
+  if (shuttingDown) return;
+  const pending = marketRuntimes
+    .enabledMarkets()
+    .filter(
+      (marketId) => !marketRuntimes.initializedMarkets().includes(marketId),
+    );
+  if (pending.length === 0) {
+    // All markets already recovered (for example via a concurrent retry).
+    return;
+  }
+  try {
+    for (const marketId of pending) {
+      await marketRuntimes.initializeMarket(marketId);
+      marketRuntimes.startMarket(marketId);
+    }
+    if (!discoveryStarted) {
+      for (const scheduler of discoverySchedulers) scheduler.start();
+      for (const worker of discoveryIntakeWorkers) worker.start();
+      discoveryStarted = true;
+    }
+    app.log.info({
+      event: "MARKET_DATA_RECOVERED",
+      attempt,
+      markets: marketRuntimes.initializedMarkets(),
+    });
+  } catch (error) {
+    const delayMs = Math.min(
+      MARKET_DATA_RETRY_FLOOR_MS * 2 ** attempt,
+      MARKET_DATA_RETRY_CEILING_MS,
+    );
+    app.log.error({
+      event: "MARKET_DATA_PARTIAL_START_FAILED",
+      attempt,
+      retryInMs: delayMs,
+      initializedMarkets: marketRuntimes.initializedMarkets(),
+      enabledMarkets: marketRuntimes.enabledMarkets(),
+      error: error instanceof Error ? error.message : String(error),
+    });
+    const timer = setTimeout(
+      () => void retryFailedMarkets(attempt + 1),
+      delayMs,
+    );
     timer.unref?.();
   }
 };

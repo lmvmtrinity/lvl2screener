@@ -156,7 +156,9 @@ export type SessionComparisonResult = z.infer<
 export const sampledExcursionSchema = z
   .object({
     basis: z.literal("SAMPLED_EXECUTABLE_BID_SINGLE_LOT"),
-    status: z.enum(["AVAILABLE", "UNAVAILABLE"]),
+    /** INDICATIVE is computed from unverified coverage for diagnostics only; research
+     * evidence and learning must require AVAILABLE. */
+    status: z.enum(["AVAILABLE", "INDICATIVE", "UNAVAILABLE"]),
     adversePct: z.number().nullable(),
     favorablePct: z.number().nullable(),
     samples: z.number().int().nonnegative(),

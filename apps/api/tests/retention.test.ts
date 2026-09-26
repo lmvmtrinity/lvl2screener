@@ -158,8 +158,8 @@ async function seed(pool: Pool): Promise<Fixture> {
   const staleSignalId = randomUUID();
   await pool.query(
     `INSERT INTO strategy_signal
-       (id, instrument_id, strategy_name, strategy_version, config_version, timestamp, previous_state, state, score, feature_snapshot_json, reason_codes)
-     VALUES ($1, $2, 'ORB_RETEST', '1.0.0', $3, $4, 'WATCH', 'WATCH', 50, '{}'::jsonb, '[]'::jsonb)`,
+       (id, instrument_id, strategy_name, strategy_version, config_version, timestamp, previous_state, state, score, reason_codes)
+     VALUES ($1, $2, 'ORB_RETEST', '1.0.0', $3, $4, 'WATCH', 'WATCH', 50, '[]'::jsonb)`,
     [staleSignalId, instrumentId, CONFIG_VERSION, staleTimestamp],
   );
 
@@ -172,8 +172,8 @@ async function seed(pool: Pool): Promise<Fixture> {
   const protectedSignalId = randomUUID();
   await pool.query(
     `INSERT INTO strategy_signal
-       (id, instrument_id, strategy_name, strategy_version, config_version, timestamp, previous_state, state, score, feature_snapshot_json, reason_codes)
-     VALUES ($1, $2, 'ORB_RETEST', '1.0.0', $3, $4, 'WATCH', 'READY', 80, '{}'::jsonb, '[]'::jsonb)`,
+       (id, instrument_id, strategy_name, strategy_version, config_version, timestamp, previous_state, state, score, reason_codes)
+     VALUES ($1, $2, 'ORB_RETEST', '1.0.0', $3, $4, 'WATCH', 'READY', 80, '[]'::jsonb)`,
     [protectedSignalId, instrumentId, CONFIG_VERSION, protectedTimestamp],
   );
   const protectedStateEventId = randomUUID();
@@ -248,7 +248,7 @@ async function cleanup(pool: Pool, instrumentId: string): Promise<void> {
 }
 
 describe("W2 retention correction", () => {
-  it("prunes rows past every window, protects alert-linked rows regardless of age, and is idempotent", async () => {
+  it("prunes row-managed history, protects alert-linked rows, and leaves chunk-managed history to Timescale", async () => {
     if (!reachable || !pool) {
       console.warn("[retention] Skipped: no live PostgreSQL reachable.");
       return;
@@ -294,8 +294,8 @@ describe("W2 retention correction", () => {
       expect(Number(row.feature)).toBe(0);
       expect(Number(row.evaluation)).toBe(0);
       expect(Number(row.context)).toBe(0);
-      expect(Number(row.quote)).toBe(0);
-      expect(Number(row.candle)).toBe(0);
+      expect(Number(row.quote)).toBe(1);
+      expect(Number(row.candle)).toBe(1);
       expect(Number(row.stale_signal)).toBe(0);
       // Alert-linked chain survives despite being just as old.
       expect(Number(row.protected_signal)).toBe(1);
@@ -331,8 +331,6 @@ describe("W2 retention correction", () => {
     expect(run.status === "SUCCEEDED" || run.status === "FAILED").toBe(true);
     expect(run.tableResults.length).toBeGreaterThan(0);
     for (const tableName of [
-      "quote_snapshot",
-      "candle",
       "feature_snapshot",
       "strategy_evaluation",
       "context_evaluation",
@@ -343,6 +341,12 @@ describe("W2 retention correction", () => {
         run.tableResults.some((result) => result.table === tableName),
       ).toBe(true);
     }
+    expect(
+      run.tableResults.some((result) => result.table === "quote_snapshot"),
+    ).toBe(false);
+    expect(run.tableResults.some((result) => result.table === "candle")).toBe(
+      false,
+    );
 
     const latest = await service.getLatestRun();
     expect(latest?.id).toBe(run.id);
@@ -388,5 +392,40 @@ describe("W2 retention correction", () => {
     );
     expect(inventory.rows).toHaveLength(1);
     expect(inventory.rows[0]?.proc_name).toBe("run_scheduled_retention");
+    const chunkPolicies = await pool.query<{
+      hypertable_name: string;
+      proc_name: string;
+      after: string;
+    }>(
+      `SELECT hypertable_name,proc_name,
+              coalesce(config->>'drop_after',config->>'compress_after') AS after
+       FROM timescaledb_information.jobs
+       WHERE hypertable_name IN ('quote_snapshot','candle')`,
+    );
+    expect(chunkPolicies.rows).toEqual(
+      expect.arrayContaining([
+        {
+          hypertable_name: "quote_snapshot",
+          proc_name: "policy_compression",
+          after: "3 days",
+        },
+        {
+          hypertable_name: "quote_snapshot",
+          proc_name: "policy_retention",
+          after: "180 days",
+        },
+        {
+          hypertable_name: "candle",
+          proc_name: "policy_compression",
+          after: "7 days",
+        },
+        {
+          hypertable_name: "candle",
+          proc_name: "policy_retention",
+          after: "365 days",
+        },
+      ]),
+    );
+    expect(chunkPolicies.rows).toHaveLength(4);
   }, 15_000);
 });

@@ -62,6 +62,13 @@ class StrategyMemory:
     invalidation_level: float | None = None
     formation_key: str | None = None
     retired_formation_keys: set[str] | None = None
+    # True when the last trade references widened the structural stop to a floor.
+    stop_floored: bool = False
+    # Spread gate state for this instrument/profile. It is quote state, not
+    # formation state, so `reset_formation` keeps it.
+    spread_wide_since: datetime | None = None
+    spread_wide_quotes: int = 0
+    spread_blocked: bool = False
 
     def reset_formation(self) -> None:
         """Clear one formation's working state so the strategy can re-arm for a new one."""
@@ -269,6 +276,17 @@ class BaseStrategy:
             candidates = [v for v in (pattern_stop, support_stop) if v is not None]
             stop = max(candidates, default=None)
 
+        memory.stop_floored = False
+        if stop is not None and parameters is not None:
+            floor = 0.0
+            if parameters.stop_min_atr_fraction > 0 and snapshot.atr_14:
+                floor = max(floor, parameters.stop_min_atr_fraction * snapshot.atr_14)
+            if parameters.stop_min_spreads > 0 and snapshot.spread_absolute > 0:
+                floor = max(floor, parameters.stop_min_spreads * snapshot.spread_absolute)
+            if entry - stop < floor:
+                stop = entry - floor
+                memory.stop_floored = True
+
         memory.selected_stop_level = stop
         memory.stop_policy = policy
 
@@ -280,6 +298,10 @@ class BaseStrategy:
         )
         if target is None and self.use_two_r_target and stop is not None:
             target = entry + 2 * (entry - stop)
+        if stop is not None and parameters is not None and parameters.target_min_r > 0:
+            minimum = entry + parameters.target_min_r * (entry - stop)
+            if target is None or target < minimum:
+                target = minimum
         return entry, stop, target
 
 

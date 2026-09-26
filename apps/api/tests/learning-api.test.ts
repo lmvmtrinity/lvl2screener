@@ -71,6 +71,32 @@ const mockOverview: LearningDashboardOverview = {
 };
 
 describe("Learning API routes", () => {
+  it("resolves readiness from a selected backtest run and strategy", async () => {
+    const readiness = { sourceKind: "BACKTEST_RUN", distinctClosedTrades: 4 };
+    const learningDashboardService: LearningDashboardApi = {
+      overview: async () => mockOverview,
+      automationRuns: async () => [mockRun],
+      backtestStrategyLearningReadiness: async (id, strategyKey, marketId) => {
+        expect(id).toBe(runId);
+        expect(strategyKey).toBe("ORB_RETEST");
+        expect(marketId).toBe("CA_TSX");
+        return readiness as never;
+      },
+    };
+    const app = await buildApp({
+      statusService: status(),
+      learningDashboardService,
+    });
+    const response = await app.inject({
+      method: "GET",
+      url: `/api/learning/backtest-runs/${runId}/strategy-readiness?strategyKey=ORB_RETEST&marketId=CA_TSX`,
+    });
+
+    expect(response.statusCode, response.body).toBe(200);
+    expect(response.json()).toEqual(readiness);
+    await app.close();
+  });
+
   it("serves GET /api/learning/overview", async () => {
     const learningDashboardService: LearningDashboardApi = {
       overview: async () => mockOverview,
@@ -87,11 +113,57 @@ describe("Learning API routes", () => {
       url: "/api/learning/overview",
     });
 
-    expect(response.statusCode).toBe(200);
+    expect(response.statusCode, response.body).toBe(200);
     const body = response.json();
     expect(body.pipelineHealth.schedulerEnabled).toBe(true);
     expect(body.shadowExperiments.decisionsEvaluated).toBe(10);
     expect(body.shadowExperiments.selectionChangesCount).toBe(2);
+    await app.close();
+  });
+
+  it("serves market-scoped BACKTEST_RUN readiness without changing paper overview", async () => {
+    const learningDashboardService: LearningDashboardApi = {
+      overview: async () => mockOverview,
+      automationRuns: async () => [mockRun],
+      strategyLearningReadiness: async (input) => ({
+        sourceKind: "BACKTEST_RUN",
+        scope: input,
+        state: "WAITING_FOR_EVIDENCE",
+        targetDistinctTrades: 30,
+        verifiedSessions: 1,
+        distinctClosedTrades: 1,
+        usableModelRows: 1,
+        qualificationCounts: { EVIDENCE_QUALIFIED: 1, EXPLORATORY: 0 },
+        exclusions: {},
+        strata: { time: {}, atr: {}, rvol: {} },
+        blockers: [],
+        shortfall: 29,
+        feasibility: {
+          state: "UNAVAILABLE",
+          reason: "MISSING_PREDECLARED_EXPERIMENT_CRITERIA",
+        },
+        collectionEstimate: {
+          state: "UNAVAILABLE",
+          reason: "NO_VERIFIED_SESSIONS",
+          observedRateMin: null,
+          observedRateMax: null,
+          observedSessions: 0,
+        },
+      }),
+    };
+    const app = await buildApp({
+      statusService: status(),
+      learningDashboardService,
+    });
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/learning/strategy-readiness?marketId=CA_TSX&strategyKey=ORB_RETEST&profileConfigId=00000000-0000-4000-8000-000000000001&strategyVersion=v3&configVersion=cfg-1&executionModelVersion=execution-v2&executionAssumptions=%7B%22feePerTrade%22%3A1%7D",
+    });
+
+    expect(response.statusCode, response.body).toBe(200);
+    expect(response.json().sourceKind).toBe("BACKTEST_RUN");
+    expect(response.json().distinctClosedTrades).toBe(1);
+    expect(response.json().scope.marketId).toBe("CA_TSX");
     await app.close();
   });
 

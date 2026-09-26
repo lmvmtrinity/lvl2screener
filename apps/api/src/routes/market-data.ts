@@ -258,6 +258,131 @@ export function registerMarketDataRoutes(
     },
   );
 
+  // Pre-market daily-list seed (daily-seed-v1). Reads are cheap; preview and
+  // run start in the background (a US ranking outlasts proxy timeouts) and
+  // report progress through the status read. Preview never edits the list;
+  // run applies the same empty-list rule as the schedule.
+  const seederFor = (
+    reply: { code(code: number): { send(value: unknown): unknown } },
+    value: string | undefined,
+  ) => {
+    const marketId = parseMarketFilter(reply, value ?? "CA_TSX");
+    if (!marketId) return undefined;
+    if (marketId === "ALL") {
+      reply.code(400).send({ error: "A single marketId is required" });
+      return undefined;
+    }
+    const seeder = options.dailySeeders?.[marketId];
+    if (!seeder) {
+      reply.code(503).send({ error: "The daily-list seed is unavailable" });
+      return undefined;
+    }
+    return seeder;
+  };
+
+  app.get<{ Querystring: { marketId?: string } }>(
+    "/api/universe/daily-seed",
+    async (request, reply) => {
+      const marketId = parseMarketFilter(
+        reply,
+        request.query.marketId ?? "CA_TSX",
+      );
+      if (!marketId) return;
+      const seeders = Object.entries(options.dailySeeders ?? {}).filter(
+        ([id]) => marketId === "ALL" || id === marketId,
+      );
+      return {
+        seeders: await Promise.all(
+          seeders.map(([, seeder]) => seeder!.status()),
+        ),
+      };
+    },
+  );
+
+  for (const action of ["preview", "run"] as const)
+    app.post<{ Querystring: { marketId?: string } }>(
+      `/api/universe/daily-seed/${action}`,
+      async (request, reply) => {
+        const seeder = seederFor(reply, request.query.marketId);
+        if (!seeder) return;
+        const started =
+          action === "preview" ? seeder.preview() : seeder.runNow();
+        started.catch(() => undefined);
+        return reply.code(202).send(await seeder.status());
+      },
+    );
+
+  app.post<{ Querystring: { marketId?: string } }>(
+    "/api/universe/daily-seed/rescan",
+    async (request, reply) => {
+      const seeder = seederFor(reply, request.query.marketId);
+      if (!seeder) return;
+      const rescan =
+        options.dailySeedRescans?.[
+          request.query.marketId as "CA_TSX" | "US_EQUITIES"
+        ];
+      if (!rescan)
+        return reply.code(503).send({
+          error: "The early-session rescan is not configured for this market",
+        });
+      rescan.runNow().catch(() => undefined);
+      return reply.code(202).send(await seeder.status());
+    },
+  );
+
+  app.post<{ Querystring: { marketId?: string; count?: string } }>(
+    "/api/universe/daily-seed/add-top",
+    async (request, reply) => {
+      const seeder = seederFor(reply, request.query.marketId);
+      if (!seeder) return;
+      const count = parseLimit(reply, request.query.count, 5, 1, 50);
+      if (count === undefined) return;
+      try {
+        return { added: await seeder.addTop(count) };
+      } catch (error) {
+        return reply.code(409).send({
+          error: error instanceof Error ? error.message : "Add failed",
+        });
+      }
+    },
+  );
+
+  app.get<{ Querystring: { marketId?: string; limit?: string } }>(
+    "/api/universe/daily-seed/history",
+    async (request, reply) => {
+      const marketId = parseMarketFilter(
+        reply,
+        request.query.marketId ?? "CA_TSX",
+      );
+      if (!marketId) return;
+      if (marketId === "ALL")
+        return reply.code(400).send({ error: "A single marketId is required" });
+      if (!options.dailySeedRepository)
+        return reply
+          .code(503)
+          .send({ error: "Daily-seed history is unavailable" });
+      const limit = parseLimit(reply, request.query.limit, 30, 1, 120);
+      if (limit === undefined) return;
+      return {
+        entries: await options.dailySeedRepository.history(marketId, limit),
+      };
+    },
+  );
+
+  app.get("/api/universe/daily-seed/legacy", async (_request, reply) => {
+    if (!options.dailySeedRepository)
+      return reply
+        .code(503)
+        .send({ error: "Legacy discovery facts are unavailable" });
+    const poolSizes: Partial<Record<"CA_TSX" | "US_EQUITIES", number>> = {};
+    await Promise.all(
+      Object.entries(options.dailySeeders ?? {}).map(async ([id, seeder]) => {
+        poolSizes[id as "CA_TSX" | "US_EQUITIES"] = await seeder!.poolSize();
+      }),
+    );
+    return options.dailySeedRepository.legacy(poolSizes);
+  });
+
   // @supported (decision-gated, defaulted per private development record W10):
   // /api/features and /api/features/:symbol are a documented diagnostic API. Keep while that
   // remains true; remove once candidate detail (/api/candidates/:symbol) is the only supported

@@ -1,6 +1,7 @@
 # Backtesting and replay
 
-Reviewed against source on September 8, 2026. See [learning](learning.md) for
+
+See [learning](learning.md) for
 the separate forward-paper training pipeline and [paper execution](paper-execution.md)
 for authoritative fill ownership and close recovery.
 
@@ -184,8 +185,15 @@ Research results may carry a nullable `researchEvidence` binding. A verified
 binding is the sequence `declared manifest → verified retained coverage → bound
 job → frozen dataset/model`; it is content-addressed by the manifest, expected
 input grid, normalized retained records, session payloads, engine revision and
-runtime fingerprint. Coverage is evaluated independently for each candidate and
-market/sector benchmark, including the required warmup stream.
+runtime fingerprint. For asynchronous `PAPER_EVIDENCE` dataset creation, the
+scheduler first records an immutable internal preparation of the qualified
+cohort, cutoff, source digest, qualification and ordered rows. That preparation
+freezes the input to resume; it is not coverage evidence or a public manifest
+authority. Coverage is evaluated independently for each candidate and
+market/sector benchmark, including the required warmup stream. A terminal
+`UNKNOWN` or `INCOMPLETE` coverage result may leave the same materialized dataset
+truthfully unproven or incomplete; it does not become a verified binding, and
+legacy datasets remain unchanged.
 
 `VERIFIED` means the declared input checks passed; it does not mean the strategy
 is profitable. `INCOMPLETE` means required retained inputs are missing or fail a
@@ -309,8 +317,9 @@ Calibration does not mutate a live scanner profile automatically.
 
 Backtest-source statistical training selects one completed captured-history backtest
 as its immutable labeled dataset and one strategy within that run. The separate
-PAPER_EVIDENCE source uses a frozen compatible dataset and stricter qualification
-described in [learning](learning.md). Trades are ordered by entry time and split chronologically; no shuffle or future-derived input is allowed. A positive label means the simulated trade produced positive R. The initial features are deterministic score, ATR%, log RVOL-at-Time, and market-local minutes from the open. Missing ATR/RVOL values use medians calculated only from the training segment.
+PAPER_EVIDENCE source uses an immutable preparation to resume the exact frozen
+qualified input, then materializes a compatible dataset under the stricter
+qualification described in [learning](learning.md). Trades are ordered by entry time and split chronologically; no shuffle or future-derived input is allowed. A positive label means the simulated trade produced positive R. The initial features are deterministic score, ATR%, log RVOL-at-Time, and market-local minutes from the open. Missing ATR/RVOL values use medians calculated only from the training segment.
 
 The regularized logistic artifact persists coefficients, intercept, feature order, scaling values, imputation medians, and regime medians. Holdout evaluation reports class balance, Brier score, a training-base-rate Brier baseline, log loss, ROC AUC, and calibration bins. The artifact cannot be activated when sample or class coverage is insufficient, or when holdout Brier score fails to improve on that training-only base-rate forecast.
 
@@ -327,6 +336,32 @@ source evidence belongs to another market.
 
 Runs may be displayed together only as separately labeled CAD and USD rows.
 They are never pooled for P&L, drawdown, risk, calibration, or model training.
+
+## 21. Historical archive replay
+
+[ADR-019](../adr/019-historical-archive-research-source.md) adds
+`dataSource: "HISTORICAL_ARCHIVE"` for `US_EQUITIES` runs. The archive holds
+Massive one-minute and daily bars and Databento `XNAS.BASIC` minute bid/ask
+samples in `historical_bar`, `historical_quote_minute` and the
+`historical_archive_import` manifest (migration 156). It is filled only by the
+`historical-import` command; see the
+[operations runbook](operations-runbook.md#historical-archive-import).
+
+An archive session is shaped by the same `buildSessionPayload` as captured
+replay. For each minute sample T it emits one quote from the bid/ask sampled at T
+and the minute bars that ended by T (`last`, cumulative volume, regular-session
+open/high/low). Quotes begin after the first regular-session bar closes.
+Five-minute bars are aggregated from minute bars; one-minute and daily bars load
+over the same 20- and 45-day windows as captured replay.
+
+Archive runs require explicit symbols, recorded as an explicit cohort with a
+warning. They report `spread: "ARCHIVED"` and `qualification: "EXPLORATORY"`,
+bind no research lineage and link no profile evidence, so training, signal-model
+research and profile comparisons ignore them. Volume follows Massive's trade
+rules and differs from Questrade, so compare archive runs only with archive
+runs. Owners: [archive store](../../apps/api/src/historical-archive/archive-repository.ts),
+[session synthesis](../../apps/api/src/historical-archive/archive-session.ts)
+and [disclosure](../../apps/api/src/historical-archive/archive-disclosure.ts).
 
 ## Source owners
 
@@ -479,3 +514,35 @@ read model, `/metrics` `scanner_backtest_automation_*` gauges and the
 `BacktestAutomationWorkFailed`/`BacktestAutomationQueueStalled` alerts expose
 queue pressure and terminal failures; the Backtest & Studies panel adds
 diagnostics and the approval/revocation surface.
+
+## 22. Strategy learning readiness and experiments
+
+The Backtests learning-readiness panel aggregates distinct closed setup identities
+across compatible completed runs in one exact market, strategy/version,
+profile/configuration, execution-model and assumptions scope. Its 30-outcome
+threshold is historical across session dates, not a per-day requirement. Replaying
+one setup does not make it a second independent observation. Coverage and the
+matching source lineage must both be verified before a trade contributes; missing
+coverage, unproven lineage, zero-candidate sessions and duplicate conflicts remain
+visible blockers or exclusions. `SAMPLE_THRESHOLD_MET` means only that the raw
+distinct-outcome target is reached. It does not qualify a model or strategy and it
+does not show that an improvement is statistically or economically reliable.
+
+This readiness count is separate from LIVE `PAPER_EVIDENCE` training: that pipeline
+retains its 200-usable-QUOTE and 50-new-outcome gates. Neither backtest replay counts
+nor the 30-outcome threshold can satisfy those LIVE gates. An experiment also needs
+predeclared minimum useful effect, uncertainty, cost and risk criteria before its
+feasibility can be estimated. The system leaves feasibility unavailable when those
+criteria are absent.
+
+The approved strategy-learning implementation supports build-ahead readiness and
+controlled candidate research. Historical runs without canonical opportunity
+capture and complete retained-input provenance remain readable but unavailable for
+this path; do not manufacture capture records or backfill lineage. A study uses
+frozen source membership, chronological development/validation/test periods,
+overlap purging, a bounded trial ledger and one-use final-test access. Model
+research and rule studies do not change the deterministic baseline or activate a
+profile. Study execution, prospective enrollment, activation, promotion, strategy
+changes and policy changes each retain their separate authorization boundaries.
+Current production evidence and acceptance receipts are maintained in the
+active strategy-learning evidence gate.

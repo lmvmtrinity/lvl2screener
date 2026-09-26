@@ -34,6 +34,60 @@ export const engineResultBatchSchema = featureSnapshotBatchSchema.extend({
 });
 export type EngineResultBatch = z.infer<typeof engineResultBatchSchema>;
 
+/** Wire shape for live quotes only. Durable events and all external result contracts stay full. */
+export const liveEngineResultBatchSchema = featureSnapshotBatchSchema.extend({
+  evaluations: z.array(
+    strategyEvaluationSchema.omit({ featureSnapshot: true }).extend({
+      featureVersion: z.string().min(1),
+      featureTimestamp: z.string().datetime(),
+    }),
+  ),
+  events: z.array(strategyStateEventSchema),
+  contexts: z.array(
+    contextEvaluationSchema.omit({ featureSnapshot: true }).extend({
+      featureVersion: z.string().min(1),
+      featureTimestamp: z.string().datetime(),
+    }),
+  ),
+  benchmarkReadiness: benchmarkReadinessSchema,
+  timings: engineTimingsSchema,
+});
+
+export function expandLiveEngineResultBatch(input: unknown): EngineResultBatch {
+  const wire = liveEngineResultBatchSchema.parse(input);
+  const snapshots = new Map(
+    wire.snapshots.map((snapshot) => [
+      `${snapshot.marketId}:${snapshot.instrumentId}:${snapshot.timestamp}:${snapshot.featureVersion}`,
+      snapshot,
+    ]),
+  );
+  const expand = <
+    T extends {
+      marketId: string;
+      instrumentId: string;
+      featureTimestamp: string;
+      featureVersion: string;
+    },
+  >(
+    value: T,
+  ) => {
+    const { featureVersion, featureTimestamp, ...rest } = value;
+    const snapshot = snapshots.get(
+      `${value.marketId}:${value.instrumentId}:${featureTimestamp}:${featureVersion}`,
+    );
+    if (!snapshot)
+      throw new Error(
+        `Missing live feature snapshot for ${value.marketId}/${value.instrumentId}/${featureTimestamp}/${featureVersion}`,
+      );
+    return { ...rest, featureSnapshot: snapshot };
+  };
+  return engineResultBatchSchema.parse({
+    ...wire,
+    evaluations: wire.evaluations.map(expand),
+    contexts: wire.contexts.map(expand),
+  });
+}
+
 export const chartCandleSchema = z.object({
   start: z.string().datetime(),
   end: z.string().datetime(),

@@ -5,6 +5,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { BacktestView } from "./BacktestView.js";
@@ -135,9 +136,48 @@ describe("BacktestView", () => {
           return json({ ...automation, marketId: "CA_TSX" });
         if (url.includes("/api/funded-historical-policies"))
           return json({ policies: [] });
+        if (url.includes("/api/signal-model-research/authorizations?"))
+          return json({ authorizations: [] });
         if (url.includes("/api/captured-history/availability"))
           return json(availability);
         if (url.includes(`/api/backtests/${run.id}`)) return json(run);
+        if (
+          url.includes("/api/learning/backtest-runs/") &&
+          url.includes("strategy-readiness")
+        )
+          return json({
+            sourceKind: "BACKTEST_RUN",
+            scope: {
+              marketId: "CA_TSX",
+              strategyKey: "ORB_RETEST",
+              profileConfigId: "33333333-3333-4333-8333-333333333333",
+              strategyVersion: "strategy-v1",
+              configVersion: "profile-orb-standard-v1",
+              executionModelVersion: "paper-execution-v7",
+              executionAssumptions: { slippageBps: 2 },
+            },
+            state: "WAITING_FOR_EVIDENCE",
+            targetDistinctTrades: 30,
+            verifiedSessions: 2,
+            distinctClosedTrades: 4,
+            usableModelRows: 3,
+            qualificationCounts: { EVIDENCE_QUALIFIED: 1, EXPLORATORY: 3 },
+            exclusions: {},
+            strata: { time: {}, atr: {}, rvol: {} },
+            blockers: [],
+            shortfall: 26,
+            feasibility: {
+              state: "UNAVAILABLE",
+              reason: "MISSING_PREDECLARED_EXPERIMENT_CRITERIA",
+            },
+            collectionEstimate: {
+              state: "UNAVAILABLE",
+              reason: "ZERO_OUTCOME_SESSION",
+              observedRateMin: 0,
+              observedRateMax: 0,
+              observedSessions: 2,
+            },
+          });
         return new Response(JSON.stringify({ error: "unavailable" }), {
           status: 503,
           headers: { "content-type": "application/json" },
@@ -146,7 +186,12 @@ describe("BacktestView", () => {
     );
   }
 
-  it("previews latest results on Overview and groups older attempts under Results", async () => {
+  function openMenuItem(label: string) {
+    fireEvent.click(screen.getByLabelText("More backtest tools"));
+    fireEvent.click(screen.getByRole("menuitem", { name: label }));
+  }
+
+  it("shows one row per strategy and keeps older attempts in run history", async () => {
     stubFetch();
     render(
       <BacktestView
@@ -157,57 +202,37 @@ describe("BacktestView", () => {
     );
 
     await waitFor(() =>
-      expect(screen.getByText("Latest results")).toBeInTheDocument(),
+      expect(screen.getByRole("status")).toHaveTextContent("Automation paused"),
     );
-    expect(await screen.findByRole("status")).toHaveTextContent(
-      "Automation paused",
+    const results = screen.getByRole("region", { name: "Results" });
+    expect(within(results).getAllByText("ORB Standard")).toHaveLength(1);
+    expect(within(results).getByText("−$161.72")).toBeInTheDocument();
+    expect(within(results).getByText("9 trades")).toBeInTheDocument();
+    expect(within(results).getByText("11%")).toBeInTheDocument();
+    expect(within(results).getAllByText("Not assessed").length).toBeGreaterThan(
+      0,
     );
-    expect(screen.getByText("View all results")).toBeInTheDocument();
-    expect(screen.getAllByText("ORB Standard")).toHaveLength(1);
-    expect(screen.getByText("$-161.72")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByText("Results"));
-    expect(screen.getByText("1 older attempt")).toBeInTheDocument();
-    expect(screen.getAllByText("Completed")).toHaveLength(2);
-    expect(screen.getAllByText("Not assessed")).toHaveLength(2);
-    expect(screen.getByText("9 trades · net simulated")).toBeInTheDocument();
+    openMenuItem("Run history");
+    const history = screen.getByRole("dialog", { name: "Run history" });
+    expect(within(history).getByText(/^2 attempts/)).toBeInTheDocument();
     expect(
-      screen.getByText("through 2026-09-11 · 1 limitation"),
+      within(history).getByRole("region", { name: "Run history list" }),
     ).toBeInTheDocument();
-
-    fireEvent.click(screen.getByText("1 older attempt"));
-    expect(screen.getAllByText("ORB Standard")).toHaveLength(2);
+    expect(within(history).getAllByText(/manual run/)).toHaveLength(2);
+    expect(within(history).getAllByText("Technical details")).toHaveLength(2);
   });
 
-  it("lists every attempt with provenance in History", async () => {
-    stubFetch();
-    render(
-      <BacktestView
-        runs={[latest, older]}
-        updateRuns={() => undefined}
-        marketId="CA_TSX"
-      />,
-    );
-    await waitFor(() =>
-      expect(screen.getByText("Latest results")).toBeInTheDocument(),
-    );
-    fireEvent.click(screen.getByText("History"));
-    expect(screen.getByText("Run history")).toBeInTheDocument();
-    expect(screen.getByText("2 attempts")).toBeInTheDocument();
-    expect(screen.getAllByText(/manual run/)).toHaveLength(2);
-    expect(screen.getAllByText("Technical details")).toHaveLength(2);
-  });
-
-  it("opens the manual replay form in a drawer", async () => {
+  it("opens the manual replay form from the tools menu", async () => {
     stubFetch();
     render(
       <BacktestView runs={[]} updateRuns={() => undefined} marketId="CA_TSX" />,
     );
     await waitFor(() =>
-      expect(screen.getByText("Manual replay")).toBeInTheDocument(),
+      expect(screen.getByText("No backtest results yet.")).toBeInTheDocument(),
     );
     expect(screen.queryByText("New historical replay")).not.toBeInTheDocument();
-    fireEvent.click(screen.getByText("Manual replay"));
+    openMenuItem("Manual replay");
     expect(screen.getByRole("dialog")).toBeInTheDocument();
     expect(screen.getByText("New historical replay")).toBeInTheDocument();
     await waitFor(() =>
@@ -216,6 +241,64 @@ describe("BacktestView", () => {
           .capturedHistory ?? "",
       ).toMatch(/captured quotes/i),
     );
+  });
+
+  it("offers the historical archive for US replays and submits it as the data source", async () => {
+    stubFetch();
+    const fetchMock = vi.mocked(fetch);
+    render(
+      <BacktestView
+        runs={[]}
+        updateRuns={() => undefined}
+        marketId="US_EQUITIES"
+      />,
+    );
+    openMenuItem("Manual replay");
+    fireEvent.change(screen.getByLabelText("Data source"), {
+      target: { value: "HISTORICAL_ARCHIVE" },
+    });
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.some(([url]) =>
+          String(url).includes(
+            "/api/captured-history/availability?marketId=US_EQUITIES&source=HISTORICAL_ARCHIVE",
+          ),
+        ),
+      ).toBe(true),
+    );
+    expect(screen.getByLabelText(/Symbols/)).toBeRequired();
+    fireEvent.change(screen.getByLabelText(/Symbols/), {
+      target: { value: "COIN, OKTA" },
+    });
+    fireEvent.submit(
+      document.querySelector<HTMLFormElement>(".backtest-form")!,
+    );
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.find(
+          ([url, init]) =>
+            String(url).endsWith("/api/backtests") && init?.method === "POST",
+        ),
+      ).toBeDefined(),
+    );
+    const [, init] = fetchMock.mock.calls.find(
+      ([url, init]) =>
+        String(url).endsWith("/api/backtests") && init?.method === "POST",
+    )!;
+    expect(JSON.parse(String(init!.body))).toMatchObject({
+      marketId: "US_EQUITIES",
+      dataSource: "HISTORICAL_ARCHIVE",
+      symbols: ["COIN", "OKTA"],
+    });
+  });
+
+  it("keeps Canadian replays on captured quotes without a source choice", async () => {
+    stubFetch();
+    render(
+      <BacktestView runs={[]} updateRuns={() => undefined} marketId="CA_TSX" />,
+    );
+    openMenuItem("Manual replay");
+    expect(screen.queryByLabelText("Data source")).not.toBeInTheDocument();
   });
 
   it("forwards the optional universe action for replay-candidate blockers", async () => {
@@ -276,7 +359,7 @@ describe("BacktestView", () => {
     expect(onOpenUniverse).toHaveBeenCalledTimes(1);
   });
 
-  it("organizes the selected result into Summary, Evidence, Trades and Provenance", async () => {
+  it("expands a result into a quick look and opens its full detail tabs", async () => {
     stubFetch();
     render(
       <BacktestView
@@ -285,10 +368,15 @@ describe("BacktestView", () => {
         marketId="CA_TSX"
       />,
     );
-    await waitFor(() =>
-      expect(screen.getByText("Latest results")).toBeInTheDocument(),
-    );
-    fireEvent.click(screen.getByText("ORB Standard"));
+    fireEvent.click(await screen.findByText("ORB Standard"));
+    expect(screen.getByText("Max drawdown")).toBeInTheDocument();
+    expect(
+      screen.getByText(/No evidence assessment was recorded for this run\./),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByText("Open full result →"));
+    expect(
+      await screen.findByRole("dialog", { name: "ORB Standard" }),
+    ).toBeInTheDocument();
     await screen.findByText("TRADES");
 
     // Summary: metrics plus one consolidated warning summary.
@@ -323,6 +411,22 @@ describe("BacktestView", () => {
     expect(
       screen.getAllByLabelText(`COPY ${latest.id}`).length,
     ).toBeGreaterThan(0);
+
+    fireEvent.click(screen.getByRole("tab", { name: "Learning readiness" }));
+    expect(
+      await screen.findByText(
+        "4 / 30 raw distinct closed outcomes across compatible runs",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("region", { name: "Strategy learning readiness" }),
+    ).toHaveTextContent(/Evidence-qualified distinct outcomes\s*1/);
+    expect(
+      screen.getByRole("region", { name: "Strategy learning readiness" }),
+    ).toHaveTextContent(/Exploratory distinct outcomes\s*3/);
+    expect(
+      screen.getByRole("region", { name: "Strategy learning readiness" }),
+    ).toHaveTextContent("Counts accumulate across compatible retained runs");
   });
 
   it("shows the run's recorded interior no-quote limitation in its summary", async () => {
@@ -354,10 +458,8 @@ describe("BacktestView", () => {
         marketId="CA_TSX"
       />,
     );
-    await waitFor(() =>
-      expect(screen.getByText("Latest results")).toBeInTheDocument(),
-    );
-    fireEvent.click(screen.getAllByText("ORB Standard")[0]!);
+    fireEvent.click(await screen.findByText("ORB Standard"));
+    fireEvent.click(screen.getByText("Open full result →"));
     await waitFor(() =>
       expect(
         document.querySelector<HTMLElement>(".backtest-metrics")?.dataset

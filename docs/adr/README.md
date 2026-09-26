@@ -28,9 +28,20 @@ implementation has limitations. Source behavior is described in the
 | [016 — Automatic paper-funded policy control](016-automatic-paper-funded-policy-control.md)       | Accepted at Stage A on 2026-09-15: authority-disabled, dependency-gated implementation only; Stage B policy approval and Stage C running-stack activation remain withheld                     |
 
 [017 — Discovery feed feasibility and valid-decision acceptance](017-discovery-feed-feasibility-and-valid-decision-acceptance.md)
-is accepted under the September 15 delegated decision: bounded provider-specific
-proposal authorized; prospective 0.99 valid-decision gate adopted, enforcement
-pending. Provider collection and activation remain separately gated.
+was accepted under the September 15 delegated decision and is superseded for
+future work by 018: the engine is frozen and its authorizations lapse unused.
+
+[018 — Pre-market daily seed replaces the discovery engine](018-pre-market-daily-seed-replaces-discovery-engine.md)
+is accepted at the user's September 24, 2026 request: `daily-seed-v1` is the
+primary automatic candidate source, discovery is frozen with code and evidence
+retained, and seed changes are versioned. Intraday extension, pool ownership,
+code retirement and table removal each need a later decision.
+
+[019 — Historical archive as an exploratory backtest source](019-historical-archive-research-source.md)
+is accepted at the user's September 25, 2026 request: US backtests may replay
+imported Massive bars with Databento minute bid/ask from separate archive tables.
+Archive runs need explicit symbols, stay exploratory and never feed qualification,
+profile evidence or training.
 
 ## Legacy numbering
 

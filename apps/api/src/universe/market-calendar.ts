@@ -1,9 +1,12 @@
+import { createHash } from "node:crypto";
 import type { MarketId } from "@tsx-scanner/contracts";
 import { zonedSessionBoundary } from "../paper-bot/session-time.js";
 import {
   publishedCalendarCovers,
   publishedCalendarRevision,
   publishedCalendarSource,
+  publishedCalendarSourceHash,
+  publishedCalendarRetrievedAt,
   publishedCalendarYear,
 } from "./published-calendars.js";
 
@@ -17,6 +20,28 @@ export interface CalendarProvenance {
   verified: boolean;
   revision: string;
   source: string;
+}
+
+export interface CalendarSessionBoundary {
+  tradingDate: string;
+  open: string;
+  close: string;
+}
+
+export interface CalendarProvenanceAt {
+  verified: boolean;
+  revision: string;
+  source: string;
+  sourceHash: string | null;
+  sourceRetrievedAt: string | null;
+  sessions: Array<CalendarSessionBoundary | null>;
+}
+
+export interface CalendarPolicyHashInput {
+  marketId: MarketId;
+  timezone: "America/Toronto" | "America/New_York";
+  sessionDates: readonly string[];
+  inputCutoff: string;
 }
 
 const COMPUTED_CALENDAR: CalendarProvenance = {
@@ -321,6 +346,126 @@ function isMarketEarlyClose(marketId: MarketId, dateStr: string): boolean {
   return getEarlyClosesForMarketYear(marketId, year).has(dateStr);
 }
 
+/** Resolve one date without treating weekends or exchange holidays as sessions. */
+export function calendarSessionBoundaryFor(
+  marketId: MarketId,
+  tradingDate: string,
+): CalendarSessionBoundary | null {
+  if (!isMarketTradingDay(tradingDate, marketId)) return null;
+  const timezone =
+    marketId === "CA_TSX" ? "America/Toronto" : "America/New_York";
+  return {
+    tradingDate,
+    open: zonedSessionBoundary(tradingDate, "09:30", timezone),
+    close: zonedSessionBoundary(
+      tradingDate,
+      isMarketEarlyClose(marketId, tradingDate) ? "13:00" : "16:00",
+      timezone,
+    ),
+  };
+}
+
+/** Resolve retained calendar evidence at the request's frozen cutoff. */
+export function calendarProvenanceForAt(
+  marketId: MarketId,
+  tradingDates: readonly string[],
+  inputCutoff: string,
+): CalendarProvenanceAt {
+  const sessions = tradingDates.map((date) =>
+    calendarSessionBoundaryFor(marketId, date),
+  );
+  const sourceRetrievedAt = publishedCalendarRetrievedAt(marketId);
+  const retrievedBeforeCutoff = publishedCalendarAuthoritativeAt(
+    marketId,
+    inputCutoff,
+  );
+  const verified =
+    tradingDates.length > 0 &&
+    publishedCalendarCovers(marketId, tradingDates) &&
+    sessions.every((session) => session !== null) &&
+    retrievedBeforeCutoff;
+  const source = publishedCalendarSource(marketId);
+  return {
+    verified,
+    revision: verified
+      ? publishedCalendarRevision(marketId)
+      : COMPUTED_CALENDAR.revision,
+    source: verified ? source.name : COMPUTED_CALENDAR.source,
+    sourceHash: verified ? publishedCalendarSourceHash(marketId) : null,
+    sourceRetrievedAt,
+    sessions,
+  };
+}
+
+/** Whether the retained published calendar was available before the frozen cutoff. */
+export function publishedCalendarAuthoritativeAt(
+  marketId: MarketId,
+  inputCutoff: string,
+): boolean {
+  const sourceRetrievedAt = publishedCalendarRetrievedAt(marketId);
+  return (
+    sourceRetrievedAt !== null && inputCutoff.slice(0, 10) > sourceRetrievedAt
+  );
+}
+
+/** Build the immutable identity carried by a new coverage recipe. */
+export function calendarPolicyHashFor(input: CalendarPolicyHashInput): string {
+  const evidence = calendarProvenanceForAt(
+    input.marketId,
+    input.sessionDates,
+    input.inputCutoff,
+  );
+  return sha256CalendarIdentity({
+    policy: "retained-session-calendar-v2",
+    marketId: input.marketId,
+    timezone: input.timezone,
+    inputCutoff: input.inputCutoff,
+    sourceHash: evidence.sourceHash,
+    sourceRetrievedAt: evidence.sourceRetrievedAt,
+    sessions: evidence.sessions,
+  });
+}
+
+/** Exact identity used by recipes written before calendar-bound coverage. */
+export function legacyCalendarPolicyHash(
+  timezone: "America/Toronto" | "America/New_York",
+): string {
+  return sha256CalendarIdentity({
+    policy: "retained-session-calendar-v1",
+    timezone,
+  });
+}
+
+function sha256CalendarIdentity(value: unknown): string {
+  return createHash("sha256")
+    .update(canonicalCalendarJson(value))
+    .digest("hex");
+}
+
+function canonicalCalendarJson(value: unknown): string {
+  return JSON.stringify(canonicalCalendarValue(value));
+}
+
+function canonicalCalendarValue(value: unknown): unknown {
+  if (
+    value === null ||
+    typeof value === "string" ||
+    typeof value === "boolean" ||
+    typeof value === "number"
+  )
+    return value;
+  if (Array.isArray(value)) return value.map(canonicalCalendarValue);
+  if (typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    return Object.fromEntries(
+      Object.keys(record)
+        .sort()
+        .map((key) => [key, canonicalCalendarValue(record[key])]),
+    );
+  }
+  throw new Error("UNSUPPORTED_CALENDAR_IDENTITY_VALUE");
+}
+
 /** Returns true if dateStr (YYYY-MM-DD) is a regular trading session (not a weekend or exchange holiday). */
 export function isMarketTradingDay(
   dateStr: string,
@@ -353,8 +498,6 @@ export function getRecentRegularSessions(
   asOfDate: string,
   count = 110,
 ): CalendarSession[] {
-  const timezone =
-    marketId === "CA_TSX" ? "America/Toronto" : "America/New_York";
   const parts = asOfDate.split("-");
   const y = Number(parts[0] ?? "2026");
   const m = Number(parts[1] ?? "1");
@@ -380,13 +523,7 @@ export function getRecentRegularSessions(
   // Reverse so they are in chronological ascending order
   tradingDates.reverse();
 
-  return tradingDates.map((tradingDate) => ({
-    tradingDate,
-    open: zonedSessionBoundary(tradingDate, "09:30", timezone),
-    close: zonedSessionBoundary(
-      tradingDate,
-      isMarketEarlyClose(marketId, tradingDate) ? "13:00" : "16:00",
-      timezone,
-    ),
-  }));
+  return tradingDates.map((tradingDate) =>
+    calendarSessionBoundaryFor(marketId, tradingDate)!,
+  );
 }

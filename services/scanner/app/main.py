@@ -3,6 +3,7 @@ import asyncio
 from datetime import UTC, datetime
 from time import perf_counter
 from collections.abc import AsyncIterator
+from typing import Any
 
 from uuid import UUID
 
@@ -12,7 +13,7 @@ from starlette.responses import JSONResponse
 from .backtest import replay, replay_signals
 from .backtest_chunks import ChunkedBacktestAccumulator
 from .replay_cancellation import run_cancellable_replay
-from .statistical_models import predict as predict_statistical, train as train_statistical
+from .statistical_models import predict as predict_statistical, train as train_statistical, train_signal_model_research
 from .funded_execution_models import (
     FundedExecutionInferenceOutput,
     FundedExecutionInferenceRequest,
@@ -28,6 +29,8 @@ from .feature_engine import FeatureEngine
 from .logging_config import configure_logging
 from .models import (
     CandleBatch,
+    InstrumentRetirement,
+    InstrumentRetirementResult,
     InstrumentWarmup,
     InstrumentWarmupReadiness,
     BacktestReplayChunkRequest,
@@ -49,6 +52,7 @@ from .models import (
     StatisticalPredictionRequest,
     StatisticalTrainingRequest,
     StatisticalTrainingResult,
+    SignalModelResearchTrainingRequest,
 )
 
 
@@ -163,8 +167,18 @@ def create_app(config: ScannerConfig | None = None, engine: FeatureEngine | None
             status = 409 if isinstance(error, RuntimeError) else 400
             raise HTTPException(status_code=status, detail=str(error)) from error
 
-    @application.post("/internal/v1/quotes/batch", response_model=EngineResultBatch)
-    async def ingest_quotes(batch: QuoteBatch) -> EngineResultBatch:
+    @application.post("/internal/v1/instruments/retire", response_model=InstrumentRetirementResult)
+    async def retire_instruments(payload: InstrumentRetirement) -> InstrumentRetirementResult:
+        try:
+            return InstrumentRetirementResult(
+                retired=feature_engine_for(payload.market_id).retire_instruments(payload.instrument_ids)
+            )
+        except (RuntimeError, ValueError) as error:
+            status = 409 if isinstance(error, RuntimeError) else 400
+            raise HTTPException(status_code=status, detail=str(error)) from error
+
+    @application.post("/internal/v1/quotes/batch")
+    async def ingest_quotes(batch: QuoteBatch) -> dict[str, Any]:
         try:
             feature_engine = feature_engine_for(batch.market_id)
             feature_started = perf_counter()
@@ -190,7 +204,7 @@ def create_app(config: ScannerConfig | None = None, engine: FeatureEngine | None
                 contexts=contexts,
                 benchmark_readiness=feature_engine.benchmark_readiness(),
                 timings=EngineTimings(feature_ms=round(feature_ms, 3), evaluation_ms=round(evaluation_ms, 3)),
-            )
+            ).live_transport()
         except (RuntimeError, ValueError) as error:
             status = 409 if isinstance(error, RuntimeError) else 400
             raise HTTPException(status_code=status, detail=str(error)) from error
@@ -271,6 +285,10 @@ def create_app(config: ScannerConfig | None = None, engine: FeatureEngine | None
     @application.post("/internal/v1/statistical-models/train", response_model=StatisticalTrainingResult)
     async def train_statistical_model(request: StatisticalTrainingRequest) -> StatisticalTrainingResult:
         return await asyncio.to_thread(train_statistical, request)
+
+    @application.post("/internal/v1/signal-model-research/train", response_model=StatisticalTrainingResult)
+    async def train_signal_model_research_candidate(request: SignalModelResearchTrainingRequest) -> StatisticalTrainingResult:
+        return await asyncio.to_thread(train_signal_model_research, request)
 
     @application.post("/internal/v1/statistical-models/predict", response_model=StatisticalPredictionBatch)
     async def predict_statistical_model(request: StatisticalPredictionRequest) -> StatisticalPredictionBatch:

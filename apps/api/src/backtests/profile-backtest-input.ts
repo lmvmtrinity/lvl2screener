@@ -1,5 +1,6 @@
 import {
   setupStrategyNameSchema,
+  type BacktestEconomics,
   type CapturedHistoryAvailability,
   type CreateBacktest,
   type ScannerProfile,
@@ -37,6 +38,7 @@ export interface ProfileQualificationInput {
 export function profileQualificationInput(
   profile: ScannerProfile,
   availability: CapturedHistoryAvailability,
+  economics?: BacktestEconomics,
 ): ProfileQualificationInput {
   const strategy = setupStrategyNameSchema.parse(profile.strategyKey);
   const input: CreateBacktest = {
@@ -54,6 +56,9 @@ export function profileQualificationInput(
     positionSize: 10_000,
     slippageBps: automationSlippageBps(profile.marketId),
     feePerTrade: 0,
+    // Replay fills apply the same entry economics the paper bot enforces, so
+    // qualification counts only trades the bot would actually take.
+    ...(economics ? { economics } : {}),
     parameters: profile.parameters,
   };
   return { input, violation: checkBacktestRequest(input, availability) };

@@ -12,18 +12,29 @@ The preflight resolves the default Compose configuration and verifies that:
 - funded account identities and immutable funding controls are owned by the API
   process; the worker cannot accidentally start market-data funded processing;
 - funded account identities are blank by default;
-- migrations are present through migration 111 (105 was reserved but never created), including the durable fact,
+- the latest migration is 156; required migrations include the durable fact,
   research-qualification, observability, provenance, temporal-reporting,
   formation-evidence, coordination model-fact, discovery, funded lookup indexes,
   research coverage/lineage, evidence-automation receipts and inactive
   challenger observation evidence, direct study grants, persisted replay sessions,
   immutable owner bindings, coverage result ownership, TradingView discovery parity audit,
-  and parity audit market binding;
+  parity audit market binding, the coverage payload store, quote/candle retention
+  policies, broker budget acquisition and the diagnostics lookup index;
 - the four funded operational alerts, both explicit market scrapes, and the
   Alertmanager receiver placeholder are present;
 - both discovery schedulers and intake workers remain disabled, and the
   discovery route still rejects `AUTO_ADD` pending market-specific commissioning;
 - the market-boundary and Compose trust-boundary checks pass.
+- candidate and rollback receipts name every API, worker, scanner and web image
+  by immutable digest; API and worker rollback images remain independent even
+  when a candidate intentionally shares one build;
+- rollback capture reads each running container's immutable `.Image` identity,
+  accepts Compose array/object/NDJSON output, and refuses to tag or replace a
+  receipt until every required image is present locally;
+- candidate builds require the requested SHA to equal `HEAD` and a clean,
+  tracked source tree. Built image revision labels must equal that tested SHA;
+- an older rollback schema is accepted only with explicit recorded compatibility
+  evidence. Integer schema ordering alone is not compatibility proof.
 
 The command is read-only. It does not migrate a database, start containers,
 contact a broker, or send an alert. A passing result is a repository/deployment
@@ -59,6 +70,7 @@ After the local preflight, deployment ownership must still confirm:
    notifications, and the recipient confirms delivery;
 4. representative peak-load measurements on deployment hardware meet the
    agreed persistence and lock budgets.
+
 
 Do not enable a funded identity or treat the paper evidence as qualified until
 those checks are recorded against the deployed revision.

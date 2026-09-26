@@ -64,6 +64,9 @@ export function BotLivenessPanel({ paperBot }: { paperBot?: PaperBotStatus }) {
   const closePending = funded?.closePendingOrders ?? 0;
   const stuckEvents = paperBot?.unreconcilableEvents ?? 0;
   const overdueRuns = paperBot?.overdueRuns ?? 0;
+  const priorClosePending = paperBot?.priorClosePendingExecutions ?? 0;
+  const fundedWaiting =
+    paperBot?.fundedBindingState === "WAITING_FOR_PRIOR_RUN";
   const coordinatedPositions = paperBot?.unresolvedCoordinatedPositions ?? 0;
   const recoveryFailures = funded?.recoveryFailuresTotal ?? 0;
   // Events, facts, orders and runs can overlap. The reconciliation candidate
@@ -74,6 +77,8 @@ export function BotLivenessPanel({ paperBot }: { paperBot?: PaperBotStatus }) {
     stuckEvents,
     overdueRuns,
     coordinatedPositions,
+    priorClosePending,
+    fundedWaiting ? 1 : 0,
   ].some((count) => count > 0);
 
   return (
@@ -95,6 +100,12 @@ export function BotLivenessPanel({ paperBot }: { paperBot?: PaperBotStatus }) {
       {paperBot?.lastError ? (
         <p className="bot-liveness-error tw:m-0 tw:border-b tw:border-b-line-subtle tw:bg-surface-danger tw:px-5 tw:py-[11px] tw:text-[0.74rem] tw:text-danger-tint-pale">
           Last processing error (independent or funded) · {paperBot.lastError}
+        </p>
+      ) : null}
+      {fundedWaiting ? (
+        <p className="tw:m-0 tw:border-b tw:border-b-line-subtle tw:bg-surface-warning tw:px-5 tw:py-[11px] tw:text-[0.74rem] tw:text-warning-tint-pale">
+          Funded paper trading is waiting for the previous session to finish
+          closing. Live data collection continues.
         </p>
       ) : null}
       <div className="bot-liveness-summary tw:grid tw:grid-cols-[repeat(auto-fit,minmax(220px,1fr))] tw:gap-px tw:border-t tw:border-t-line tw:bg-line-subtle">

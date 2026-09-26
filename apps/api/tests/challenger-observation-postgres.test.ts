@@ -883,8 +883,8 @@ describe.skipIf(!databaseUrl)(
           };
         };
       }>(
-        "SELECT request FROM research_coverage_request WHERE idempotency_key=$1",
-        [`challenger-coverage:${id}:${date}`],
+        "SELECT request FROM research_coverage_request WHERE idempotency_key LIKE $1",
+        [`challenger-coverage:${id}:${date}:%`],
       );
       expect(
         saved.rows[0]?.request.manifest.manifest.purpose.experimentId,

@@ -259,7 +259,7 @@ describe("App navigation status", () => {
 
     await waitFor(() =>
       expect(
-        screen.getByRole("button", { name: "BOT · LIVE" }),
+        screen.getByRole("button", { name: "Bot · LIVE" }),
       ).toBeInTheDocument(),
     );
     expect(screen.queryByLabelText("Market status")).not.toBeInTheDocument();
@@ -314,9 +314,14 @@ describe("App navigation status", () => {
     });
     await waitFor(() => expect(pill).toHaveTextContent("LIVE"));
 
-    fireEvent.change(screen.getByLabelText("Market"), {
-      target: { value: "US_EQUITIES" },
-    });
+    const market = screen.getByRole("group", { name: "Market" });
+    fireEvent.click(within(market).getByRole("button", { name: "US · USD" }));
+    expect(
+      within(market).getByRole("button", { name: "US · USD" }),
+    ).toHaveAttribute("aria-pressed", "true");
+    expect(
+      within(market).getByRole("button", { name: "TSX · CAD" }),
+    ).toHaveAttribute("aria-pressed", "false");
     await waitFor(() => expect(pill).toHaveTextContent("SIGN-IN REQUIRED"));
 
     fireEvent.click(pill);

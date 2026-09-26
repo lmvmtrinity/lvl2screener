@@ -160,11 +160,14 @@ export function Drawer({
   open,
   onClose,
   title,
+  size = "default",
   children,
 }: {
   open: boolean;
   onClose: () => void;
   title: string;
+  /** `wide` fits full-width content such as a result's detail tabs. */
+  size?: "default" | "wide";
   children: ReactNode;
 }) {
   const ref = useRef<HTMLElement>(null);
@@ -180,7 +183,11 @@ export function Drawer({
       data-testid="drawer-scrim"
     >
       <aside
-        className="tw:flex tw:h-full tw:w-[min(560px,100vw)] tw:flex-col tw:border-l tw:border-line-input tw:bg-surface tw:shadow-[-20px_0_50px_rgba(0,0,0,0.5)] tw:outline-none"
+        className={
+          size === "wide"
+            ? "tw:flex tw:h-full tw:w-[min(1040px,100vw)] tw:flex-col tw:border-l tw:border-line-input tw:bg-surface tw:shadow-[-20px_0_50px_rgba(0,0,0,0.5)] tw:outline-none"
+            : "tw:flex tw:h-full tw:w-[min(560px,100vw)] tw:flex-col tw:border-l tw:border-line-input tw:bg-surface tw:shadow-[-20px_0_50px_rgba(0,0,0,0.5)] tw:outline-none"
+        }
         role="dialog"
         aria-modal="true"
         aria-label={title}

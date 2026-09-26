@@ -9,6 +9,39 @@ const MIGRATIONS_DIRECTORY = fileURLToPath(
 );
 const ADVISORY_LOCK_ID = 748_203_961;
 const MIGRATION_FILENAME = /^\d{3}-.+\.sql$/;
+const KNOWN_FUTURE_MIGRATIONS = [
+  {
+    filename: "139-strategy-learning-trial-ledger.sql",
+    checksum:
+      "b3d15e76935c8a4511430c129752b8651c3e7a14f43db065a9ea32f6cdccb08f",
+  },
+  {
+    filename: "140-signal-model-experiments.sql",
+    checksum:
+      "ab1239eacb32bf58ee4567422c733b65876c9eddfce4eb0e8075edd8d1e89fb0",
+  },
+  {
+    filename: "141-backtest-opportunity-capture.sql",
+    checksum:
+      "5931fb2445e4fd1ce9590aaf988027920bd56e6b9febfa0186dc98f89851d7c9",
+  },
+  {
+    filename: "142-signal-model-research-plan-v2.sql",
+    checksum:
+      "083585f20e4f3b0fcd63afaea9ce8e64be78e18529c43da0167e87e247e51938",
+  },
+  {
+    filename: "143-strategy-study-test-session-claims.sql",
+    checksum:
+      "c6b9f6b0dc800d33d66dbbb534982fde5506436d1c07c7594623ede1ce0e5d4a",
+  },
+  {
+    filename: "144-signal-model-prospective-candidate.sql",
+    checksum:
+      "f12c7bc0228835f08891b832b22f84f9700b6434e1ebca0c281c24e9d4bbf03c",
+  },
+] as const;
+const LAST_KNOWN_MIGRATION = "138-statistical-dataset-preparation.sql";
 
 type MigrationRequirement = {
   table: string;
@@ -352,6 +385,617 @@ const requirements: Readonly<Record<string, readonly MigrationRequirement[]>> =
         },
       },
       { table: "foundation_schema_version", foundationVersion: 132 },
+    ],
+    "136-funded-shadow-observation.sql": [
+      {
+        table: "funded_shadow_gate_policy",
+        columns: [
+          "id",
+          "gate_policy_version",
+          "market_id",
+          "currency",
+          "stage_b_approval",
+          "gate_window",
+          "challenger_policy_version",
+          "max_prediction_lag_ms",
+          "gate_policy_digest",
+          "created_at",
+        ],
+        indexes: [
+          "funded_shadow_gate_policy_id_market_currency_uq",
+          "funded_shadow_gate_policy_market_idx",
+        ],
+        triggers: [
+          "funded_shadow_gate_policy_validate",
+          "funded_shadow_gate_policy_immutable",
+        ],
+        constraint: {
+          name: "funded_shadow_gate_policy_stage_b_check",
+          definitionIncludes: "referenceSessionCount",
+        },
+      },
+      {
+        table: "funded_shadow_enrollment",
+        columns: [
+          "id",
+          "gate_policy_id",
+          "market_id",
+          "currency",
+          "source_kind",
+          "champion_source_run_id",
+          "champion_source_account_id",
+          "champion_policy_digest",
+          "champion_payload",
+          "challenger_model_id",
+          "challenger_model_version",
+          "challenger_model_type",
+          "challenger_artifact_digest",
+          "challenger_feature_version",
+          "challenger_cohort_digest",
+          "challenger_dataset_digest",
+          "challenger_training_partition_digest",
+          "challenger_training_evidence_cutoff_at",
+          "challenger_policy_digest",
+          "challenger_payload",
+          "evidence_cutoff_at",
+          "effective_from",
+          "registration_request_id",
+          "request_hash",
+          "enrollment_digest",
+          "created_at",
+        ],
+        indexes: [
+          "funded_shadow_enrollment_id_market_currency_uq",
+          "funded_shadow_enrollment_id_gate_policy_uq",
+          "funded_shadow_enrollment_market_idx",
+        ],
+        triggers: [
+          "funded_shadow_enrollment_validate",
+          "funded_shadow_enrollment_immutable",
+        ],
+        constraint: {
+          name: "funded_shadow_enrollment_challenger_fk",
+          definitionIncludes: "challenger_artifact_digest",
+        },
+      },
+      {
+        table: "funded_shadow_enrollment_transition",
+        columns: [
+          "enrollment_id",
+          "sequence",
+          "action",
+          "state",
+          "request_id",
+          "request_hash",
+          "effective_at",
+        ],
+        triggers: [
+          "funded_shadow_enrollment_transition_validate",
+          "funded_shadow_enrollment_transition_immutable",
+        ],
+        constraint: {
+          name: "funded_shadow_enrollment_transition_action_check",
+          definitionIncludes: "PAUSE",
+        },
+      },
+      {
+        table: "funded_shadow_batch",
+        columns: [
+          "id",
+          "enrollment_id",
+          "market_id",
+          "currency",
+          "run_id",
+          "account_id",
+          "session_date",
+          "decision_at",
+          "champion_identity_digest",
+          "sealed_at",
+          "batch_digest",
+        ],
+        indexes: [
+          "funded_shadow_batch_id_enrollment_uq",
+          "funded_shadow_batch_id_market_currency_uq",
+          "funded_shadow_batch_enrollment_idx",
+        ],
+        triggers: [
+          "funded_shadow_batch_validate",
+          "funded_shadow_batch_immutable",
+        ],
+        constraint: {
+          name: "funded_shadow_batch_enrollment_fk",
+          definitionIncludes: "market_id",
+        },
+      },
+      {
+        table: "funded_shadow_attempt",
+        columns: [
+          "id",
+          "attempt_version",
+          "batch_id",
+          "enrollment_id",
+          "market_id",
+          "currency",
+          "run_id",
+          "account_id",
+          "observation_id",
+          "session_date",
+          "decision_sequence",
+          "decision_input_digest",
+          "champion_action",
+          "decision_at",
+          "deadline_at",
+          "recorded_at",
+          "attempt_digest",
+        ],
+        indexes: [
+          "funded_shadow_attempt_id_enrollment_uq",
+          "funded_shadow_attempt_id_batch_uq",
+          "funded_shadow_attempt_enrollment_idx",
+          "funded_shadow_attempt_deadline_idx",
+        ],
+        triggers: [
+          "funded_shadow_attempt_validate",
+          "funded_shadow_attempt_immutable",
+        ],
+        constraint: {
+          name: "funded_shadow_attempt_input_check",
+          definitionIncludes: "UNAVAILABLE",
+        },
+      },
+      {
+        table: "funded_shadow_batch_member",
+        columns: [
+          "batch_id",
+          "ordinal",
+          "observation_id",
+          "attempt_id",
+          "member_digest",
+          "recorded_at",
+        ],
+        triggers: [
+          "funded_shadow_batch_member_validate",
+          "funded_shadow_batch_member_immutable",
+        ],
+        constraint: {
+          name: "funded_shadow_batch_member_attempt_fk",
+          definitionIncludes: "batch_id",
+        },
+      },
+      {
+        table: "funded_shadow_attempt_result",
+        columns: [
+          "attempt_id",
+          "enrollment_id",
+          "market_id",
+          "currency",
+          "disposition",
+          "prediction_id",
+          "prediction_digest",
+          "failure_reason",
+          "recorded_at",
+          "result_digest",
+        ],
+        indexes: ["funded_shadow_attempt_result_enrollment_idx"],
+        triggers: [
+          "funded_shadow_attempt_result_validate",
+          "funded_shadow_attempt_result_immutable",
+        ],
+        constraint: {
+          name: "funded_shadow_attempt_result_pairing_check",
+          definitionIncludes: "TIMELY_PREDICTION",
+        },
+      },
+      {
+        table: "funded_shadow_batch_projection",
+        columns: [
+          "batch_id",
+          "projection_version",
+          "enrollment_id",
+          "market_id",
+          "currency",
+          "batch_disposition",
+          "fallback_reason",
+          "ordered_attempt_ids",
+          "prediction_coverage",
+          "order_changes",
+          "recorded_at",
+          "projection_digest",
+        ],
+        triggers: [
+          "funded_shadow_batch_projection_validate",
+          "funded_shadow_batch_projection_immutable",
+        ],
+        constraint: {
+          name: "funded_shadow_batch_projection_fallback_check",
+          definitionIncludes: "FALLBACK_CHAMPION_ORDER",
+        },
+      },
+      {
+        table: "funded_shadow_label",
+        columns: [
+          "attempt_id",
+          "label_version",
+          "enrollment_id",
+          "market_id",
+          "currency",
+          "status",
+          "r_multiple",
+          "label_available_at",
+          "unresolved_reason",
+          "evidence_execution_id",
+          "recorded_at",
+          "label_digest",
+        ],
+        triggers: [
+          "funded_shadow_label_validate",
+          "funded_shadow_label_immutable",
+        ],
+        constraint: {
+          name: "funded_shadow_label_pairing_check",
+          definitionIncludes: "UNRESOLVED",
+        },
+      },
+      {
+        table: "funded_shadow_report",
+        columns: [
+          "id",
+          "enrollment_id",
+          "market_id",
+          "currency",
+          "as_of",
+          "report",
+          "report_digest",
+          "created_at",
+        ],
+        indexes: ["funded_shadow_report_enrollment_idx"],
+        triggers: [
+          "funded_shadow_report_validate",
+          "funded_shadow_report_immutable",
+        ],
+        constraint: {
+          name: "funded_shadow_report_no_authority_check",
+          definitionIncludes: "authorityEffect",
+        },
+      },
+      {
+        table: "funded_shadow_observer_event",
+        columns: [
+          "id",
+          "market_id",
+          "currency",
+          "kind",
+          "detail",
+          "recorded_at",
+        ],
+        indexes: ["funded_shadow_observer_event_market_idx"],
+        triggers: [
+          "funded_shadow_observer_event_validate",
+          "funded_shadow_observer_event_immutable",
+        ],
+        constraint: {
+          name: "funded_shadow_observer_event_kind_check",
+          definitionIncludes: "OWNERSHIP_REFUSAL",
+        },
+      },
+      { table: "foundation_schema_version", foundationVersion: 136 },
+    ],
+    "137-funded-shadow-boundary-hardening.sql": [
+      {
+        table: "funded_shadow_gate_policy",
+        constraint: {
+          name: "funded_shadow_gate_policy_window_check",
+          definitionIncludes: "minDecisions",
+        },
+      },
+      {
+        table: "funded_shadow_report",
+        constraint: {
+          name: "funded_shadow_report_no_authority_check",
+          definitionIncludes: "authorityEffect",
+        },
+      },
+      {
+        table: "funded_shadow_batch_projection",
+        constraint: {
+          name: "funded_shadow_batch_projection_batch_ownership_fk",
+          definitionIncludes: "market_id",
+        },
+      },
+      { table: "foundation_schema_version", foundationVersion: 137 },
+    ],
+    "138-statistical-dataset-preparation.sql": [
+      {
+        table: "statistical_training_dataset_preparation",
+        columns: [
+          "id",
+          "market_id",
+          "cohort",
+          "requested_cutoff",
+          "effective_cutoff",
+          "source_digest",
+          "excluded_counts",
+          "research_qualification",
+          "qualified_rows",
+          "created_at",
+        ],
+        indexes: ["statistical_training_dataset_preparation_owner_idx"],
+        triggers: ["statistical_training_dataset_preparation_immutable"],
+      },
+      { table: "foundation_schema_version", foundationVersion: 138 },
+    ],
+    "139-strategy-learning-trial-ledger.sql": [
+      {
+        table: "strategy_study_trial_ledger",
+        columns: [
+          "study_id",
+          "study_spec_hash",
+          "market_id",
+          "source_digest",
+          "binding",
+          "trial_budget",
+          "authority_kind",
+          "authority_id",
+        ],
+        triggers: ["strategy_study_trial_ledger_immutable"],
+      },
+      {
+        table: "strategy_study_trial_claim",
+        columns: [
+          "study_id",
+          "attempt_id",
+          "candidate_identity",
+          "candidate_spec",
+          "attempt_number",
+          "job_id",
+          "job_attempt_count",
+          "lease_owner",
+          "claimed_at",
+        ],
+        triggers: [
+          "strategy_study_trial_claim_immutable",
+          "strategy_study_trial_claim_validate",
+        ],
+      },
+      {
+        table: "strategy_study_trial_attempt",
+        columns: [
+          "study_id",
+          "attempt_id",
+          "candidate_identity",
+          "attempt_number",
+          "status",
+          "outcome",
+          "job_id",
+          "job_attempt_count",
+          "lease_owner",
+        ],
+        triggers: [
+          "strategy_study_trial_attempt_immutable",
+          "strategy_study_trial_attempt_validate",
+        ],
+      },
+      {
+        table: "strategy_study_final_test_link",
+        columns: ["study_id", "study_spec_hash", "test_claim_id", "linked_at"],
+        triggers: [
+          "strategy_study_final_test_link_immutable",
+          "strategy_study_final_test_link_validate",
+        ],
+      },
+      { table: "foundation_schema_version", foundationVersion: 139 },
+    ],
+    "140-signal-model-experiments.sql": [
+      {
+        table: "signal_model_research_authorization",
+        columns: [
+          "id",
+          "market_id",
+          "source_run_id",
+          "source_digest",
+          "plan_hash",
+          "plan",
+          "trial_budget",
+          "mode",
+          "expires_at",
+          "revoked_at",
+        ],
+        triggers: [
+          "signal_model_research_authorization_validate",
+          "signal_model_research_authorization_immutable",
+        ],
+      },
+      {
+        table: "signal_model_research_execution_grant",
+        columns: ["authorization_id", "job_id", "plan_hash"],
+        triggers: [
+          "signal_model_research_grant_validate",
+          "signal_model_research_grant_immutable",
+        ],
+      },
+      {
+        table: "signal_model_research_stage_claim",
+        columns: [
+          "authorization_id",
+          "execution_job_id",
+          "stage",
+          "claim_id",
+          "membership_hash",
+          "consumed_at",
+        ],
+        triggers: [
+          "signal_model_stage_claim_validate",
+          "signal_model_stage_claim_immutable",
+        ],
+      },
+      {
+        table: "signal_model_research_attempt",
+        columns: [
+          "authorization_id",
+          "stage",
+          "claim_id",
+          "attempt_id",
+          "attempt_number",
+          "candidate_identity",
+          "status",
+          "outcome",
+        ],
+        triggers: [
+          "signal_model_attempt_validate",
+          "signal_model_attempt_immutable",
+        ],
+      },
+      {
+        table: "signal_model_validation_selection",
+        columns: [
+          "authorization_id",
+          "validation_attempt_id",
+          "candidate_identity",
+          "threshold",
+        ],
+        triggers: [
+          "signal_model_validation_selection_validate",
+          "signal_model_validation_selection_immutable",
+        ],
+      },
+      { table: "foundation_schema_version", foundationVersion: 140 },
+    ],
+    "141-backtest-opportunity-capture.sql": [
+      {
+        table: "backtest_opportunity_capture",
+        columns: [
+          "source_run_id",
+          "capture_ordinal",
+          "market_id",
+          "profile_id",
+          "execution_assumptions_hash",
+          "decision_timestamp",
+          "prediction_features",
+          "outcome",
+          "capture_hash",
+          "label_available_at",
+        ],
+        indexes: ["backtest_opportunity_capture_scope_idx"],
+        triggers: [
+          "backtest_opportunity_capture_immutable",
+          "backtest_opportunity_capture_validate",
+        ],
+        foundationVersion: 141,
+      },
+      {
+        table: "backtest_opportunity_capture_receipt",
+        columns: [
+          "source_run_id",
+          "expected_count",
+          "membership_hash",
+          "execution_assumptions_hash",
+        ],
+        triggers: [
+          "backtest_opportunity_capture_receipt_immutable",
+          "backtest_opportunity_capture_receipt_validate",
+        ],
+      },
+    ],
+    "142-signal-model-research-plan-v2.sql": [
+      {
+        table: "signal_model_research_report",
+        columns: [
+          "authorization_id",
+          "experiment_id",
+          "source_digest",
+          "plan_hash",
+          "job_id",
+          "status",
+          "selected_candidate_identity",
+          "selected_threshold",
+          "evaluation",
+          "reason_codes",
+        ],
+        triggers: ["signal_model_research_report_validate"],
+      },
+      {
+        table: "signal_model_research_readiness_check",
+        columns: [
+          "authorization_id",
+          "status",
+          "blockers",
+          "next_action",
+          "checked_at",
+        ],
+        indexes: ["signal_model_research_readiness_latest_idx"],
+        triggers: ["signal_model_research_readiness_immutable"],
+      },
+      {
+        table: "signal_model_research_stage_claim",
+        columns: ["trial_cost"],
+      },
+      {
+        table: "signal_model_research_test_consumption",
+        columns: [
+          "authorization_id",
+          "market_id",
+          "source_run_id",
+          "source_digest",
+          "claim_id",
+          "membership_hash",
+          "test_sessions",
+          "test_opportunity_ids",
+          "consumed_at",
+        ],
+        indexes: ["signal_model_research_test_consumption_lineage_idx"],
+        triggers: ["signal_model_test_consumption_immutable"],
+      },
+      { table: "foundation_schema_version", foundationVersion: 142 },
+    ],
+    "143-strategy-study-test-session-claims.sql": [
+      {
+        table: "strategy_study_test_session_reservation",
+        columns: [
+          "market_id",
+          "source_digest",
+          "strategy_key",
+          "baseline_profile_config_id",
+          "strategy_version",
+          "execution_assumptions",
+          "session_date",
+          "study_id",
+          "job_id",
+        ],
+        indexes: ["strategy_study_test_session_lineage_idx"],
+        triggers: ["strategy_study_test_session_reservation_immutable"],
+      },
+      {
+        table: "signal_model_research_stage_claim",
+        triggers: ["a_signal_model_test_session_overlap_guard"],
+      },
+      {
+        table: "strategy_study_receipt",
+        triggers: ["validate_strategy_study_receipt_insert"],
+      },
+      { table: "foundation_schema_version", foundationVersion: 143 },
+    ],
+    "145-funded-inbox-analyze-cadence.sql": [
+      { table: "foundation_schema_version", foundationVersion: 145 },
+    ],
+    "146-funded-fact-processed-revision-index.sql": [
+      {
+        table: "paper_funded_fact",
+        indexes: ["paper_funded_fact_processed_revision_idx"],
+      },
+      { table: "foundation_schema_version", foundationVersion: 146 },
+    ],
+    "147-universe-refresh-kind.sql": [
+      { table: "universe_refresh_run", columns: ["refresh_kind"] },
+      { table: "foundation_schema_version", foundationVersion: 147 },
+    ],
+    "133-strategy-signal-snapshot-json-nullable.sql": [
+      { table: "foundation_schema_version", foundationVersion: 133 },
+    ],
+    "134-drop-superseded-indexes.sql": [
+      { table: "foundation_schema_version", foundationVersion: 133 },
+    ],
+    "135-funded-signal-fact-partial-index.sql": [
+      { table: "foundation_schema_version", foundationVersion: 134 },
     ],
     "131-funded-causal-provenance.sql": [
       {
@@ -1752,6 +2396,9 @@ const requirements: Readonly<Record<string, readonly MigrationRequirement[]>> =
  * 025 was corrected after release; 026 repairs the resulting constraint state.
  * 030 later received comment-only documentation path updates when its plan was
  * archived; its executable SQL was unchanged.
+ * 054 and 078 were applied from a checkout with CRLF line endings; the
+ * canonical LF bodies are byte-identical SQL, so the line-ending-only digests
+ * are recorded here instead of rewriting the applied migrations.
  */
 const acceptedHistoricalChecksums: Readonly<Record<string, readonly string[]>> =
   {
@@ -1766,6 +2413,12 @@ const acceptedHistoricalChecksums: Readonly<Record<string, readonly string[]>> =
     ],
     "030-paper-bot.sql": [
       "63cf83195c36cf8dddd5ff16d54b5bb80064214b322cdd20be58dd0d903cb2b7",
+    ],
+    "054-strategy-retention-optimization.sql": [
+      "68277a03cbd18fec77b4fd1dcf246954320f8414772c0161a2d667dc05dffbcb",
+    ],
+    "078-paper-qualification-label-boundaries.sql": [
+      "ff0d5785e441598f1799abb2ab360a64a23194bc08a7e19635b235ad7685f666",
     ],
   };
 
@@ -1955,10 +2608,28 @@ function validateAppliedMigrations(
       (migration) => migration.filename === record.filename,
     );
     const migration = expected.get(record.filename);
-    if (!migration)
-      throw new MigrationError(
-        `Database ledger contains unknown migration ${record.filename}; refusing to guess its ordering.`,
+    if (!migration) {
+      const futureIndex = KNOWN_FUTURE_MIGRATIONS.findIndex(
+        (future) => future.filename === record.filename,
       );
+      if (futureIndex === -1)
+        throw new MigrationError(
+          `Database ledger contains unknown migration ${record.filename}; refusing to guess its ordering.`,
+        );
+      if (
+        migrations.at(-1)?.filename !== LAST_KNOWN_MIGRATION ||
+        migrations.length + futureIndex !== previousIndex + 1
+      )
+        throw new MigrationError(
+          `Migration ledger skips an earlier migration before ${record.filename}; refusing to apply out of order.`,
+        );
+      if (record.checksum !== KNOWN_FUTURE_MIGRATIONS[futureIndex]?.checksum)
+        throw new MigrationError(
+          `Checksum mismatch for ${record.filename}. The applied migration was modified; restore its original contents or create a new corrective migration.`,
+        );
+      previousIndex = migrations.length + futureIndex;
+      continue;
+    }
     if (
       record.checksum !== migration.checksum &&
       !migration.acceptedChecksums?.includes(record.checksum)

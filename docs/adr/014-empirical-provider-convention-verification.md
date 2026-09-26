@@ -5,6 +5,10 @@ discovery production-unblock work. Scope is limited to establishing discovery
 calendar and adjustment provenance. No trading, execution, learning or
 activation policy is changed.
 
+> **September 24, 2026:** [ADR-018](018-pre-market-daily-seed-replaces-discovery-engine.md)
+> froze the discovery engine. This rule remains a general provider-convention
+> policy but has no active discovery protocol under it.
+
 ## Context
 
 The automated candidate discovery plan

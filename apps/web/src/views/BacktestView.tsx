@@ -1,8 +1,8 @@
+import { HistoricalImportProgress } from "./HistoricalImportProgress.js";
 import {
-  AUTHORITATIVE_EXECUTION_MODEL_VERSION,
-  type BacktestAutomationStatus,
   type BacktestAutomationWork,
   type BacktestComparison,
+  type BacktestDataSource,
   type BacktestRun,
   type ResearchJob,
   backtestComparisonSchema,
@@ -10,13 +10,14 @@ import {
   backtestRunSchema,
   researchJobSchema,
 } from "@tsx-scanner/contracts";
-import { type FormEvent, useMemo, useRef, useState } from "react";
+import { type FormEvent, Fragment, useMemo, useRef, useState } from "react";
 import { getJson, sendJson } from "../lib/api.js";
 import {
   useCapturedHistoryFormGuard,
   useCapturedHistoryRunSummary,
 } from "../lib/captured-history.js";
 import {
+  type BacktestResultGroup,
   TRIGGER_ORIGIN_LABELS,
   coverageLabel,
   evidenceLabel,
@@ -43,24 +44,36 @@ import { Button } from "../components/ui/Button.js";
 import { Panel, PanelHeader, PanelMeta } from "../components/ui/Panel.js";
 import { CopyButton, Drawer } from "../ui.js";
 import { EvidenceSummary } from "./EvidenceSummary.js";
-import { BacktestAutomationPanel } from "./BacktestAutomationPanel.js";
+import {
+  CARD,
+  LABEL,
+  LINK_BUTTON,
+  MoreMenu,
+  SectionHead,
+  badge,
+} from "../components/PageSections.js";
+import {
+  AutomationDiagnostics,
+  AutomationEvidence,
+  AutomationSettings,
+  AutomationStatusLine,
+  CheckForWorkButton,
+  NowRunning,
+  useBacktestAutomation,
+} from "./BacktestAutomationPanel.js";
 import { FundedReplayPanel } from "./FundedReplayPanel.js";
 import { StrategyStudyPanel } from "./StrategyStudyPanel.js";
+import { StrategyLearningReadinessPanel } from "./StrategyLearningReadinessPanel.js";
+import { SignalModelResearchStatusPanel } from "./SignalModelResearchStatusPanel.js";
 
-type PageTab = "overview" | "results" | "history";
-type DetailTab = "summary" | "evidence" | "trades" | "provenance";
-
-const PAGE_TABS: { key: PageTab; label: string }[] = [
-  { key: "overview", label: "Overview" },
-  { key: "results", label: "Results" },
-  { key: "history", label: "History" },
-];
+type DetailTab = "summary" | "evidence" | "trades" | "provenance" | "readiness";
 
 const DETAIL_TABS: { key: DetailTab; label: string }[] = [
   { key: "summary", label: "Summary" },
   { key: "evidence", label: "Evidence" },
   { key: "trades", label: "Trades" },
   { key: "provenance", label: "Provenance" },
+  { key: "readiness", label: "Learning readiness" },
 ];
 
 const VIEW_TAB_BASE =
@@ -70,36 +83,8 @@ const VIEW_TAB_TONES: Record<string, string> = {
   active: "tw:border-line-accent tw:bg-surface-raised tw:text-ink-50",
 };
 
-const AUTOMATION_SECONDARY =
-  "tw:cursor-pointer tw:rounded-[7px] tw:border tw:border-line-input tw:bg-surface tw:px-[11px] tw:py-2 tw:font-mono tw:text-[0.62rem] tw:font-bold tw:tracking-[0.06em] tw:text-ink-250 tw:hover:border-line-accent tw:hover:text-accent";
-
-const AUTOMATION_STATE_BASE =
-  "tw:inline-block tw:rounded-full tw:border tw:px-[7px] tw:py-[3px] tw:font-mono tw:text-[0.62rem] tw:font-bold tw:tracking-[0.05em]";
-const AUTOMATION_STATE_TONES: Record<string, string> = {
-  ok: "tw:border-[rgba(34,197,94,0.3)] tw:bg-[rgba(34,197,94,0.15)] tw:text-[#4ade80]",
-  warn: "tw:border-line-warn tw:bg-surface-warn tw:text-warn-soft",
-  bad: "tw:border-line-danger tw:bg-surface-danger tw:text-danger-tint-soft",
-  pending: "tw:border-line",
-  waiting: "tw:border-line tw:bg-surface-sunken tw:text-ink-250",
-};
-
-function automationState(tone: string): string {
-  return classes(
-    AUTOMATION_STATE_BASE,
-    AUTOMATION_STATE_TONES[tone] ?? AUTOMATION_STATE_TONES.pending,
-  );
-}
-
 const EMPTY_COMPACT =
   "empty compact tw:p-[25px] tw:text-center tw:text-ink-700";
-
-const RESULTS_GRID =
-  "tw:grid tw:grid-cols-[20px_minmax(220px,1.6fr)_110px_140px_minmax(120px,1fr)_minmax(140px,1fr)] tw:items-center tw:gap-3 tw:below-1100:grid-cols-[20px_minmax(0,1fr)] tw:below-1100:items-start";
-const RESULT_ROW_TONES: Record<string, string> = {
-  standard: "tw:border-b tw:border-line-subtle tw:px-[18px] tw:py-[13px]",
-  grouped: "tw:px-[18px] tw:py-[13px]",
-  nested: "tw:border-t tw:border-line-subtle tw:px-0 tw:py-[11px]",
-};
 
 const HISTORY_SUMMARY =
   "tw:grid tw:grid-cols-[minmax(220px,1.6fr)_110px_140px_minmax(120px,1fr)_minmax(140px,1fr)] tw:items-center tw:gap-3 tw:below-1100:grid-cols-[minmax(0,1fr)] tw:below-1100:gap-2";
@@ -166,112 +151,6 @@ function WarningsSummary({ warnings }: { warnings: string[] }) {
   );
 }
 
-function ResultRow({
-  title,
-  run,
-  selected,
-  checked,
-  selectable = true,
-  onToggle,
-  onOpen,
-  tone = "standard",
-}: {
-  title: string;
-  run: BacktestRun;
-  selected: boolean;
-  checked: boolean;
-  selectable?: boolean;
-  onToggle: () => void;
-  onOpen: () => void;
-  tone?: "standard" | "grouped" | "nested";
-}) {
-  const netPnl = run.metrics?.netPnl ?? null;
-  const trades = run.metrics?.tradesSimulated ?? null;
-  return (
-    <article
-      className={classes(
-        "result-row",
-        RESULTS_GRID,
-        RESULT_ROW_TONES[tone],
-        selected && "tw:bg-surface-raised",
-      )}
-    >
-      {selectable ? (
-        <input
-          type="checkbox"
-          checked={checked}
-          onChange={onToggle}
-          aria-label={`Compare ${run.name}`}
-        />
-      ) : (
-        <span aria-hidden="true" className="tw:below-1100:col-start-2" />
-      )}
-      <div className="result-main tw:grid tw:min-w-0 tw:gap-1 tw:below-1100:col-start-2">
-        <button
-          type="button"
-          className="tw:grid tw:cursor-pointer tw:gap-[3px] tw:border-0 tw:bg-transparent tw:p-0 tw:text-left tw:text-ink-150 tw:hover:[&_strong]:text-accent"
-          onClick={onOpen}
-        >
-          <strong>{title}</strong>
-          <small className="tw:text-[0.65rem] tw:text-ink-400">
-            {run.startDate} → {run.endDate}
-            {run.supersedesBacktestRunId ? " · replacement" : ""}
-          </small>
-        </button>
-        <details className="result-technical">
-          <summary className="tw:w-max tw:cursor-pointer tw:font-mono tw:text-[0.62rem] tw:text-ink-350">
-            Technical details
-          </summary>
-          <span className="tw:mt-1 tw:block tw:font-mono tw:text-[0.63rem] tw:text-ink-350 tw:wrap-anywhere">
-            config {run.configVersion} ·{" "}
-            {run.executionModelVersion
-              ? `${run.executionModelVersion} · ${
-                  run.executionModelVersion ===
-                  AUTHORITATIVE_EXECUTION_MODEL_VERSION
-                    ? "current model"
-                    : "other model version"
-                }`
-              : "no execution model"}{" "}
-            · run {run.id} <CopyButton value={run.id} />
-          </span>
-        </details>
-      </div>
-      <span
-        className={classes(
-          automationState(executionTone(run)),
-          "tw:below-1100:col-start-2",
-        )}
-      >
-        {executionLabel(run)}
-      </span>
-      <span
-        className={classes(
-          automationState(evidenceTone(run)),
-          "tw:below-1100:col-start-2",
-        )}
-      >
-        {evidenceLabel(run)}
-      </span>
-      <span className="result-coverage tw:text-[0.72rem] tw:text-ink-250 tw:below-1100:col-start-2">
-        {coverageLabel(run)}
-      </span>
-      <span
-        className={classes(
-          "result-outcome tw:grid tw:justify-items-end tw:gap-[2px] tw:text-right tw:below-1100:col-start-2",
-          netPnl === null ? "" : netPnl >= 0 ? "positive" : "negative",
-        )}
-      >
-        <b>{netPnl === null ? "—" : `$${netPnl.toFixed(2)}`}</b>
-        <small className="tw:text-[0.63rem] tw:text-ink-400">
-          {trades === null
-            ? "net simulated"
-            : `${trades} trades · net simulated`}
-        </small>
-      </span>
-    </article>
-  );
-}
-
 function HistoryRow({
   run,
   work,
@@ -307,15 +186,12 @@ function HistoryRow({
           <strong>{run.name}</strong>
           <small className="tw:text-[0.65rem] tw:text-ink-400">
             {run.startDate} → {run.endDate} · {provenance}
+            {run.dataSource === "HISTORICAL_ARCHIVE" ? " · archive" : ""}
             {run.supersedesBacktestRunId ? " · replacement" : ""}
           </small>
         </button>
-        <span className={automationState(executionTone(run))}>
-          {executionLabel(run)}
-        </span>
-        <span className={automationState(evidenceTone(run))}>
-          {evidenceLabel(run)}
-        </span>
+        <span className={badge(executionTone(run))}>{executionLabel(run)}</span>
+        <span className={badge(evidenceTone(run))}>{evidenceLabel(run)}</span>
         <span className="result-coverage tw:text-[0.72rem] tw:text-ink-250">
           {coverageLabel(run)}
         </span>
@@ -479,13 +355,11 @@ function ResultDetail({
   work,
   tab,
   onTabChange,
-  onClose,
 }: {
   run: BacktestRun;
   work?: BacktestAutomationWork;
   tab: DetailTab;
   onTabChange: (tab: DetailTab) => void;
-  onClose: () => void;
 }) {
   const warnings = collectWarnings(run);
   return (
@@ -495,24 +369,14 @@ function ResultDetail({
       aria-label="Selected result"
     >
       <PanelHeader
-        title={runDisplayName(run)}
+        title={`${run.startDate} → ${run.endDate}`}
         description={
           <>
-            {run.startDate} → {run.endDate} · {executionLabel(run)} ·{" "}
-            {evidenceLabel(run)}
+            {executionLabel(run)} · {evidenceLabel(run)}
             {work
               ? ` · ${TRIGGER_ORIGIN_LABELS[work.triggerOrigin] ?? work.triggerOrigin}`
               : ""}
           </>
-        }
-        actions={
-          <button
-            type="button"
-            className={AUTOMATION_SECONDARY}
-            onClick={onClose}
-          >
-            Close
-          </button>
         }
       />
       <nav
@@ -761,9 +625,9 @@ function ResultDetail({
                   {trade.sampledExcursion && (
                     <small className="tw:mt-1 tw:block tw:text-[0.62rem] tw:text-ink-350">
                       sampled bid path:{" "}
-                      {trade.sampledExcursion.status === "AVAILABLE"
-                        ? `${trade.sampledExcursion.adversePct?.toFixed(2)}% adverse / ${trade.sampledExcursion.favorablePct?.toFixed(2)}% favorable`
-                        : trade.sampledExcursion.reasonCodes.join(", ")}
+                      {trade.sampledExcursion.status === "UNAVAILABLE"
+                        ? trade.sampledExcursion.reasonCodes.join(", ")
+                        : `${trade.sampledExcursion.adversePct?.toFixed(2)}% adverse / ${trade.sampledExcursion.favorablePct?.toFixed(2)}% favorable${trade.sampledExcursion.status === "INDICATIVE" ? " (unverified coverage)" : ""}`}
                     </small>
                   )}
                 </span>
@@ -894,9 +758,410 @@ function ResultDetail({
           />
         </div>
       )}
+      {tab === "readiness" && (
+        <StrategyLearningReadinessPanel
+          scope={null}
+          runContext={{
+            runId: run.id,
+            marketId: run.marketId,
+            status: run.status,
+            strategies: run.strategies,
+          }}
+        />
+      )}
     </Panel>
   );
 }
+
+function money(value: number, signed = false): string {
+  const sign = value < 0 ? "−" : signed && value > 0 ? "+" : "";
+  return `${sign}$${Math.abs(value).toFixed(2)}`;
+}
+
+function clock(value: string | null): string {
+  return value
+    ? new Date(value).toLocaleTimeString(undefined, {
+        hour: "2-digit",
+        minute: "2-digit",
+      })
+    : "—";
+}
+
+/** Plain-language reason a result is or is not validated. */
+function verdict(run: BacktestRun): string {
+  if (run.status !== "COMPLETED")
+    return run.error ?? `${executionLabel(run)}; no result was recorded.`;
+  const evidence = run.evidence;
+  if (!evidence) return "No evidence assessment was recorded for this run.";
+  if (evidence.qualification === "EVIDENCE_QUALIFIED")
+    return "Evidence qualified: the sample and expectancy range gates pass.";
+  const reasons = [
+    !evidence.adequateSamples &&
+      `the sample or one of its slices is below ${evidence.minimumTradesPerSlice} trades`,
+    !evidence.positiveExpectancyRange &&
+      "the 95% expectancy range does not stay above zero",
+  ].filter(Boolean);
+  return reasons.length
+    ? `Not validated: ${reasons.join(" and ")}.`
+    : "Exploratory: not validated for promotion.";
+}
+
+const QUICK_BOX =
+  "tw:rounded-[10px] tw:border tw:border-line-subtle tw:bg-surface-sunken tw:px-4 tw:py-[14px]";
+const QUICK_VALUE =
+  "tw:m-0 tw:mt-[7px] tw:text-[1.05rem] tw:font-semibold tw:text-ink-50";
+const QUICK_HINT = "tw:m-0 tw:mt-[3px] tw:text-[0.75rem] tw:text-ink-400";
+
+/** Expectancy with its bootstrap range on an axis that always includes zero,
+ * so a range crossing zero is visible at a glance. */
+function ExpectancyRange({ run }: { run: BacktestRun }) {
+  const expectancy = run.evidence?.expectancy;
+  if (
+    !expectancy ||
+    expectancy.lower === null ||
+    expectancy.upper === null ||
+    expectancy.estimate === null
+  )
+    return <p className={QUICK_HINT}>No confidence range recorded.</p>;
+  const range = {
+    lower: expectancy.lower,
+    upper: expectancy.upper,
+    estimate: expectancy.estimate,
+  };
+  const low = Math.min(range.lower, 0);
+  const high = Math.max(range.upper, 0);
+  const span = high - low || 1;
+  const at = (value: number) => `${((value - low) / span) * 100}%`;
+  return (
+    <>
+      <div
+        className="tw:relative tw:mt-3 tw:h-[22px]"
+        role="img"
+        aria-label={`95% range ${money(range.lower)} to ${money(range.upper)}`}
+      >
+        <span className="tw:absolute tw:top-[10px] tw:right-0 tw:left-0 tw:h-[2px] tw:bg-line" />
+        <span
+          className="tw:absolute tw:top-[7px] tw:h-2 tw:rounded-[4px] tw:bg-accent/35"
+          style={{
+            left: at(range.lower),
+            width: `${((range.upper - range.lower) / span) * 100}%`,
+          }}
+        />
+        <span
+          className="tw:absolute tw:top-[3px] tw:bottom-[3px] tw:w-px tw:bg-ink-400"
+          style={{ left: at(0) }}
+        />
+        <span
+          className="tw:absolute tw:top-1 tw:h-[14px] tw:w-[3px] tw:-translate-x-1/2 tw:rounded-[2px] tw:bg-accent"
+          style={{ left: at(range.estimate) }}
+        />
+      </div>
+      <div className="tw:flex tw:justify-between tw:font-mono tw:text-[0.7rem] tw:text-ink-400">
+        <span>{money(range.lower)}</span>
+        <span>{money(range.upper)}</span>
+      </div>
+    </>
+  );
+}
+
+function ResultQuickLook({
+  run,
+  onOpenFull,
+}: {
+  run: BacktestRun;
+  onOpenFull: () => void;
+}) {
+  const metrics = run.metrics;
+  const warnings = collectWarnings(run);
+  return (
+    <div className="tw:grid tw:gap-[14px]">
+      {metrics && (
+        <div className="tw:grid tw:grid-cols-[1.4fr_1fr_1fr_1fr] tw:gap-[14px] tw:below-1000:grid-cols-[1fr_1fr] tw:below-620:grid-cols-[1fr]">
+          <div className={QUICK_BOX}>
+            <div className={LABEL}>Expectancy per trade · 95% range</div>
+            <p className={QUICK_VALUE}>
+              {money(run.evidence?.expectancy.estimate ?? metrics.expectancy)}
+            </p>
+            <ExpectancyRange run={run} />
+          </div>
+          <div className={QUICK_BOX}>
+            <div className={LABEL}>Max drawdown</div>
+            <p className={classes(QUICK_VALUE, "tw:text-danger")}>
+              {money(-Math.abs(metrics.maximumDrawdown))}
+            </p>
+            <p className={QUICK_HINT}>
+              {metrics.maximumDrawdownPct.toFixed(2)}% of capital
+            </p>
+          </div>
+          <div className={QUICK_BOX}>
+            <div className={LABEL}>Avg win / loss</div>
+            <p className={QUICK_VALUE}>
+              {money(metrics.averageWin)} /{" "}
+              {money(Math.abs(metrics.averageLoss))}
+            </p>
+            <p className={QUICK_HINT}>
+              {metrics.wins} wins · {metrics.losses} losses
+            </p>
+          </div>
+          <div className={QUICK_BOX}>
+            <div className={LABEL}>Signals → trades</div>
+            <p className={QUICK_VALUE}>
+              {metrics.readySignals} → {metrics.tradesSimulated}
+            </p>
+            <p className={QUICK_HINT}>
+              {metrics.averageHoldMinutes.toFixed(0)} min average hold
+            </p>
+          </div>
+        </div>
+      )}
+      <div className="tw:flex tw:flex-wrap tw:items-baseline tw:justify-between tw:gap-3 tw:text-[0.8rem] tw:text-ink-300">
+        <span>
+          {verdict(run)}
+          {warnings.length
+            ? ` ${warnings.length} ${warnings.length === 1 ? "limitation" : "limitations"} recorded.`
+            : ""}
+        </span>
+        <button type="button" className={LINK_BUTTON} onClick={onOpenFull}>
+          Open full result →
+        </button>
+      </div>
+    </div>
+  );
+}
+
+const TH =
+  "tw:whitespace-nowrap tw:border-b tw:border-line tw:px-4 tw:py-[13px] tw:first:pl-[22px] tw:last:pr-[22px] tw:font-sans tw:text-[0.68rem] tw:font-semibold tw:tracking-[0.08em] tw:uppercase tw:text-ink-500";
+const TD =
+  "tw:border-b tw:border-line-subtle tw:px-4 tw:py-[14px] tw:first:pl-[22px] tw:last:pr-[22px] tw:align-middle tw:text-[0.84rem] tw:text-ink-200";
+/* Secondary columns hidden on phones; the expanded quick look carries them. */
+const NARROW_HIDDEN = "tw:below-md:hidden";
+const NUM =
+  "tw:whitespace-nowrap tw:font-mono tw:text-[0.8rem] tw:tabular-nums";
+
+/** Net result of a run that simulated at least one trade; null otherwise. */
+function tradedNetPnl(run: BacktestRun): number | null {
+  return run.metrics?.tradesSimulated ? run.metrics.netPnl : null;
+}
+
+function compareNetPnl(left: BacktestRun, right: BacktestRun): number {
+  const a = tradedNetPnl(left);
+  const b = tradedNetPnl(right);
+  if (a === null && b === null) return 0;
+  if (a === null) return 1;
+  if (b === null) return -1;
+  return b - a;
+}
+
+/** Latest result per strategy, best net result first. A row expands in place
+ * to a quick look; the full tabs open in a drawer. */
+function ResultsTable({
+  groups,
+  rerunning,
+  expanded,
+  onToggle,
+  onOpenFull,
+}: {
+  groups: BacktestResultGroup[];
+  rerunning: ReadonlySet<string>;
+  expanded: string | null;
+  onToggle: (key: string) => void;
+  onOpenFull: (run: BacktestRun) => void;
+}) {
+  const rows = [...groups].sort((left, right) =>
+    compareNetPnl(left.latest, right.latest),
+  );
+  const scale = Math.max(
+    1,
+    ...rows.map((group) => Math.abs(group.latest.metrics?.netPnl ?? 0)),
+  );
+  return (
+    <div className="tw:overflow-x-auto">
+      <table className="tw:w-full tw:min-w-[760px] tw:border-collapse tw:below-md:min-w-0">
+        <thead>
+          <tr>
+            <th className={classes(TH, "tw:text-left")}>Strategy</th>
+            <th className={classes(TH, "tw:text-left", NARROW_HIDDEN)}>
+              Sample
+            </th>
+            <th className={classes(TH, "tw:text-right", NARROW_HIDDEN)}>
+              Win rate
+            </th>
+            <th className={classes(TH, "tw:text-right", NARROW_HIDDEN)}>
+              Profit factor
+            </th>
+            <th className={classes(TH, "tw:text-right")}>Net P&amp;L</th>
+            <th className={classes(TH, "tw:text-right", NARROW_HIDDEN)}>
+              Evidence
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((group) => {
+            const run = group.latest;
+            const metrics = run.metrics;
+            const trades = metrics?.tradesSimulated ?? null;
+            const minimum = run.evidence?.minimumTradesPerSlice ?? null;
+            const netPnl = metrics?.netPnl ?? null;
+            const open = expanded === group.key;
+            const completed = run.status === "COMPLETED";
+            return (
+              <Fragment key={group.key}>
+                <tr
+                  className={classes(
+                    "result-row",
+                    open && "tw:bg-surface-raised",
+                  )}
+                >
+                  <td
+                    className={classes(
+                      TD,
+                      open && "tw:shadow-[inset_3px_0_0_var(--accent)]",
+                    )}
+                  >
+                    <button
+                      type="button"
+                      className="tw:grid tw:cursor-pointer tw:gap-[2px] tw:border-0 tw:bg-transparent tw:p-0 tw:text-left tw:hover:[&_strong]:text-accent"
+                      aria-expanded={open}
+                      onClick={() => onToggle(group.key)}
+                    >
+                      <strong className="tw:whitespace-nowrap tw:text-[0.88rem] tw:below-md:whitespace-normal tw:font-semibold tw:text-ink-50">
+                        {group.title}
+                      </strong>
+                      <small className="tw:text-[0.74rem] tw:text-ink-500">
+                        updated {clock(run.completedAt ?? run.createdAt)}
+                        {rerunning.has(group.title) ? " · rerunning now" : ""}
+                        <span className="tw:hidden tw:below-md:inline">
+                          {" · "}
+                          {completed ? evidenceLabel(run) : executionLabel(run)}
+                        </span>
+                      </small>
+                    </button>
+                  </td>
+                  <td className={classes(TD, NARROW_HIDDEN)}>
+                    {trades === null ? (
+                      <span className="tw:text-ink-500">—</span>
+                    ) : (
+                      <span className="tw:flex tw:items-center tw:gap-[10px]">
+                        {minimum !== null && (
+                          <span
+                            className="tw:h-[6px] tw:w-[72px] tw:shrink-0 tw:overflow-hidden tw:rounded-full tw:bg-surface-sunken"
+                            aria-hidden="true"
+                          >
+                            <span
+                              className={classes(
+                                "tw:block tw:h-full tw:rounded-full",
+                                trades >= minimum
+                                  ? "tw:bg-gain"
+                                  : "tw:bg-ink-400",
+                              )}
+                              style={{
+                                width: `${Math.min(100, (trades / minimum) * 100)}%`,
+                              }}
+                            />
+                          </span>
+                        )}
+                        <span className={classes(NUM, "tw:text-ink-300")}>
+                          {minimum !== null
+                            ? `${trades} / ${minimum}`
+                            : `${trades} trades`}
+                        </span>
+                      </span>
+                    )}
+                  </td>
+                  <td
+                    className={classes(TD, NUM, "tw:text-right", NARROW_HIDDEN)}
+                  >
+                    {metrics && trades ? `${metrics.winRate.toFixed(0)}%` : "—"}
+                  </td>
+                  <td
+                    className={classes(TD, NUM, "tw:text-right", NARROW_HIDDEN)}
+                  >
+                    {metrics?.profitFactor != null
+                      ? metrics.profitFactor.toFixed(2)
+                      : "—"}
+                  </td>
+                  <td className={classes(TD, "tw:text-right")}>
+                    <span className="tw:flex tw:items-center tw:justify-end tw:gap-3">
+                      <span
+                        className="tw:relative tw:h-[6px] tw:w-[80px] tw:shrink-0 tw:below-1100:hidden"
+                        aria-hidden="true"
+                      >
+                        <span className="tw:absolute tw:-top-[3px] tw:-bottom-[3px] tw:left-1/2 tw:w-px tw:bg-line" />
+                        {netPnl !== null && netPnl !== 0 && (
+                          <span
+                            className={classes(
+                              "tw:absolute tw:top-0 tw:h-full tw:rounded-[3px]",
+                              netPnl > 0
+                                ? "tw:left-1/2 tw:bg-gain"
+                                : "tw:right-1/2 tw:bg-danger",
+                            )}
+                            style={{
+                              width: `${(Math.abs(netPnl) / scale) * 50}%`,
+                            }}
+                          />
+                        )}
+                      </span>
+                      <span
+                        className={classes(
+                          NUM,
+                          "tw:min-w-[76px]",
+                          netPnl === null || !trades
+                            ? "tw:text-ink-500"
+                            : netPnl > 0
+                              ? "tw:text-gain"
+                              : netPnl < 0
+                                ? "tw:text-danger"
+                                : "tw:text-ink-300",
+                        )}
+                      >
+                        {netPnl === null
+                          ? "—"
+                          : trades
+                            ? money(netPnl, true)
+                            : "no trades"}
+                      </span>
+                    </span>
+                  </td>
+                  <td className={classes(TD, "tw:text-right", NARROW_HIDDEN)}>
+                    <span
+                      className={badge(
+                        completed ? evidenceTone(run) : executionTone(run),
+                      )}
+                    >
+                      {completed ? evidenceLabel(run) : executionLabel(run)}
+                    </span>
+                  </td>
+                </tr>
+                {open && (
+                  <tr className="tw:bg-surface-raised">
+                    <td
+                      colSpan={6}
+                      className="tw:border-b tw:border-line tw:px-[22px] tw:pt-1 tw:pb-5 tw:shadow-[inset_3px_0_0_var(--accent)]"
+                    >
+                      <ResultQuickLook
+                        run={run}
+                        onOpenFull={() => onOpenFull(run)}
+                      />
+                    </td>
+                  </tr>
+                )}
+              </Fragment>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+type DrawerKey =
+  | "result"
+  | "history"
+  | "manual"
+  | "settings"
+  | "diagnostics"
+  | "tools"
+  | "imports";
 
 export function BacktestView({
   runs,
@@ -914,7 +1179,13 @@ export function BacktestView({
   const [name, setName] = useState("Baseline replay"),
     [startDate, setStartDate] = useState(monthAgo),
     [endDate, setEndDate] = useState(today),
-    [symbols, setSymbols] = useState("");
+    [symbols, setSymbols] = useState(""),
+    [dataSourceChoice, setDataSource] =
+      useState<BacktestDataSource>("CAPTURED_QUOTES");
+  // The archive covers US equities only (ADR-019).
+  const dataSource: BacktestDataSource =
+    marketId === "US_EQUITIES" ? dataSourceChoice : "CAPTURED_QUOTES";
+  const archive = dataSource === "HISTORICAL_ARCHIVE";
   const [rvol, setRvol] = useState("1.5"),
     [spread, setSpread] = useState("0.25"),
     [volumeRatio, setVolumeRatio] = useState("1.5"),
@@ -925,19 +1196,48 @@ export function BacktestView({
     [slippage, setSlippage] = useState("2"),
     [fees, setFees] = useState("0"),
     [selected, setSelected] = useState<BacktestRun>(),
+    [expanded, setExpanded] = useState<string | null>(null),
     [comparisonIds, setComparisonIds] = useState<string[]>([]),
     [comparison, setComparison] = useState<BacktestComparison>(),
     [error, setError] = useState(""),
     [running, setRunning] = useState(false),
-    [manualOpen, setManualOpen] = useState(false),
-    [pageTab, setPageTab] = useState<PageTab>("overview"),
+    [drawer, setDrawer] = useState<DrawerKey | null>(null),
     [detailTab, setDetailTab] = useState<DetailTab>("summary"),
-    [automationStatus, setAutomationStatus] =
-      useState<BacktestAutomationStatus>(),
     [job, setJob] = useState<ResearchJob>();
   const abortRef = useRef<AbortController | undefined>(undefined);
-  useCapturedHistoryFormGuard(startDate, endDate, marketId, manualOpen);
+  const manualOpen = drawer === "manual";
+  useCapturedHistoryFormGuard(
+    startDate,
+    endDate,
+    marketId,
+    manualOpen,
+    dataSource,
+  );
+  const refreshRuns = async () => {
+    try {
+      const value = backtestRunListSchema.parse(
+        await getJson("/api/backtests?limit=100"),
+      );
+      updateRuns(value.runs.filter((run) => run.marketId === marketId));
+    } catch {
+      // The automation status stays visible; a failed run reload leaves the
+      // existing list in place instead of clearing it.
+    }
+  };
+  const automation = useBacktestAutomation(marketId, () => void refreshRuns());
   const resultGroups = useMemo(() => groupBacktestResults(runs), [runs]);
+  const qualified = resultGroups.filter(
+    (group) => group.latest.evidence?.qualification === "EVIDENCE_QUALIFIED",
+  ).length;
+  const rerunning = useMemo(
+    () =>
+      new Set(
+        [...automation.groups.running, ...automation.groups.queued].flatMap(
+          (entry) => (entry.work.configName ? [entry.work.configName] : []),
+        ),
+      ),
+    [automation.groups],
+  );
   const historyRuns = useMemo(
     () =>
       [...runs].sort(
@@ -950,11 +1250,11 @@ export function BacktestView({
   const workByRunId = useMemo(
     () =>
       new Map(
-        (automationStatus?.works ?? []).flatMap((work) =>
+        (automation.status?.works ?? []).flatMap((work) =>
           work.runId ? [[work.runId, work] as const] : [],
         ),
       ),
-    [automationStatus],
+    [automation.status],
   );
   const selectedWork = selected ? workByRunId.get(selected.id) : undefined;
   const create = async (event: FormEvent) => {
@@ -980,6 +1280,7 @@ export function BacktestView({
           slippageBps: Number(slippage),
           feePerTrade: Number(fees),
           marketId,
+          dataSource,
           parameters: {
             rvolAtTimeMin: Number(rvol),
             spreadHardMaxPct: Number(spread),
@@ -1001,8 +1302,7 @@ export function BacktestView({
         updateRuns([run, ...runs.filter((value) => value.id !== run.id)]);
         setSelected(run);
         setDetailTab("summary");
-        setPageTab("results");
-        setManualOpen(false);
+        setDrawer("result");
       } else {
         setError(researchJobFailureMessage(finished));
       }
@@ -1037,6 +1337,7 @@ export function BacktestView({
       setSelected(
         backtestRunSchema.parse(await getJson(`/api/backtests/${run.id}`)),
       );
+      setDrawer("result");
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Unable to load run");
     }
@@ -1066,22 +1367,15 @@ export function BacktestView({
           : current,
     );
   const runLabel = running ? jobProgressLabel(job) : "RUN BACKTEST";
-  const refreshRuns = async () => {
-    try {
-      const value = backtestRunListSchema.parse(
-        await getJson("/api/backtests?limit=100"),
-      );
-      updateRuns(value.runs);
-    } catch {
-      // The automation panel keeps its own status; a failed run reload leaves
-      // the existing list in place instead of clearing it.
-    }
-  };
   const manualForm = (
     <form className="backtest-form" onSubmit={(event) => void create(event)}>
       <PanelHeader
         title="New historical replay"
-        description="Captured quotes only · same live feature and strategy logic"
+        description={
+          archive
+            ? "Archived provider history · exploratory · same live feature and strategy logic"
+            : "Captured quotes only · same live feature and strategy logic"
+        }
         descriptionClassName="tw:mt-1 tw:mb-0 tw:text-[0.72rem] tw:text-ink-350"
         actions={<PanelMeta>NO LOOK-AHEAD</PanelMeta>}
       />
@@ -1123,16 +1417,36 @@ export function BacktestView({
             />
           </label>
         </div>
+        {marketId === "US_EQUITIES" && (
+          <label className={FIELD_LABEL}>
+            Data source
+            <select
+              className={FIELD_CONTROL}
+              value={dataSource}
+              onChange={(e) =>
+                setDataSource(e.target.value as BacktestDataSource)
+              }
+            >
+              <option value="CAPTURED_QUOTES">Captured Questrade quotes</option>
+              <option value="HISTORICAL_ARCHIVE">
+                Historical archive (exploratory)
+              </option>
+            </select>
+          </label>
+        )}
         <label className={FIELD_LABEL}>
           Symbols{" "}
           <small className="tw:font-medium tw:tracking-normal">
-            blank = active universe
+            {archive
+              ? "required · archived symbols"
+              : "blank = active universe"}
           </small>
           <input
             className={FIELD_CONTROL}
             value={symbols}
+            required={archive}
             onChange={(e) => setSymbols(e.target.value)}
-            placeholder="BTO.TO, BAM.TO"
+            placeholder={archive ? "COIN, OKTA" : "BTO.TO, BAM.TO"}
           />
         </label>
         <div className={FIELD_PAIR}>
@@ -1262,209 +1576,215 @@ export function BacktestView({
   );
   return (
     <>
-      <div className="backtest-toolbar tw:mx-0 tw:mt-[14px] tw:mb-[10px] tw:flex tw:items-center tw:justify-between tw:gap-3 tw:text-[0.72rem] tw:text-ink-400">
-        <nav
-          className="view-tabs tw:flex tw:items-center tw:gap-1"
-          role="tablist"
-          aria-label="Backtest views"
-        >
-          {PAGE_TABS.map((entry) => (
-            <button
-              key={entry.key}
-              type="button"
-              role="tab"
-              aria-selected={pageTab === entry.key}
-              className={classes(
-                VIEW_TAB_BASE,
-                pageTab === entry.key
-                  ? VIEW_TAB_TONES.active
-                  : VIEW_TAB_TONES.idle,
-              )}
-              onClick={() => setPageTab(entry.key)}
-            >
-              {entry.label}
-            </button>
-          ))}
-        </nav>
+      <div className="tw:-mt-3 tw:mb-7 tw:flex tw:flex-wrap tw:items-center tw:justify-between tw:gap-3">
+        <AutomationStatusLine automation={automation} />
+        <div className="tw:flex tw:items-center tw:gap-[10px]">
+          <CheckForWorkButton automation={automation} />
+          <MoreMenu
+            label="More backtest tools"
+            items={[
+              { label: "Run history", onSelect: () => setDrawer("history") },
+              { label: "Manual replay", onSelect: () => setDrawer("manual") },
+              {
+                label: "Import progress",
+                onSelect: () => setDrawer("imports"),
+              },
+              {
+                label: "Automation settings",
+                onSelect: () => setDrawer("settings"),
+              },
+              {
+                label: "Diagnostics",
+                onSelect: () => setDrawer("diagnostics"),
+              },
+              {
+                label: "Studies & funded replay",
+                onSelect: () => setDrawer("tools"),
+              },
+            ]}
+          />
+        </div>
+      </div>
+      {automation.error && <p className="error-banner">{automation.error}</p>}
+      {error && <p className="error-banner">{error}</p>}
+      <NowRunning automation={automation} />
+      <AutomationEvidence
+        automation={automation}
+        qualified={qualified}
+        results={resultGroups.length}
+        onOpenDiagnostics={() => setDrawer("diagnostics")}
+        onOpenSettings={() => setDrawer("settings")}
+        onOpenUniverse={onOpenUniverse}
+      />
+      <section className="tw:mb-4" aria-label="Results">
+        <SectionHead title="Results">
+          Latest replay per strategy · slippage and fees included
+        </SectionHead>
+        <div className={CARD}>
+          {resultGroups.length ? (
+            <ResultsTable
+              groups={resultGroups}
+              rerunning={rerunning}
+              expanded={expanded}
+              onToggle={(key) =>
+                setExpanded((current) => (current === key ? null : key))
+              }
+              onOpenFull={(run) => void open(run)}
+            />
+          ) : (
+            <p className="tw:m-0 tw:px-[22px] tw:py-6 tw:text-center tw:text-[0.84rem] tw:text-ink-400">
+              No backtest results yet.
+            </p>
+          )}
+        </div>
+      </section>
+      <p className="tw:m-0 tw:mb-6 tw:flex tw:flex-wrap tw:justify-between tw:gap-3 tw:text-[0.75rem] tw:text-ink-500">
+        <span>
+          Simulated on captured quotes · nothing here activates a strategy
+        </span>
         <button
           type="button"
-          className={AUTOMATION_SECONDARY}
-          onClick={() => setManualOpen(true)}
+          className={LINK_BUTTON}
+          onClick={() => setDrawer("history")}
         >
-          Manual replay
+          All {historyRuns.length} attempts
         </button>
-      </div>
-      {pageTab === "overview" && (
-        <>
-          <BacktestAutomationPanel
-            marketId={marketId}
-            onRefreshed={() => void refreshRuns()}
-            onStatusChange={setAutomationStatus}
-            onOpenUniverse={onOpenUniverse}
-          />
-          <Panel as="section" className="results-list results-preview tw:mb-4">
-            <PanelHeader
-              title="Latest results"
-              description="Most recent result per configuration."
-              actions={
-                <Button variant="primary" onClick={() => setPageTab("results")}>
-                  View all results
-                </Button>
-              }
-            />
-            {resultGroups.slice(0, 4).map((group, index, shown) => (
-              <ResultRow
-                key={group.key}
-                title={group.title}
-                run={group.latest}
-                selected={selected?.id === group.latest.id}
-                checked={false}
-                selectable={false}
-                tone={index === shown.length - 1 ? "grouped" : "standard"}
-                onToggle={() => undefined}
-                onOpen={() => void open(group.latest)}
-              />
-            ))}
-            {!resultGroups.length && (
-              <div className="empty">No results yet.</div>
-            )}
-          </Panel>
-        </>
-      )}
-      {pageTab === "results" && (
-        <Panel as="section" className="results-list tw:mb-4">
-          <PanelHeader
-            title="Latest results"
-            description="Latest run per configuration. Older attempts stay available for audit and controlled comparison."
-            actions={
-              <Button
-                variant="primary"
-                disabled={comparisonIds.length < 2}
-                onClick={() => void compare()}
-              >
-                COMPARE · {comparisonIds.length}
-              </Button>
-            }
-          />
-          <div
-            className={classes(
-              "results-head",
-              RESULTS_GRID,
-              "tw:border-b tw:border-line tw:px-[18px] tw:py-2 tw:font-mono tw:text-[0.62rem] tw:font-bold tw:tracking-[0.08em] tw:uppercase tw:text-ink-350 tw:below-1100:hidden",
-            )}
-            aria-hidden="true"
-          >
-            <span />
-            <span>Configuration</span>
-            <span>Execution</span>
-            <span>Evidence</span>
-            <span>Coverage</span>
-            <span>Outcome</span>
-          </div>
-          {resultGroups.map((group) => (
-            <div
-              className="result-group tw:border-b tw:border-line-subtle"
-              key={group.key}
-            >
-              <ResultRow
-                title={group.title}
-                run={group.latest}
-                selected={selected?.id === group.latest.id}
-                checked={comparisonIds.includes(group.latest.id)}
-                tone="grouped"
-                onToggle={() => toggle(group.latest.id)}
-                onOpen={() => void open(group.latest)}
-              />
-              {group.older.length > 0 && (
-                <details className="result-history tw:pt-0 tw:pr-[18px] tw:pb-[10px] tw:pl-[50px]">
-                  <summary className="tw:w-max tw:cursor-pointer tw:px-0 tw:py-[6px] tw:font-mono tw:text-[0.62rem] tw:font-bold tw:tracking-[0.05em] tw:text-ink-350">
-                    {group.older.length} older{" "}
-                    {group.older.length === 1 ? "attempt" : "attempts"}
-                  </summary>
-                  {group.older.map((run) => (
-                    <ResultRow
-                      key={run.id}
-                      title={group.title}
-                      run={run}
-                      selected={selected?.id === run.id}
-                      checked={comparisonIds.includes(run.id)}
-                      tone="nested"
-                      onToggle={() => toggle(run.id)}
-                      onOpen={() => void open(run)}
-                    />
-                  ))}
-                </details>
-              )}
-            </div>
-          ))}
-          {!runs.length && <div className="empty">No backtest runs yet.</div>}
-        </Panel>
-      )}
-      {pageTab === "history" && (
-        <Panel as="section" className="history-list tw:mb-4">
-          <PanelHeader
-            title="Run history"
-            description="All attempts, superseded runs, failures and provenance. Raw diagnostics stay with each run."
-            actions={<PanelMeta>{historyRuns.length} attempts</PanelMeta>}
-          />
-          {historyRuns.map((run) => (
-            <HistoryRow
-              key={run.id}
-              run={run}
-              work={workByRunId.get(run.id)}
-              selected={selected?.id === run.id}
-              onOpen={() => void open(run)}
-            />
-          ))}
-          {!historyRuns.length && (
-            <div className="empty">No backtest runs recorded yet.</div>
-          )}
-        </Panel>
-      )}
-      {selected && (
-        <ResultDetail
-          run={selected}
-          work={selectedWork}
-          tab={detailTab}
-          onTabChange={setDetailTab}
-          onClose={() => setSelected(undefined)}
-        />
-      )}
-      <details className="backtest-collapsible tw:group tw:mx-0 tw:mt-[18px] tw:mb-4">
-        <summary className="tw:cursor-pointer tw:rounded-panel tw:border tw:border-line tw:bg-surface tw:px-[18px] tw:py-[13px] tw:font-mono tw:text-[0.66rem] tw:font-bold tw:tracking-[0.07em] tw:text-ink-400 tw:group-open:rounded-b-none">
-          Study authorization &amp; frozen plan (expert)
-        </summary>
-        <StrategyStudyPanel marketId={marketId} />
-      </details>
-      <FundedReplayPanel marketId={marketId} />
-      {error && <p className="error-banner">{error}</p>}
-      {comparison && (
-        <section
-          className={classes(
-            "comparison-note tw:mb-4 tw:flex tw:gap-[14px] tw:rounded-[9px] tw:border tw:px-[17px] tw:py-[13px] tw:text-[0.76rem] tw:text-ink-450",
-            comparison.comparable
-              ? "tw:border-line-accent tw:bg-surface-raised"
-              : "tw:border-line-warn-strong tw:bg-surface-warn",
-          )}
-        >
-          <strong>
-            {comparison.comparable
-              ? "Controlled comparison"
-              : "Comparison needs caution"}
-          </strong>
-          <span>
-            {comparison.comparable
-              ? "Dates, universe, source, sizing, slippage, and fees match."
-              : `Different: ${comparison.differences.join(", ")}.`}
-          </span>
-        </section>
-      )}
+      </p>
       <Drawer
-        open={manualOpen}
-        onClose={() => setManualOpen(false)}
+        open={drawer === "result" && Boolean(selected)}
+        onClose={() => setDrawer(null)}
+        title={selected ? runDisplayName(selected) : "Result"}
+        size="wide"
+      >
+        {selected && (
+          <ResultDetail
+            run={selected}
+            work={selectedWork}
+            tab={detailTab}
+            onTabChange={setDetailTab}
+          />
+        )}
+      </Drawer>
+      <Drawer
+        open={drawer === "history"}
+        onClose={() => setDrawer(null)}
+        title="Run history"
+        size="wide"
+      >
+        <div className="tw:mb-3 tw:flex tw:flex-wrap tw:items-center tw:justify-between tw:gap-3">
+          <p className="tw:m-0 tw:text-[0.78rem] tw:text-ink-350">
+            {historyRuns.length} attempts, including superseded runs and
+            failures. Select two or more to compare.
+          </p>
+          <Button
+            variant="primary"
+            disabled={comparisonIds.length < 2}
+            onClick={() => void compare()}
+          >
+            COMPARE · {comparisonIds.length}
+          </Button>
+        </div>
+        {comparison && (
+          <section
+            className={classes(
+              "comparison-note tw:mb-4 tw:flex tw:gap-[14px] tw:rounded-[9px] tw:border tw:px-[17px] tw:py-[13px] tw:text-[0.76rem] tw:text-ink-450",
+              comparison.comparable
+                ? "tw:border-line-accent tw:bg-surface-raised"
+                : "tw:border-line-warn-strong tw:bg-surface-warn",
+            )}
+          >
+            <strong>
+              {comparison.comparable
+                ? "Controlled comparison"
+                : "Comparison needs caution"}
+            </strong>
+            <span>
+              {comparison.comparable
+                ? "Dates, universe, source, sizing, slippage, and fees match."
+                : `Different: ${comparison.differences.join(", ")}.`}
+            </span>
+          </section>
+        )}
+        {historyRuns.length > 0 ? (
+          <div
+            className="history-scroll-container"
+            role="region"
+            aria-label="Run history list"
+          >
+            {historyRuns.map((run) => (
+              <div
+                className="tw:grid tw:grid-cols-[20px_minmax(0,1fr)] tw:items-start tw:gap-2"
+                key={run.id}
+              >
+                <input
+                  type="checkbox"
+                  className="tw:mt-[17px]"
+                  checked={comparisonIds.includes(run.id)}
+                  onChange={() => toggle(run.id)}
+                  aria-label={`Compare ${run.name}`}
+                />
+                <HistoryRow
+                  run={run}
+                  work={workByRunId.get(run.id)}
+                  selected={selected?.id === run.id}
+                  onOpen={() => void open(run)}
+                />
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="empty">No backtest runs recorded yet.</div>
+        )}
+      </Drawer>
+      <Drawer
+        open={drawer === "manual"}
+        onClose={() => setDrawer(null)}
         title="Manual replay"
       >
         {manualForm}
+      </Drawer>
+      <Drawer
+        open={drawer === "settings"}
+        onClose={() => setDrawer(null)}
+        title="Automation settings"
+      >
+        <AutomationSettings automation={automation} />
+      </Drawer>
+      <Drawer
+        open={drawer === "imports"}
+        onClose={() => setDrawer(null)}
+        title="Historical import progress"
+        size="wide"
+      >
+        {drawer === "imports" && <HistoricalImportProgress />}
+      </Drawer>
+      <Drawer
+        open={drawer === "diagnostics"}
+        onClose={() => setDrawer(null)}
+        title="Automation diagnostics"
+        size="wide"
+      >
+        <AutomationDiagnostics automation={automation} />
+      </Drawer>
+      <Drawer
+        open={drawer === "tools"}
+        onClose={() => setDrawer(null)}
+        title="Studies & funded replay"
+        size="wide"
+      >
+        <SignalModelResearchStatusPanel marketId={marketId} />
+        <details className="backtest-collapsible tw:border-b tw:border-line-subtle">
+          <summary className="tw:cursor-pointer tw:px-2 tw:py-3 tw:text-[0.82rem] tw:font-semibold tw:text-ink-150">
+            Study authorization &amp; frozen plan (expert)
+          </summary>
+          <StrategyStudyPanel marketId={marketId} />
+        </details>
+        <details className="backtest-collapsible">
+          <summary className="tw:cursor-pointer tw:px-2 tw:py-3 tw:text-[0.82rem] tw:font-semibold tw:text-ink-150">
+            Funded portfolio replay
+          </summary>
+          <FundedReplayPanel marketId={marketId} />
+        </details>
       </Drawer>
     </>
   );

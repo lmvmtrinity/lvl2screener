@@ -15,6 +15,13 @@ export interface AuthSession {
   refreshToken: string;
   expiresAt: Date;
   apiServer: URL;
+  /**
+   * Non-secret in-memory session generation. Each successful token rotation
+   * increments it. Diagnostics may log this number with a refresh disposition
+   * (JOINED_REFRESH, REUSED_NEWER_SESSION, STARTED_REFRESH) but must never
+   * log access or refresh tokens.
+   */
+  generation: number;
 }
 
 export interface RawSymbol {
@@ -33,6 +40,32 @@ export interface RawSymbolDetail {
   symbolId: number;
   marketCap: number | null;
   industrySector: string | null;
+  /** Optional listing snapshot fields; absent from fixtures that predate them. */
+  prevDayClosePrice?: number | null;
+  averageVol3Months?: number | null;
+  averageVol20Days?: number | null;
+  securityType?: string | null;
+  listingExchange?: string | null;
+  currency?: string | null;
+  description?: string | null;
+  isTradable?: boolean | null;
+  isQuotable?: boolean | null;
+}
+
+/** Listing snapshot used by the pre-market daily seed. */
+export interface SymbolSnapshot {
+  symbol: string;
+  symbolId: number;
+  marketCap: number | null;
+  prevDayClosePrice: number | null;
+  averageVol3Months: number | null;
+  averageVol20Days: number | null;
+  securityType: string | null;
+  listingExchange: string | null;
+  currency: string | null;
+  description: string | null;
+  isTradable: boolean | null;
+  isQuotable: boolean | null;
 }
 
 export interface InstrumentFundamentals {

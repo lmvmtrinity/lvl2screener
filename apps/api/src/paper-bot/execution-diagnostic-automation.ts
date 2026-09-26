@@ -26,11 +26,22 @@ type EligibleRun = { runId: string };
 
 const DIAGNOSTIC_REPORT_VERSION = "execution-diagnostics-v2";
 const SOURCE_REVISION_STATEMENT_TIMEOUT_MS = 120_000;
+/** The worker evidence loop runs at the research-job poll cadence (2 s by default), but
+ * completed-run sources change only at completion or late processing. After a pass
+ * dispatches nothing, the next probe for that market waits at least this long. */
+const DEFAULT_IDLE_PROBE_INTERVAL_MS = 30_000;
 
 /** Cheap eligibility scan: completed runs with no diagnostics job for this report version, or
  * runs whose retained boundary evidence changed after the newest matching job was created.
- * This keeps the expensive source-revision digest off the steady-state poll path. */
-const ELIGIBLE_SOURCES_SQL = `
+ * This keeps the expensive source-revision digest off the steady-state poll path. The
+ * processed-fact branch is served by `paper_funded_fact_processed_revision_idx`
+ * (migration 146), whose `processed_at IS NOT NULL` predicate is implied by the strict
+ * comparison, so an unchanged completed run costs an empty range probe rather than a
+ * filter over its whole retained history. `fact_at` is NOT NULL, so `(... ) IS TRUE` is the
+ * same boundary predicate; it is written that way only so the planner cannot use it as an
+ * index condition on the (run_id, fact_at) index, whose estimate otherwise ties with the
+ * processed-time index for these generic parameters. */
+export const ELIGIBLE_SOURCES_SQL = `
   WITH candidates AS (
     SELECT b.run_id,b.account_id,s.boundary_at,
            (SELECT max(j.created_at) FROM research_job j
@@ -46,8 +57,8 @@ const ELIGIBLE_SOURCES_SQL = `
    WHERE c.last_job_at IS NULL
       OR EXISTS (
            SELECT 1 FROM paper_funded_fact f
-            WHERE f.run_id=c.run_id AND f.fact_at<=c.boundary_at
-              AND f.processed_at>c.last_job_at)
+            WHERE f.run_id=c.run_id AND f.processed_at>c.last_job_at
+              AND (f.fact_at<=c.boundary_at) IS TRUE)
       OR EXISTS (
            SELECT 1 FROM paper_funded_event e
             WHERE e.account_id=c.account_id AND e.recorded_at>c.last_job_at
@@ -98,14 +109,33 @@ const SOURCE_REVISION_SQL = `
  * hint; the snapshot and evidence-work identity make this restart-safe and independent of the
  * settlement transaction. */
 export class ExecutionDiagnosticAutomation {
+  private readonly idleUntil = new Map<MarketId, number>();
+
   constructor(
     private readonly pool: Pool,
     private readonly evidence: PostgresEvidenceAutomationRepository,
     private readonly jobs: ResearchJobRepository,
     private readonly clock: () => Date = () => new Date(),
+    private readonly idleProbeIntervalMs = DEFAULT_IDLE_PROBE_INTERVAL_MS,
   ) {}
 
+  /** Bounded poll: after a pass dispatches nothing, the market is not probed again until
+   * the idle interval elapses. A failed pass throws before backing off, so it retries on
+   * the next worker cycle. */
   async catchUp(marketId: MarketId, limit = 100): Promise<number> {
+    const now = this.clock().getTime();
+    if (now < (this.idleUntil.get(marketId) ?? 0)) return 0;
+    const dispatched = await this.dispatchEligible(marketId, limit);
+    if (dispatched === 0)
+      this.idleUntil.set(marketId, now + this.idleProbeIntervalMs);
+    else this.idleUntil.delete(marketId);
+    return dispatched;
+  }
+
+  private async dispatchEligible(
+    marketId: MarketId,
+    limit: number,
+  ): Promise<number> {
     const eligible = await this.pool.query<EligibleRun>(ELIGIBLE_SOURCES_SQL, [
       marketId,
       limit,

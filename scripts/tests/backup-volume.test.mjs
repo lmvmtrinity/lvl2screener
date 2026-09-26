@@ -180,6 +180,22 @@ async function main() {
 
     const seeded = await psql(`
       CREATE EXTENSION timescaledb;
+      CREATE TABLE instrument (
+        id integer PRIMARY KEY
+      );
+      INSERT INTO instrument VALUES (1), (2);
+      CREATE TABLE candle (
+        instrument_id integer NOT NULL,
+        ts timestamptz NOT NULL,
+        close_value integer,
+        PRIMARY KEY (instrument_id, ts),
+        CONSTRAINT candle_instrument_id_fkey
+          FOREIGN KEY (instrument_id) REFERENCES instrument(id)
+      );
+      SELECT create_hypertable('candle', by_range('ts'));
+      INSERT INTO candle VALUES
+        (1, '2026-08-31 13:32:45+00', 7),
+        (2, '2026-01-05 15:00:00+00', 3);
       CREATE TABLE feature (
         id integer NOT NULL,
         ts timestamptz NOT NULL,
@@ -255,12 +271,13 @@ async function main() {
     const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
     assert(manifest.schemaVersion === 2, "manifest is not schemaVersion 2");
     assert(
-      Array.isArray(manifest.hypertables) && manifest.hypertables.length === 1,
-      "manifest did not capture the registered hypertable",
+      Array.isArray(manifest.hypertables) && manifest.hypertables.length === 2,
+      "manifest did not capture both registered hypertables",
     );
     assert(
-      manifest.foreignKeys.some((value) => value.validated === true),
-      "manifest did not capture a validated foreign key",
+      manifest.foreignKeys.filter((value) => value.validated === true).length >=
+        2,
+      "manifest did not capture both validated foreign keys",
     );
     assert(
       manifest.jobs.some((value) => value.procName === "policy_retention"),

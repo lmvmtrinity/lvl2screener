@@ -1,4 +1,4 @@
-from typing import Literal
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
@@ -71,6 +71,11 @@ class EntryWindow(CamelModel):
 
 
 class StrategyParameters(CamelModel):
+    #: Opt-in entry filters; disabled defaults preserve legacy READY transitions.
+    latest_ready_time: str | None = Field(default=None, alias="latestReadyTime", pattern=r"^(?:[01]\d|2[0-3]):[0-5]\d$")
+    max_vwap_distance_atr: float = Field(default=0, ge=0, le=20, alias="maxVwapDistanceAtr")
+    max_change_from_open_atr: float = Field(default=0, ge=0, le=20, alias="maxChangeFromOpenAtr")
+    min_sector_relative_strength_pct: float = Field(default=0, ge=0, le=20, alias="minSectorRelativeStrengthPct")
     rvol_at_time_min: float = Field(default=1.5, ge=0, le=20, alias="rvolAtTimeMin")
     spread_hard_max_pct: float = Field(default=0.25, gt=0, le=5, alias="spreadHardMaxPct")
     atr_pct_min: float = Field(default=0, ge=0, le=20, alias="atrPctMin")
@@ -113,6 +118,25 @@ class StrategyParameters(CamelModel):
     rsi_divergence_min_points: float = Field(default=3, ge=0, le=100, alias="rsiDivergenceMinPoints")
     rsi_divergence_volume_contraction_max_ratio: float = Field(default=0.8, gt=0, le=1, alias="rsiDivergenceVolumeContractionMaxRatio")
     rsi_setup_timeout_minutes: int = Field(default=30, ge=5, le=120, alias="rsiSetupTimeoutMinutes")
+    #: Spread stabilization. The defaults act on the first quote above the hard
+    #: maximum, with no recovery band and no tick floor, which is the historical gate.
+    #: Consecutive quotes above the limit before the gate blocks the setup.
+    spread_confirm_quotes: int = Field(default=1, ge=1, le=20, alias="spreadConfirmQuotes")
+    #: Seconds the spread must stay above the limit before the gate blocks the setup.
+    spread_confirm_seconds: float = Field(default=0, ge=0, le=120, alias="spreadConfirmSeconds")
+    #: After a block, the spread must fall to this percent of the limit before the setup re-arms.
+    spread_recovery_pct: float = Field(default=100, ge=50, le=100, alias="spreadRecoveryPct")
+    #: Minimum allowed spread in price ticks, so a low-priced symbol is not gated by tick size.
+    spread_min_ticks: int = Field(default=0, ge=0, le=10, alias="spreadMinTicks")
+    #: Trade reference floors. Zero keeps the structural stop and the nearest
+    #: resistance target exactly as before.
+    #: Minimum stop distance as a fraction of the daily ATR(14).
+    stop_min_atr_fraction: float = Field(default=0, ge=0, le=1, alias="stopMinAtrFraction")
+    #: Minimum stop distance as a multiple of the quoted spread.
+    stop_min_spreads: float = Field(default=0, ge=0, le=20, alias="stopMinSpreads")
+    #: Minimum target distance in multiples of the (floored) stop risk. The nearest
+    #: resistance is kept when it is at least this far; otherwise the target is raised to it.
+    target_min_r: float = Field(default=0, ge=0, le=5, alias="targetMinR")
     #: Optional explanatory/experimental prior-day trend filter; zero is legacy behavior.
     daily_ema_filter_enabled: int = Field(default=0, ge=0, le=1, alias="dailyEmaFilterEnabled")
     #: Stop selection policy: HYBRID (max of pattern and support), PATTERN_INVALIDATION, or NEAREST_SUPPORT.
@@ -208,6 +232,17 @@ class InstrumentWarmup(CamelModel):
     instrument: InstrumentRef
     candles: list[CandleRecord] = Field(default_factory=list)
     as_of: AwareDatetime = Field(alias="asOf")
+
+
+class InstrumentRetirement(CamelModel):
+    """Remove candidates from a live session without resetting other strategy state."""
+
+    market_id: MarketId = Field(default="CA_TSX", alias="marketId")
+    instrument_ids: list[UUID] = Field(alias="instrumentIds", min_length=1, max_length=200)
+
+
+class InstrumentRetirementResult(CamelModel):
+    retired: list[UUID]
 
 
 class InstrumentWarmupReadiness(CamelModel):
@@ -466,6 +501,15 @@ class BacktestParameters(StrategyParameters):
     pass
 
 
+class BacktestEconomics(CamelModel):
+    """Paper-bot entry economics (apps/api/src/paper-bot/economics.ts) applied to replay fills."""
+
+    min_net_reward_risk: float = Field(ge=0, alias="minNetRewardRisk")
+    min_stop_friction_multiple: float = Field(ge=0, alias="minStopFrictionMultiple")
+    min_target_friction_multiple: float = Field(ge=0, alias="minTargetFrictionMultiple")
+    max_spread_pct: float = Field(gt=0, alias="maxSpreadPct")
+
+
 class BacktestAssumptions(CamelModel):
     starting_capital: float = Field(gt=0, alias="startingCapital")
     position_size: float = Field(gt=0, alias="positionSize")
@@ -474,6 +518,8 @@ class BacktestAssumptions(CamelModel):
     stop_method: Literal["STRUCTURAL", "ATR"] = Field(default="STRUCTURAL", alias="stopMethod")
     atr_stop_multiple: float = Field(default=1, gt=0, le=10, alias="atrStopMultiple")
     reward_risk_ratio: float | None = Field(default=None, gt=0, le=20, alias="rewardRiskRatio")
+    #: Absent keeps every earlier replay's behavior: only a positive target is required.
+    economics: BacktestEconomics | None = None
 
 
 class BacktestSession(CamelModel):
@@ -662,6 +708,26 @@ class EngineResultBatch(FeatureSnapshotBatch):
     benchmark_readiness: BenchmarkReadiness = Field(alias="benchmarkReadiness")
     timings: EngineTimings = Field(default_factory=EngineTimings)
 
+    def live_transport(self) -> dict[str, Any]:
+        """Share each live feature once; keep complete event envelopes for durable evidence."""
+        payload = self.model_dump(mode="json", by_alias=True)
+        snapshot_keys = {
+            (item["marketId"], item["instrumentId"], item["timestamp"], item["featureVersion"])
+            for item in payload["snapshots"]
+        }
+        for collection in ("evaluations", "contexts"):
+            for item in payload[collection]:
+                snapshot = item.pop("featureSnapshot")
+                key = (snapshot["marketId"], snapshot["instrumentId"], snapshot["timestamp"], snapshot["featureVersion"])
+                if key not in snapshot_keys:
+                    # Only a result whose snapshot is not already listed adds
+                    # one; candidate order is otherwise unchanged.
+                    payload["snapshots"].append(snapshot)
+                    snapshot_keys.add(key)
+                item["featureVersion"] = snapshot["featureVersion"]
+                item["featureTimestamp"] = snapshot["timestamp"]
+        return payload
+
 
 class BacktestDataQuality(CamelModel):
     quote_snapshots: int = Field(alias="quoteSnapshots")
@@ -678,6 +744,7 @@ class BacktestSignalReplayResult(CamelModel):
 
 
 class BacktestReplayResult(CamelModel):
+    entry_filter_diagnostics: dict[str, dict[str, dict[str, int]]] = Field(default_factory=dict, alias="entryFilterDiagnostics")
     metrics: BacktestMetrics
     analyses: list[BacktestSlice]
     trades: list[BacktestTrade]
@@ -694,6 +761,27 @@ class StatisticalTrainingRequest(CamelModel):
     l2_penalty: float = Field(default=0.1, ge=0, le=100, alias="l2Penalty")
     training_source_keys: list[str] | None = Field(default=None, alias="trainingSourceKeys")
     testing_source_keys: list[str] | None = Field(default=None, alias="testingSourceKeys")
+
+
+class SignalModelResearchTrainingExample(CamelModel):
+    """Minimal, exact capture-derived supervision used only by inactive research."""
+
+    source_key: str = Field(alias="sourceKey", min_length=1, max_length=200)
+    strategy: SetupStrategyName
+    entry_time: AwareDatetime = Field(alias="entryTime")
+    score: int = Field(ge=0, le=100)
+    atr_pct: float | None = Field(alias="atrPct")
+    rvol_at_time: float | None = Field(alias="rvolAtTime")
+    r_multiple: float = Field(alias="rMultiple")
+
+
+class SignalModelResearchTrainingRequest(CamelModel):
+    source_kind: Literal["CAPTURED_BACKTEST_RESEARCH"] = Field(alias="sourceKind")
+    market_id: Literal["CA_TSX", "US_EQUITIES"] = Field(alias="marketId")
+    strategy: SetupStrategyName
+    training_rows: list[SignalModelResearchTrainingExample] = Field(alias="trainingRows", min_length=1, max_length=100_000)
+    minimum_samples: int = Field(default=200, ge=20, le=100_000, alias="minimumSamples")
+    l2_penalty: float = Field(default=0.1, ge=0, le=100, alias="l2Penalty")
 
 
 class StatisticalDatasetMetrics(CamelModel):

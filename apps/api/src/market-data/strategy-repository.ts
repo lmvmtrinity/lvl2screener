@@ -8,6 +8,11 @@ import type { PersistenceMetrics } from "../observability/persistence-metrics.js
 import { chunkRows, countUpsertOutcome } from "./batch-utils.js";
 
 export interface StrategySignalStore {
+  planPersistence?(
+    evaluations: StrategyEvaluation[],
+    events: StrategyStateEvent[],
+    contexts: ContextEvaluation[],
+  ): { evaluations: StrategyEvaluation[]; contexts: ContextEvaluation[] };
   saveStrategyResults(
     evaluations: StrategyEvaluation[],
     events: StrategyStateEvent[],
@@ -22,10 +27,53 @@ const EVENT_CHUNK_SIZE = 1000;
 const CONTEXT_CHUNK_SIZE = 500;
 
 export class PostgresStrategySignalStore implements StrategySignalStore {
+  private readonly previousEvaluations = new Map<
+    string,
+    { decision: string; at: number }
+  >();
+  private readonly previousSignalStates = new Map<
+    string,
+    { state: string; at: number }
+  >();
+  private readonly previousContexts = new Map<
+    string,
+    { decision: string; at: number }
+  >();
   constructor(
     private readonly pool: Pool,
     private readonly metrics?: PersistenceMetrics,
+    private readonly heartbeatMs = 60_000,
   ) {}
+
+  planPersistence(
+    evaluations: StrategyEvaluation[],
+    events: StrategyStateEvent[],
+    contexts: ContextEvaluation[],
+  ): { evaluations: StrategyEvaluation[]; contexts: ContextEvaluation[] } {
+    const eventKeys = new Set(events.map((event) => evaluationKey(event)));
+    return {
+      evaluations: evaluations.filter((value) => {
+        const previous = this.previousEvaluations.get(evaluationKey(value));
+        return (
+          eventKeys.has(evaluationKey(value)) ||
+          shouldPersist(
+            previous,
+            evaluationDecision(value),
+            value.timestamp,
+            this.heartbeatMs,
+          )
+        );
+      }),
+      contexts: contexts.filter((value) =>
+        shouldPersist(
+          this.previousContexts.get(contextKey(value)),
+          contextDecision(value),
+          value.timestamp,
+          this.heartbeatMs,
+        ),
+      ),
+    };
+  }
 
   /** Persists one cycle's worth of setup evaluations/signals, state-change events, and context
    *  evaluations in a single transaction with set-based bulk statements -- no per-row round trips.
@@ -61,6 +109,21 @@ export class PostgresStrategySignalStore implements StrategySignalStore {
       const eventOutcome = await this.saveEvents(client, events);
       const contextOutcome = await this.saveContexts(client, contexts);
       await client.query("COMMIT");
+      for (const value of evaluations) {
+        const next = { state: value.state, at: Date.parse(value.timestamp) };
+        this.previousEvaluations.set(evaluationKey(value), {
+          decision: evaluationDecision(value),
+          at: next.at,
+        });
+        const key = signalKey(value);
+        if (next.at >= (this.previousSignalStates.get(key)?.at ?? -Infinity))
+          this.previousSignalStates.set(key, next);
+      }
+      for (const value of contexts)
+        this.previousContexts.set(contextKey(value), {
+          decision: contextDecision(value),
+          at: Date.parse(value.timestamp),
+        });
       const latencyMs = Math.round((performance.now() - started) * 100) / 100;
       this.metrics?.record(
         "strategy_signal",
@@ -124,16 +187,21 @@ export class PostgresStrategySignalStore implements StrategySignalStore {
     const signal = { written: 0, conflicts: 0 };
     const evaluation = { written: 0, conflicts: 0 };
     for (const chunk of chunkRows(evaluations, EVALUATION_CHUNK_SIZE)) {
-      const rows = chunk.map(toEvaluationRow);
+      const [firstTimestamp, lastTimestamp] = timestampBounds(chunk);
+      const rows = chunk.map((value) => ({
+        ...toEvaluationRow(value),
+        previous_state:
+          this.previousSignalStates.get(signalKey(value))?.state ?? null,
+      }));
       const payload = JSON.stringify(rows);
 
       const signalResult = await client.query<{ inserted: boolean }>(
         `WITH input AS (
            SELECT * FROM jsonb_to_recordset($1::jsonb) AS t(
              market_id text, instrument_id uuid, profile_id uuid, strategy_name text, strategy_version text,
-             config_version text, ts timestamptz, state text, score integer,
+             config_version text, ts timestamptz, state text, previous_state text, score integer,
              entry_reference numeric, stop_reference numeric, target_reference numeric,
-             estimated_rr numeric, feature_snapshot_json jsonb, reason_codes jsonb,
+             estimated_rr numeric, reason_codes jsonb,
              feature_version text, score_version text, score_components jsonb,
              setup_instance_id uuid, formation_evidence jsonb
            )
@@ -144,26 +212,27 @@ export class PostgresStrategySignalStore implements StrategySignalStore {
            FROM input i
            LEFT JOIN LATERAL (
              SELECT state FROM strategy_signal s2
-             WHERE s2.market_id=i.market_id AND s2.instrument_id = i.instrument_id AND s2.profile_id = i.profile_id
+             WHERE i.previous_state IS NULL AND s2.market_id=i.market_id AND s2.instrument_id = i.instrument_id AND s2.profile_id = i.profile_id
              ORDER BY s2.timestamp DESC LIMIT 1
            ) s ON TRUE
          )
          INSERT INTO strategy_signal (
            market_id, instrument_id, profile_id, strategy_name, strategy_version, config_version, timestamp,
            previous_state, state, score, entry_reference, stop_reference, target_reference,
-           estimated_rr, feature_snapshot_id, feature_snapshot_json, reason_codes, score_version,
+           estimated_rr, feature_snapshot_id, reason_codes, score_version,
            score_components, setup_instance_id, formation_evidence
          )
          SELECT i.market_id, i.instrument_id, i.profile_id, i.strategy_name, i.strategy_version,
-                i.config_version, i.ts, COALESCE(p.state, 'INACTIVE'), i.state, i.score,
-                i.entry_reference, i.stop_reference, i.target_reference, i.estimated_rr,
-                fs.id, i.feature_snapshot_json, i.reason_codes, i.score_version,
-                i.score_components, i.setup_instance_id, i.formation_evidence
+               i.config_version, i.ts, COALESCE(i.previous_state, p.state, 'INACTIVE'), i.state, i.score,
+               i.entry_reference, i.stop_reference, i.target_reference, i.estimated_rr,
+               fs.id, i.reason_codes, i.score_version,
+               i.score_components, i.setup_instance_id, i.formation_evidence
          FROM input i
          JOIN prev p ON p.instrument_id = i.instrument_id
            AND p.profile_id IS NOT DISTINCT FROM i.profile_id
          JOIN feature_snapshot fs ON fs.instrument_id = i.instrument_id
            AND fs.market_id = i.market_id AND fs.timestamp = i.ts AND fs.feature_version = i.feature_version
+           AND fs.timestamp BETWEEN $2::timestamptz AND $3::timestamptz
          ON CONFLICT (profile_id, instrument_id, timestamp) WHERE profile_id IS NOT NULL DO UPDATE SET
            strategy_name = EXCLUDED.strategy_name,
            strategy_version = EXCLUDED.strategy_version,
@@ -176,7 +245,6 @@ export class PostgresStrategySignalStore implements StrategySignalStore {
            target_reference = EXCLUDED.target_reference,
            estimated_rr = EXCLUDED.estimated_rr,
            feature_snapshot_id = EXCLUDED.feature_snapshot_id,
-           feature_snapshot_json = EXCLUDED.feature_snapshot_json,
            reason_codes = EXCLUDED.reason_codes,
            score_version = EXCLUDED.score_version,
            score_components = EXCLUDED.score_components,
@@ -184,9 +252,13 @@ export class PostgresStrategySignalStore implements StrategySignalStore {
            formation_evidence = EXCLUDED.formation_evidence,
            updated_at = now()
          RETURNING (xmax = 0) AS inserted`,
-        [payload],
+        [payload, firstTimestamp, lastTimestamp],
       );
       const signalOutcome = countUpsertOutcome(signalResult.rows);
+      if (signalResult.rows.length !== chunk.length)
+        throw new Error(
+          "Strategy signal persistence did not match every input evaluation",
+        );
       signal.written += signalOutcome.written;
       signal.conflicts += signalOutcome.conflicts;
 
@@ -194,7 +266,7 @@ export class PostgresStrategySignalStore implements StrategySignalStore {
         `WITH input AS (
            SELECT * FROM jsonb_to_recordset($1::jsonb) AS t(
              market_id text, instrument_id uuid, profile_id uuid, strategy_name text, strategy_version text,
-             config_version text, ts timestamptz, state text, score integer,
+             config_version text, ts timestamptz, state text, previous_state text, score integer,
              entry_reference numeric, stop_reference numeric, target_reference numeric,
              estimated_rr numeric, reason_codes jsonb, feature_version text, score_version text,
              score_components jsonb, score_explanation jsonb, setup_instance_id uuid,
@@ -207,7 +279,7 @@ export class PostgresStrategySignalStore implements StrategySignalStore {
            FROM input i
            LEFT JOIN LATERAL (
              SELECT state FROM strategy_evaluation e2
-             WHERE e2.market_id=i.market_id AND e2.profile_id = i.profile_id AND e2.instrument_id = i.instrument_id
+             WHERE i.previous_state IS NULL AND e2.market_id=i.market_id AND e2.profile_id = i.profile_id AND e2.instrument_id = i.instrument_id
              ORDER BY e2.timestamp DESC LIMIT 1
            ) e ON TRUE
          )
@@ -218,7 +290,7 @@ export class PostgresStrategySignalStore implements StrategySignalStore {
            score_components, score_explanation, setup_instance_id, formation_evidence
          )
          SELECT i.market_id, i.profile_id, i.instrument_id, fs.id, i.ts, i.strategy_name, i.strategy_version,
-                i.config_version, COALESCE(p.state, 'INACTIVE'), i.state, i.score,
+                i.config_version, COALESCE(i.previous_state, p.state, 'INACTIVE'), i.state, i.score,
                 i.entry_reference, i.stop_reference, i.target_reference, i.estimated_rr,
                 i.reason_codes, i.score_version, i.score_components, i.score_explanation,
                 i.setup_instance_id, i.formation_evidence
@@ -227,6 +299,7 @@ export class PostgresStrategySignalStore implements StrategySignalStore {
            AND p.profile_id IS NOT DISTINCT FROM i.profile_id
          JOIN feature_snapshot fs ON fs.instrument_id = i.instrument_id
            AND fs.market_id = i.market_id AND fs.timestamp = i.ts AND fs.feature_version = i.feature_version
+           AND fs.timestamp BETWEEN $2::timestamptz AND $3::timestamptz
          ON CONFLICT (profile_id, instrument_id, feature_snapshot_id) DO UPDATE SET
            strategy_key = EXCLUDED.strategy_key,
            strategy_version = EXCLUDED.strategy_version,
@@ -245,9 +318,13 @@ export class PostgresStrategySignalStore implements StrategySignalStore {
            setup_instance_id = EXCLUDED.setup_instance_id,
            formation_evidence = EXCLUDED.formation_evidence
          RETURNING (xmax = 0) AS inserted`,
-        [payload],
+        [payload, firstTimestamp, lastTimestamp],
       );
       const evaluationOutcome = countUpsertOutcome(evaluationResult.rows);
+      if (evaluationResult.rows.length !== chunk.length)
+        throw new Error(
+          "Strategy evaluation persistence did not match every input evaluation",
+        );
       evaluation.written += evaluationOutcome.written;
       evaluation.conflicts += evaluationOutcome.conflicts;
     }
@@ -308,6 +385,19 @@ export class PostgresStrategySignalStore implements StrategySignalStore {
       // between the chunk size and the rows actually matched/returned.
       outcome.written += result.rows.length;
       outcome.conflicts += chunk.length - result.rows.length;
+      if (result.rows.length < chunk.length) {
+        const present = await client.query<{ id: string }>(
+          "SELECT id FROM strategy_state_event WHERE id = ANY($1::uuid[])",
+          [chunk.map((event) => event.eventId)],
+        );
+        if (
+          present.rows.length !==
+          new Set(chunk.map((event) => event.eventId)).size
+        )
+          throw new Error(
+            "Strategy state event persistence did not match every input event",
+          );
+      }
     }
     return outcome;
   }
@@ -319,6 +409,7 @@ export class PostgresStrategySignalStore implements StrategySignalStore {
     const outcome = { written: 0, conflicts: 0 };
     if (contexts.length === 0) return outcome;
     for (const chunk of chunkRows(contexts, CONTEXT_CHUNK_SIZE)) {
+      const [firstTimestamp, lastTimestamp] = timestampBounds(chunk);
       const result = await client.query<{ inserted: boolean }>(
         `WITH input AS (
            SELECT * FROM jsonb_to_recordset($1::jsonb) AS t(
@@ -343,6 +434,7 @@ export class PostgresStrategySignalStore implements StrategySignalStore {
          FROM input i
          JOIN feature_snapshot fs ON fs.instrument_id = i.instrument_id
            AND fs.market_id=i.market_id AND fs.timestamp = i.ts AND fs.feature_version = i.feature_version
+           AND fs.timestamp BETWEEN $2::timestamptz AND $3::timestamptz
          LEFT JOIN instrument bi ON upper(bi.symbol) = upper(i.benchmark_symbol)
          ON CONFLICT (profile_id, instrument_id, feature_snapshot_id) DO UPDATE SET
            signal_key = EXCLUDED.signal_key,
@@ -384,14 +476,70 @@ export class PostgresStrategySignalStore implements StrategySignalStore {
               feature_version: context.featureSnapshot.featureVersion,
             })),
           ),
+          firstTimestamp,
+          lastTimestamp,
         ],
       );
       const chunkOutcome = countUpsertOutcome(result.rows);
+      if (result.rows.length !== chunk.length)
+        throw new Error(
+          "Context persistence did not match every input evaluation",
+        );
       outcome.written += chunkOutcome.written;
       outcome.conflicts += chunkOutcome.conflicts;
     }
     return outcome;
   }
+}
+
+function evaluationKey(value: StrategyEvaluation | StrategyStateEvent): string {
+  return `${signalKey(value)}:${value.strategyVersion}:${value.configVersion}`;
+}
+
+function signalKey(value: StrategyEvaluation | StrategyStateEvent): string {
+  return `${value.marketId}:${value.instrumentId}:${value.profileId}`;
+}
+
+function contextKey(value: ContextEvaluation): string {
+  return `${value.marketId}:${value.instrumentId}:${value.profileId}:${value.signalVersion}:${value.configVersion}`;
+}
+
+/** Fields whose change is recorded immediately; everything else waits for the heartbeat. */
+function evaluationDecision(value: StrategyEvaluation): string {
+  return JSON.stringify([
+    value.state,
+    value.score,
+    value.setupInstanceId,
+    value.entryReference,
+    value.stopReference,
+    value.targetReference,
+  ]);
+}
+
+function contextDecision(value: ContextEvaluation): string {
+  return JSON.stringify([value.status, value.contextScore]);
+}
+
+function shouldPersist(
+  previous: { decision: string; at: number } | undefined,
+  decision: string,
+  timestamp: string,
+  heartbeatMs: number,
+): boolean {
+  const at = Date.parse(timestamp);
+  return (
+    heartbeatMs === 0 ||
+    !previous ||
+    previous.decision !== decision ||
+    !Number.isFinite(at) ||
+    at < previous.at ||
+    at - previous.at >= heartbeatMs
+  );
+}
+
+function timestampBounds(values: { timestamp: string }[]): [string, string] {
+  const timestamps = values.map((value) => value.timestamp).sort();
+  return [timestamps[0]!, timestamps[timestamps.length - 1]!];
 }
 
 function toEvaluationRow(value: StrategyEvaluation) {
@@ -409,7 +557,6 @@ function toEvaluationRow(value: StrategyEvaluation) {
     stop_reference: value.stopReference,
     target_reference: value.targetReference,
     estimated_rr: value.estimatedRr,
-    feature_snapshot_json: value.featureSnapshot,
     reason_codes: value.reasonCodes,
     feature_version: value.featureSnapshot.featureVersion,
     score_version: value.scoreVersion,

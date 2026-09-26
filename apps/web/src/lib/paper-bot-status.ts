@@ -63,6 +63,14 @@ function detailLines(paperBot: PaperBotStatus): string[] {
     );
   if (paperBot.fundedProcessing)
     lines.push("Funded recovery batch running; live collection continues");
+  if (paperBot.fundedBindingState === "WAITING_FOR_PRIOR_RUN")
+    lines.push(
+      `Funded paper trading is waiting for the previous session to finish closing. Live data collection continues.${paperBot.priorClosePendingExecutions ? ` · ${plural(paperBot.priorClosePendingExecutions, "close-pending execution")}` : ""}`,
+    );
+  if (paperBot.priorClosePendingExecutions)
+    lines.push(
+      `${plural(paperBot.priorClosePendingExecutions, "prior close-pending execution")} remain unresolved${paperBot.oldestPriorClosePendingAgeMs == null ? "" : ` · oldest ${Math.floor(paperBot.oldestPriorClosePendingAgeMs / 1000)}s`}`,
+    );
   return lines;
 }
 
@@ -129,6 +137,16 @@ export function derivePaperBotIndicator(
       tone: "error",
       label: "ORPHAN",
       summary: `${plural(paperBot.completedRunsWithUnresolvedCoordinatedPositions ?? 0, "completed run")} still owns an unresolved coordinated position. New coordinated approvals are blocked.`,
+      detail,
+    };
+  }
+
+  if (paperBot.fundedBindingState === "WAITING_FOR_PRIOR_RUN") {
+    return {
+      tone: "attention",
+      label: "WAITING",
+      summary:
+        "Funded paper trading is waiting for the previous session to finish closing. Live data collection continues.",
       detail,
     };
   }

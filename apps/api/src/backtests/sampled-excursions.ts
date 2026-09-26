@@ -37,9 +37,14 @@ export function sampledExcursion(input: ExcursionInput): SampledExcursion {
   )
     reasons.push("INVALID_INTERVAL");
   if (input.lotCount !== 1) reasons.push("MULTI_LOT_UNSUPPORTED");
-  if (!input.coverageVerified) reasons.push("COVERAGE_UNVERIFIED");
   if (input.exclusionsPresent) reasons.push("INPUT_EXCLUSIONS_PRESENT");
-  if (reasons.length > 0) return unavailable({ ...base, reasonCodes: reasons });
+  if (reasons.length > 0)
+    return unavailable({
+      ...base,
+      reasonCodes: input.coverageVerified
+        ? reasons
+        : [...reasons, "COVERAGE_UNVERIFIED"],
+    });
 
   const byTimestamp = new Map<string, number>();
   let conflicting = false;
@@ -55,21 +60,36 @@ export function sampledExcursion(input: ExcursionInput): SampledExcursion {
   if (conflicting)
     return unavailable({
       ...base,
-      reasonCodes: ["CONFLICTING_SAME_TIME_MARKS"],
+      reasonCodes: withCoverage(
+        ["CONFLICTING_SAME_TIME_MARKS"],
+        input.coverageVerified,
+      ),
     });
   const changes = [...byTimestamp.values()].map(
     (bid) => (bid / input.entryPrice - 1) * 100,
   );
   if (changes.length === 0)
-    return unavailable({ ...base, reasonCodes: ["NO_INTERIOR_SAMPLES"] });
+    return unavailable({
+      ...base,
+      reasonCodes: withCoverage(
+        ["NO_INTERIOR_SAMPLES"],
+        input.coverageVerified,
+      ),
+    });
+  // Unverified coverage still yields the observed excursion as a diagnostic,
+  // labelled INDICATIVE so it can never be mistaken for verified evidence.
   return sampledExcursionSchema.parse({
     ...base,
-    status: "AVAILABLE",
+    status: input.coverageVerified ? "AVAILABLE" : "INDICATIVE",
     adversePct: Math.min(0, ...changes),
     favorablePct: Math.max(0, ...changes),
     samples: changes.length,
-    reasonCodes: [],
+    reasonCodes: input.coverageVerified ? [] : ["COVERAGE_UNVERIFIED"],
   });
+}
+
+function withCoverage(reasons: string[], coverageVerified: boolean): string[] {
+  return coverageVerified ? reasons : [...reasons, "COVERAGE_UNVERIFIED"];
 }
 
 function unavailable(

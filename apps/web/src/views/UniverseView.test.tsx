@@ -12,7 +12,7 @@ import {
   type UniverseAutomation,
   type UniverseRefreshRun,
 } from "@tsx-scanner/contracts";
-import { getJson } from "../lib/api.js";
+import { getJson, sendJson } from "../lib/api.js";
 import { UniverseView } from "./UniverseView.js";
 
 vi.mock("../lib/api.js", () => ({
@@ -32,6 +32,7 @@ function refreshRun(
     marketId: "CA_TSX",
     provider: "CONFIGURED_TSX_LIVE_WATCHLIST",
     policyVersion: "tsx-liquid-momentum-v1",
+    refreshKind: "FULL",
     status: "COMPLETED",
     discoveredCount: 2,
     evaluatedCount: 2,
@@ -127,15 +128,97 @@ describe("UniverseView", () => {
     cleanup();
   });
 
-  it("shows qualified and excluded lifecycle states", async () => {
+  it("lists configured and excluded candidates with one status each", async () => {
     renderView(automationWith());
 
-    expect(
-      await screen.findByLabelText("Candidate lifecycle summary"),
-    ).toHaveTextContent("QUALIFIED 1");
+    const summary = await screen.findByLabelText("Candidate lifecycle summary");
+    expect(summary).toHaveTextContent(/Symbols\s*2/);
+    expect(summary).toHaveTextContent(/Warming up\s*1/);
+    expect(summary).toHaveTextContent(/Unavailable\s*1/);
     expect(screen.getByText("AAPL.TO")).toBeInTheDocument();
     expect(screen.getByText("SHOP.TO")).toBeInTheDocument();
-    expect(screen.getAllByText("EXCLUDED").length).toBeGreaterThan(0);
+    expect(screen.getByText("Excluded")).toBeInTheDocument();
+    expect(screen.getAllByText("Qualified · Discovery")).toHaveLength(1);
+    expect(screen.getByText("Operator exclusion")).toBeInTheDocument();
+  });
+
+  it("uses live coverage for analysis status and counts", async () => {
+    const coverage = (
+      symbol: string,
+      status: string,
+      reasons: string[] = [],
+    ) => ({
+      symbol,
+      status,
+      dataReadiness: "READY",
+      warmupPending: [],
+      setupCount: status === "READY" ? 2 : 0,
+      contextCount: 1,
+      latestAnalysisAt: "2026-09-09T13:00:00.000Z",
+      reasons,
+    });
+    renderView(
+      automationWith({
+        configuredSymbols: ["AAPL.TO", "RY.TO", "CNQ.TO"],
+        candidateStatuses: [],
+        coverage: [
+          coverage("AAPL.TO", "READY"),
+          coverage("RY.TO", "FORMING"),
+          coverage("CNQ.TO", "UNAVAILABLE", ["Average volume below minimum"]),
+        ],
+      } as Partial<UniverseAutomation>),
+    );
+
+    const summary = await screen.findByLabelText("Candidate lifecycle summary");
+    expect(summary).toHaveTextContent(/Being analyzed\s*2/);
+    expect(summary).toHaveTextContent(/Unavailable\s*1/);
+    expect(screen.getByText("Setup ready")).toBeInTheDocument();
+    expect(screen.getByText("Setup forming")).toBeInTheDocument();
+    expect(screen.getByText("2 setups · 1 context")).toBeInTheDocument();
+    expect(
+      screen.getByText("Average volume below minimum"),
+    ).toBeInTheDocument();
+  });
+
+  it("keeps history, policy and removal behind the menu and row details", async () => {
+    vi.mocked(getJson).mockResolvedValue({ runs: [refreshRun()] });
+    vi.mocked(sendJson).mockResolvedValue({
+      instruments: [],
+      automation: automationWith({ configuredSymbols: [] }),
+    });
+    await act(async () => {
+      renderView(automationWith({ latestRun: refreshRun() }));
+    });
+
+    fireEvent.click(screen.getByLabelText("More daily list tools"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Refresh history" }));
+    const history = screen.getByRole("dialog", { name: "Refresh history" });
+    expect(
+      within(history).getByText("2 submitted · 2 analyzable · 2 activated"),
+    ).toBeInTheDocument();
+    expect(within(history).getByText(/Full refresh/)).toBeInTheDocument();
+    fireEvent.click(within(history).getByLabelText("Close"));
+
+    fireEvent.click(screen.getByLabelText("More daily list tools"));
+    fireEvent.click(
+      screen.getByRole("menuitem", { name: "Eligibility policy" }),
+    );
+    expect(
+      within(screen.getByRole("dialog")).getByText("CAD 5–150"),
+    ).toBeInTheDocument();
+    fireEvent.click(within(screen.getByRole("dialog")).getByLabelText("Close"));
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Warm-up stages for AAPL.TO" }),
+    );
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Remove AAPL.TO" }));
+    });
+    expect(vi.mocked(sendJson)).toHaveBeenCalledWith(
+      "/api/universe/watchlist?marketId=CA_TSX",
+      "PUT",
+      { symbols: [] },
+    );
   });
 
   it("shows plain-language activity while a refresh is running", async () => {
@@ -257,7 +340,7 @@ describe("UniverseView", () => {
       renderView(automation);
     });
 
-    expect(screen.getByText(/3 ATTEMPTS/)).toBeInTheDocument();
+    expect(screen.getByText("Failed · 3 attempts")).toBeInTheDocument();
     fireEvent.click(
       screen.getByRole("button", { name: "Warm-up stages for AAPL.TO" }),
     );

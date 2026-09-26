@@ -9,6 +9,7 @@ from zoneinfo import ZoneInfo
 
 from .feature_engine import FeatureEngine
 from .models import (
+    BacktestEconomics,
     BacktestDataQuality,
     BacktestMetrics,
     BacktestReplayRequest,
@@ -28,7 +29,8 @@ from .replay_cancellation import ReplayCancelled
 
 def replay(request: BacktestReplayRequest) -> BacktestReplayResult:
     _validate_market_homogeneous(request)
-    events, contexts_by_signal, session_candles, quality = _generate_signals(request)
+    diagnostics: dict[str, dict[str, dict[str, int]]] = {}
+    events, contexts_by_signal, session_candles, quality = _generate_signals(request, diagnostics=diagnostics)
     timezone = request.sessions[0].session.timezone if request.sessions else "America/Toronto"
     trades = _simulate_trades(request, events, session_candles, contexts_by_signal, timezone)
     warnings = list(quality.warnings)
@@ -53,6 +55,7 @@ def replay(request: BacktestReplayRequest) -> BacktestReplayResult:
         analyses=_analyses(trades, timezone),
         trades=trades,
         timeline=timeline,
+        entry_filter_diagnostics=diagnostics,
         data_quality=quality.model_copy(update={"warnings": warnings}),
     )
 
@@ -91,6 +94,7 @@ def _validate_market_homogeneous(request: BacktestReplayRequest) -> None:
 def _generate_signals(
     request: BacktestReplayRequest,
     cancelled: Event | None = None,
+    diagnostics: dict[str, dict[str, dict[str, int]]] | None = None,
 ) -> tuple[
     list[StrategyStateEvent],
     dict[tuple[object, str, datetime], list[ContextEvaluation]],
@@ -106,7 +110,7 @@ def _generate_signals(
     for item in sorted(request.sessions, key=lambda value: value.session.start_time):
         _check_replay_cancellation(cancelled)
         engine = FeatureEngine()
-        engine.strategies = StrategyEngine(request.parameters, request.config_version)
+        engine.strategies = StrategyEngine(request.parameters, request.config_version, collect_entry_filter_diagnostics=diagnostics is not None)
         engine.start_session(item.session)
         setup_profiles = [
             ScannerProfileConfig(
@@ -162,6 +166,12 @@ def _generate_signals(
                 # without changing setup-event evidence.
                 if setup_events:
                     contexts_by_signal[(snapshot.instrument_id, snapshot.symbol, snapshot.timestamp)] = contexts
+        if diagnostics is not None:
+            for strategy, reasons in engine.strategies.entry_filter_diagnostics.items():
+                for reason, counts in reasons.items():
+                    total = diagnostics.setdefault(strategy, {}).setdefault(reason, {"blockedEvaluations": 0, "blockedInstances": 0})
+                    for key, count in counts.items():
+                        total[key] += count
         current = [
             value for value in candles if value.timeframe == "OneMinute" and value.start >= item.session.start_time
         ]
@@ -241,6 +251,11 @@ def _simulate_trades(
             continue
         shares = floor(request.assumptions.position_size / entry)
         if shares < 1:
+            continue
+        if request.assumptions.economics is not None and not _economically_viable(
+            request.assumptions.economics, entry, stop, target, shares, slip,
+            request.assumptions.fee_per_trade, feature.spread_absolute if feature is not None else None,
+        ):
             continue
         # Exclude the partially elapsed bar containing the signal; its low/high may have occurred before entry.
         future = [
@@ -435,3 +450,22 @@ def _rvol_bucket(value: float | None) -> str:
     if value < 2.5:
         return "1.5-2.49x"
     return "2.5x+"
+
+
+def _economically_viable(
+    gates: BacktestEconomics, entry: float, stop: float, target: float, shares: int,
+    slip: float, fee: float, spread: float | None,
+) -> bool:
+    """Mirror of the paper bot's entry economics: the trade must clear friction and reward/risk."""
+    friction = (spread or 0) + stop * slip + entry * slip + (fee / shares if shares else 0)
+    target_net = (target - entry) * shares - fee
+    stop_net = (stop * (1 - slip) - entry) * shares - fee
+    if target_net <= 0:
+        return False
+    if spread is not None and spread / entry * 100 > gates.max_spread_pct:
+        return False
+    if friction > 0 and (entry - stop) / friction < gates.min_stop_friction_multiple:
+        return False
+    if friction > 0 and (target - entry) / friction < gates.min_target_friction_multiple:
+        return False
+    return stop_net < 0 and target_net / -stop_net >= gates.min_net_reward_risk

@@ -11,16 +11,27 @@ function resultTimestamp(run: BacktestRun): number {
   return Date.parse(run.completedAt ?? run.startedAt ?? run.createdAt);
 }
 
-/** Automation runs record their profile name in the run name. The trailing
- * config version is redundant beside the configuration column, so it is kept
- * only for non-automation runs where the name carries no other identity. */
+const AUTO_PREFIX = "Auto qualification · ";
+
+/** Automation runs are named `Auto qualification · <profile> · <profile
+ * config version>`. The run's own `configVersion` is the scanner
+ * configuration, which many profiles share, so the profile identity has to
+ * come from the name. */
+function autoRunParts(
+  run: BacktestRun,
+): { profile: string; profileVersion: string | null } | null {
+  if (!run.name.startsWith(AUTO_PREFIX)) return null;
+  const rest = run.name.slice(AUTO_PREFIX.length);
+  const split = rest.lastIndexOf(" · ");
+  return split < 0
+    ? { profile: rest, profileVersion: null }
+    : { profile: rest.slice(0, split), profileVersion: rest.slice(split + 3) };
+}
+
+/** Automation runs show only their profile name; the trailing profile config
+ * version stays in technical details. Manual runs keep their full name. */
 export function runDisplayName(run: BacktestRun): string {
-  if (!run.name.startsWith("Auto qualification · ")) return run.name;
-  const suffix = ` · ${run.configVersion}`;
-  const base = run.name.endsWith(suffix)
-    ? run.name.slice(0, -suffix.length)
-    : run.name;
-  return base.replace(/^Auto qualification · /, "");
+  return autoRunParts(run)?.profile ?? run.name;
 }
 
 /** How a run came to exist, joined from the automation work registry. */
@@ -43,8 +54,9 @@ export function groupBacktestResults(
 ): BacktestResultGroup[] {
   const groups = new Map<string, BacktestRun[]>();
   for (const run of runs) {
-    const key = run.name.startsWith("Auto qualification · ")
-      ? `config:${run.configVersion}`
+    const auto = autoRunParts(run);
+    const key = auto
+      ? `profile:${auto.profileVersion ?? auto.profile}`
       : `run:${run.id}`;
     groups.set(key, [...(groups.get(key) ?? []), run]);
   }

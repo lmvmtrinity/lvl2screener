@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type {
   PaperEvidenceCohort,
   PaperEvidenceTrainingRow,
@@ -149,6 +149,117 @@ describe("PaperEvidenceTrainingService", () => {
 
     expect(store.lastInput?.researchDerivation).toEqual(derivation);
     expect(store.lastInput?.researchEvidence).toEqual(binding);
+  });
+
+  it("resumes one frozen preparation and leaves no dataset while coverage is pending", async () => {
+    const store = new Store();
+    let pending: any;
+    let verified = false;
+    const preparationStore = {
+      create: vi.fn(async (input: any) => {
+        pending = {
+          id: "10000000-0000-4000-8000-000000000040",
+          marketId: input.marketId,
+          cohort: input.cohort,
+          requestedCutoff: input.requestedCutoff.toISOString(),
+          effectiveCutoff: input.effectiveCutoff.toISOString(),
+          sourceDigest: input.sourceDigest,
+          excludedCounts: input.excludedCounts,
+          researchQualification: input.researchQualification,
+          rows: input.rows,
+          createdAt: "2026-08-05T00:00:00.000Z",
+        };
+        return pending;
+      }),
+      findPending: vi.fn(async () => pending),
+    };
+    const lineage = {
+      resolveArtifact: vi.fn(async () =>
+        verified
+          ? {
+              binding: {
+                manifestHash: "1".repeat(64),
+                coverageReportHash: "2".repeat(64),
+                inputHash: "3".repeat(64),
+                engineRevision: "e".repeat(40),
+                runtimeFingerprint: "f".repeat(64),
+                verifiedAt: "2026-08-05T00:00:00.000Z",
+              },
+              derivation: {
+                version: "dataset-derivation-v1" as const,
+                complete: true,
+                featureVersion: "1.2.0",
+                engineRevision: "e".repeat(40),
+                runtimeFingerprint: "f".repeat(64),
+                sourceDigest: pending.sourceDigest,
+                rowsDigest: "a".repeat(64),
+                rowCount: rows.length,
+                sessionPayloadHashes: { "2026-08-03": "b".repeat(64) },
+                coverageManifestHash: "1".repeat(64),
+                coverageReportHash: "2".repeat(64),
+                reasons: [],
+                capturedAt: "2026-08-05T00:00:00.000Z",
+              },
+            }
+          : {
+              derivation: {
+                version: "dataset-derivation-v1" as const,
+                complete: false,
+                featureVersion: null,
+                engineRevision: null,
+                runtimeFingerprint: null,
+                sourceDigest: pending.sourceDigest,
+                rowsDigest: "a".repeat(64),
+                rowCount: rows.length,
+                sessionPayloadHashes: null,
+                coverageManifestHash: null,
+                coverageReportHash: null,
+                reasons: ["COVERAGE_REPORT_UNVERIFIED"],
+                capturedAt: "2026-08-05T00:00:00.000Z",
+              },
+            },
+      ),
+    };
+    const qualification = {
+      qualification: {
+        policyVersion: "paper-research-qualification-v2",
+        qualified: true,
+        reasons: [],
+        sourceRowCount: rows.length,
+        acceptedRowCount: rows.length,
+        distinctSessionCount: 2,
+        chronologicalSplitAt: rows[1]!.signalTimestamp,
+        walkForwardWindows: [],
+        excludedCounts: {},
+      },
+      acceptedRows: rows,
+      qualifiedRows: rows,
+    };
+    const service = new PaperEvidenceTrainingService(
+      store,
+      lineage as never,
+      preparationStore as never,
+    );
+    const first = await service.prepareAndMaterialize(
+      cohort,
+      new Date("2026-08-10T00:00:00.000Z"),
+      qualification,
+    );
+    expect(first).toEqual({ dataset: undefined, pending: true });
+    expect(store.lastInput).toBeUndefined();
+    verified = true;
+    const second = await service.prepareAndMaterialize(
+      { ...cohort, closedQuoteCount: 99 },
+      new Date("2026-08-11T00:00:00.000Z"),
+      qualification,
+    );
+    expect(second.dataset).toBeDefined();
+    expect(preparationStore.create).toHaveBeenCalledOnce();
+    expect(store.lastInput?.requestedCutoff.toISOString()).toBe(
+      "2026-08-10T00:00:00.000Z",
+    );
+    expect(store.lastInput?.sourceDigest).toBe(pending.sourceDigest);
+    expect(store.lastInput?.rows).toEqual(rows);
   });
 
   it("rejects evidence that would mix markets in one frozen dataset", async () => {

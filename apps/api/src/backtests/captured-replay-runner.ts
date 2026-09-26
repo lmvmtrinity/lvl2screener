@@ -186,7 +186,9 @@ export class CapturedReplayRunner implements StudyRunner {
         run.id,
         configVersion,
         prepared.input,
-        undefined,
+        prepared.input.economics
+          ? { economics: prepared.input.economics }
+          : undefined,
         true,
       );
       const metadata = {

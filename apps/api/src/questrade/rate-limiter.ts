@@ -321,6 +321,18 @@ export class QuestradeRateLimiter implements QuestradeRequestScheduler {
           if (!decision.granted) {
             request.availableAt =
               this.clock().getTime() + Math.max(1, decision.retryAfterMs);
+            // The budget decision applies to this shared queue. Rechecking
+            // every item before its retry time only repeats database work.
+            for (const queued of this.queue) {
+              if (
+                queued.priority !== "P0" &&
+                queued.discovery === request.discovery
+              )
+                queued.availableAt = Math.max(
+                  queued.availableAt,
+                  request.availableAt,
+                );
+            }
             continue;
           }
         }

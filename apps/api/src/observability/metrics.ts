@@ -1,6 +1,10 @@
 import type { PersistenceMetricsSnapshot } from "./persistence-metrics.js";
 import type { RetentionRunSummary } from "./retention-repository.js";
-import type { DiscoveryStatus, MarketId } from "@tsx-scanner/contracts";
+import type {
+  DiscoveryStatus,
+  FundedShadowStatus,
+  MarketId,
+} from "@tsx-scanner/contracts";
 
 /**
  * Phase 9 observability. A dependency-free Prometheus text-exposition renderer:
@@ -48,6 +52,12 @@ export interface ObservabilitySnapshot {
     oldestUnresolvedCoordinatedAgeMs: number | null;
     unknownQuoteSizeUnits: number;
     overdueRuns: number;
+    priorClosePendingExecutions?: number;
+    oldestPriorClosePendingAgeMs?: number | null;
+    fundedCycleState?: "PROCESSED" | "WAITING" | "FAILED";
+    fundedBindingState?:
+      "UNBOUND" | "BOUND" | "WAITING_FOR_PRIOR_RUN" | "FAILED";
+    fundedBlockReason?: "PRIOR_RUN_ACTIVE" | null;
     lastSuccessfulProcessingAt?: string | null;
     fundedLastSuccessfulProcessingAt?: string | null;
     funded?: {
@@ -114,6 +124,9 @@ export interface ObservabilitySnapshot {
   /** A4 backtest-automation gauges. Null when the API has no automation service wired
    *  or its status read is temporarily unavailable. */
   backtestAutomation?: BacktestAutomationMetrics | null;
+  /** FP04 funded shadow observation status. Null when no status reader is wired or
+   *  its optional persistence dependency is temporarily unavailable. */
+  fundedShadow?: FundedShadowStatus | null;
 }
 
 export interface BacktestAutomationMetrics {
@@ -345,6 +358,21 @@ export function renderPrometheusMetrics(
       "Earlier live paper-bot runs that remain unresolved past session close.",
       snapshot.paperBot.overdueRuns,
     );
+    gauge(
+      marketMetric("scanner_paper_bot_prior_close_pending_executions"),
+      "Independent paper CLOSE_PENDING executions across prior LIVE runs in the selected market, excluding abandoned rows.",
+      snapshot.paperBot.priorClosePendingExecutions ?? 0,
+    );
+    gauge(
+      marketMetric("scanner_paper_bot_oldest_prior_close_pending_age_ms"),
+      "Age in milliseconds of the oldest independent paper CLOSE_PENDING execution across prior LIVE runs in the selected market; null when any counted execution lacks a durable transition receipt.",
+      snapshot.paperBot.oldestPriorClosePendingAgeMs ?? null,
+    );
+    gauge(
+      marketMetric("scanner_paper_bot_funded_waiting_for_prior_run"),
+      "Funded paper trading is waiting for the previous session to finish closing; 1 means blocked by ownership.",
+      snapshot.paperBot.fundedBindingState === "WAITING_FOR_PRIOR_RUN" ? 1 : 0,
+    );
     if (snapshot.paperBot.funded) {
       gauge(
         marketMetric("scanner_paper_bot_funded_pending_facts"),
@@ -471,6 +499,112 @@ export function renderPrometheusMetrics(
       snapshot.paperBot.fundedLastSuccessfulProcessingAt
         ? Date.parse(snapshot.paperBot.fundedLastSuccessfulProcessingAt) / 1000
         : null,
+    );
+  }
+  if (snapshot.fundedShadow) {
+    const shadow = snapshot.fundedShadow;
+    gauge(
+      marketMetric("scanner_paper_bot_funded_shadow_active_enrollments"),
+      "Active SHADOW enrollments for the market; FP04 observation never grants funded authority.",
+      shadow.activeEnrollments,
+    );
+    gauge(
+      marketMetric("scanner_paper_bot_funded_shadow_enrollment_state"),
+      "Latest FP04 enrollment lifecycle state (0=none 1=SHADOW 2=PAUSED 3=REVOKED).",
+      shadow.enrollmentState === null
+        ? 0
+        : shadow.enrollmentState === "SHADOW"
+          ? 1
+          : shadow.enrollmentState === "PAUSED"
+            ? 2
+            : 3,
+    );
+    gauge(
+      marketMetric("scanner_paper_bot_funded_shadow_pending_attempts"),
+      "Sealed funded shadow attempts without a terminal result.",
+      shadow.pendingAttempts,
+    );
+    gauge(
+      marketMetric(
+        "scanner_paper_bot_funded_shadow_oldest_pending_attempt_age_ms",
+      ),
+      "Age of the oldest sealed funded shadow attempt without a terminal result.",
+      shadow.oldestPendingAttemptAgeMs,
+    );
+    counter(
+      marketMetric("scanner_paper_bot_funded_shadow_timely_predictions_total"),
+      "Funded shadow attempts predicted before their database-owned deadline.",
+      shadow.timelyPredictions,
+    );
+    counter(
+      marketMetric("scanner_paper_bot_funded_shadow_missed_deadline_total"),
+      "Funded shadow attempts whose prediction deadline expired first.",
+      shadow.missedDeadline,
+    );
+    counter(
+      marketMetric("scanner_paper_bot_funded_shadow_invalid_identity_total"),
+      "Funded shadow attempts rejected for a frozen identity mismatch.",
+      shadow.invalidIdentity,
+    );
+    counter(
+      marketMetric("scanner_paper_bot_funded_shadow_inference_failures_total"),
+      "Funded shadow attempts whose inference failed.",
+      shadow.inferenceFailure,
+    );
+    counter(
+      marketMetric("scanner_paper_bot_funded_shadow_input_unavailable_total"),
+      "Funded shadow attempts whose decision input was unavailable.",
+      shadow.inputUnavailable,
+    );
+    counter(
+      marketMetric("scanner_paper_bot_funded_shadow_fallback_batches_total"),
+      "Sealed batches that fell back to whole-batch champion order.",
+      shadow.fallbackBatches,
+    );
+    gauge(
+      marketMetric("scanner_paper_bot_funded_shadow_prediction_coverage"),
+      "Timely predictions divided by terminal funded shadow attempts.",
+      shadow.predictionCoverage,
+    );
+    gauge(
+      marketMetric("scanner_paper_bot_funded_shadow_label_coverage"),
+      "Attempts with a durable independent outcome label divided by terminal attempts.",
+      shadow.labelCompleteness,
+    );
+    gauge(
+      marketMetric("scanner_paper_bot_funded_shadow_reports_available"),
+      "Immutable funded shadow report snapshots persisted for the market.",
+      shadow.reportsAvailable,
+    );
+    gauge(
+      marketMetric("scanner_paper_bot_funded_shadow_latest_report_age_ms"),
+      "Age of the most recent funded shadow report snapshot.",
+      shadow.latestReportAgeMs,
+    );
+    counter(
+      marketMetric("scanner_paper_bot_funded_shadow_observer_failures_total"),
+      "Funded shadow observer failures; target zero while an enrollment is active.",
+      shadow.observerFailures,
+    );
+    counter(
+      marketMetric("scanner_paper_bot_funded_shadow_reconcile_failures_total"),
+      "Funded shadow reconciliation/projection/label failures.",
+      shadow.reconcileFailures,
+    );
+    counter(
+      marketMetric("scanner_paper_bot_funded_shadow_lease_contention_total"),
+      "Funded shadow observation lease contention receipts.",
+      shadow.leaseContention,
+    );
+    counter(
+      marketMetric("scanner_paper_bot_funded_shadow_ownership_refusals_total"),
+      "Funded shadow ownership or cross-market refusals.",
+      shadow.ownershipRefusals,
+    );
+    counter(
+      marketMetric("scanner_paper_bot_funded_shadow_late_inputs_total"),
+      "Committed decisions that arrived after their batch was sealed.",
+      shadow.lateInputs,
     );
   }
   if (snapshot.broker) {

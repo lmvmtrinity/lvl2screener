@@ -1,4 +1,5 @@
 import type {
+  CreateCoverageRequest,
   DatasetResearchDerivation,
   MarketId,
   ResearchEvidenceBinding,
@@ -13,10 +14,12 @@ import {
   evidenceWorkKey,
   PostgresEvidenceAutomationRepository,
 } from "../statistical-models/evidence-automation-repository.js";
+import { calendarPolicyHashFor } from "../universe/market-calendar.js";
 
 export type ArtifactCoverageScope = {
   kind: "DATASET" | "BACKTEST" | "CALIBRATION";
   marketId: MarketId;
+  preparationId?: string;
   scope: unknown;
   sessionDates: string[];
   inputCutoff: string;
@@ -29,6 +32,7 @@ export type ArtifactResearchResolution = {
    * Non-dataset producers keep null.
    */
   derivation: DatasetResearchDerivation | null;
+  coverageStatus?: "VERIFIED" | "INCOMPLETE" | "UNKNOWN" | null;
 };
 export interface ArtifactResearchLineage {
   resolve(
@@ -102,7 +106,20 @@ export class ResearchLineageService implements ArtifactResearchLineage {
     input: ArtifactCoverageScope,
   ): Promise<ArtifactResearchResolution> {
     const scopeHash = contentHash(input);
-    const runtime = await this.runtime.current();
+    const coverageRequests = new PostgresCoverageRequestRepository(this.pool);
+    const existingRequest = input.preparationId
+      ? await coverageRequests.findByPreparationId(
+          input.preparationId,
+          input.marketId,
+        )
+      : null;
+    const runtime = existingRequest
+      ? {
+          engineRevision: existingRequest.request.recipe.engineRevision,
+          runtimeFingerprint: existingRequest.request.recipe.runtimeFingerprint,
+          featureVersion: existingRequest.request.recipe.featureVersion,
+        }
+      : await this.runtime.current();
     if (!runtime?.featureVersion || input.sessionDates.length === 0) {
       const identity = {
         kind: "COVERAGE" as const,
@@ -142,57 +159,74 @@ export class ResearchLineageService implements ArtifactResearchLineage {
       purpose: input,
       plan: { expectedSessions: input.sessionDates },
     };
-    const request = await new PostgresCoverageRequestRepository(
-      this.pool,
-    ).create(
-      {
-        manifest: {
-          hash: contentHash(manifest),
-          marketId: input.marketId,
-          manifest,
-        },
-        recipe: {
-          version: "research-coverage-recipe-v2",
-          marketId: input.marketId,
-          ...runtime,
-          featureVersion: runtime.featureVersion,
-          sessionDates: input.sessionDates,
-          inputCutoff: input.inputCutoff,
-          streamRequirements: [
-            {
-              timeframe: "Daily",
-              warmupDays: 45,
-              requiredWarmupBars: 20,
-              includeInSession: false,
-            },
-            {
-              timeframe: "OneMinute",
-              warmupDays: 20,
-              requiredWarmupBars: 20,
-              includeInSession: true,
-            },
-            {
-              timeframe: "FiveMinutes",
-              warmupDays: 1,
-              requiredWarmupBars: 0,
-              includeInSession: true,
-            },
-          ],
-          maxQuoteGapMs: 30000,
-          replayPolicy: policy,
-          replayPolicyHash: contentHash(policy),
-          membershipPolicyHash: contentHash({
-            policy: "retained-universe-membership-v1",
-            marketId: input.marketId,
-          }),
-          calendarPolicyHash: contentHash({
-            policy: "retained-session-calendar-v1",
-            timezone: policy.timezone,
-          }),
-        },
+    const requestInput: CreateCoverageRequest = {
+      manifest: {
+        hash: contentHash(manifest),
+        marketId: input.marketId,
+        manifest,
       },
-      `artifact-coverage:${scopeHash}:${contentHash(runtime)}`,
-    );
+      recipe: {
+        version: "research-coverage-recipe-v2",
+        marketId: input.marketId,
+        ...runtime,
+        featureVersion: runtime.featureVersion,
+        sessionDates: input.sessionDates,
+        inputCutoff: input.inputCutoff,
+        streamRequirements: [
+          {
+            timeframe: "Daily",
+            warmupDays: 45,
+            requiredWarmupBars: 20,
+            includeInSession: false,
+          },
+          {
+            timeframe: "OneMinute",
+            warmupDays: 20,
+            requiredWarmupBars: 20,
+            includeInSession: true,
+          },
+          {
+            timeframe: "FiveMinutes",
+            warmupDays: 1,
+            requiredWarmupBars: 0,
+            includeInSession: true,
+          },
+        ],
+        maxQuoteGapMs: 30000,
+        replayPolicy: policy,
+        replayPolicyHash: contentHash(policy),
+        membershipPolicyHash: contentHash({
+          policy: "retained-universe-membership-v1",
+          marketId: input.marketId,
+        }),
+        calendarPolicyHash:
+          existingRequest?.request.recipe.calendarPolicyHash ??
+          calendarPolicyHashFor({
+            marketId: input.marketId,
+            timezone: policy.timezone,
+            sessionDates: input.sessionDates,
+            inputCutoff: input.inputCutoff,
+          }),
+      },
+    };
+    const request =
+      existingRequest ??
+      (await coverageRequests.create(
+        requestInput,
+        input.preparationId
+          ? `artifact-coverage-preparation:${input.preparationId}`
+          : `artifact-coverage:${scopeHash}:${contentHash(runtime)}`,
+      ));
+    if (
+      existingRequest &&
+      existingRequest.requestHash !== contentHash(requestInput)
+    )
+      throw new Error("DATASET_PREPARATION_REQUEST_CONFLICT");
+    const coverageStatus =
+      (await coverageRequests.get(request.id, input.marketId))
+        ?.coverageStatus ??
+      existingRequest?.coverageStatus ??
+      null;
     const evidence = new PostgresResearchEvidenceStore(this.pool);
     const binding = request.latestJobId
       ? await evidence.getBinding({
@@ -234,9 +268,9 @@ export class ResearchLineageService implements ArtifactResearchLineage {
             recordedAt: new Date().toISOString(),
           },
         );
-        return { derivation };
+        return { derivation, coverageStatus };
       }
-      return { binding: binding ?? undefined, derivation };
+      return { binding: binding ?? undefined, derivation, coverageStatus };
     }
     if (
       !binding ||
@@ -293,13 +327,9 @@ export class ResearchLineageService implements ArtifactResearchLineage {
         ? scope.sourceDigest
         : null;
     if (!sourceDigest) reasons.push("SOURCE_DIGEST_UNAVAILABLE");
-    const rowKeys = rows.map(rowIdentity);
-    if (rowKeys.some((key) => key === null))
+    const rowsDigest = datasetRowsDigest(rows);
+    if (rowsDigest === null && rows.length > 0)
       reasons.push("ROW_IDENTITY_UNAVAILABLE");
-    const rowsDigest =
-      rowKeys.length > 0 && rowKeys.every((key) => key !== null)
-        ? contentHash(rowKeys)
-        : null;
     const sessionPayloadHashes = report?.sessionPayloadHashes ?? null;
     const rowSessions = researchSessionDates(
       rows
@@ -339,7 +369,7 @@ export class ResearchLineageService implements ArtifactResearchLineage {
   }
 }
 
-function rowIdentity(row: unknown): string | null {
+export function datasetRowIdentity(row: unknown): string | null {
   if (typeof row !== "object" || row === null) return null;
   const sourceKey = (row as { sourceKey?: unknown }).sourceKey;
   if (typeof sourceKey === "string" && sourceKey.length > 0) return sourceKey;
@@ -347,6 +377,17 @@ function rowIdentity(row: unknown): string | null {
   const executionId = (row as { executionId?: unknown }).executionId;
   return typeof observationId === "string" && typeof executionId === "string"
     ? `${observationId}:${executionId}`
+    : null;
+}
+
+/** The row-membership digest is shared with asynchronous reconciliation so a
+ * verifier cannot silently use a different identity projection than the
+ * producer that froze the dataset. */
+export function datasetRowsDigest(rows: readonly unknown[]): string | null {
+  if (rows.length === 0) return null;
+  const rowKeys = rows.map(datasetRowIdentity);
+  return rowKeys.every((key): key is string => key !== null)
+    ? contentHash(rowKeys)
     : null;
 }
 

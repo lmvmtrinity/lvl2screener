@@ -52,15 +52,15 @@ const vite = spawn(
 );
 
 const NAV_MATCHERS = {
-  SCANNER: [{ role: "button", name: "SCANNER", exact: true }],
-  DETAIL: [{ role: "button", name: "SCANNER", exact: true }],
-  DAILY: [{ role: "button", name: /^DAILY LIST/ }],
-  DISCOVERY: [{ role: "button", name: "DISCOVERY", exact: true }],
-  BOT: [{ role: "button", name: /^BOT · / }],
-  PERFORMANCE: [{ role: "button", name: "BOT PERFORMANCE", exact: true }],
-  LEARNING: [{ role: "button", name: "LEARNING", exact: true }],
-  LAB: [{ role: "button", name: "STRATEGY LAB", exact: true }],
-  BACKTESTS: [{ role: "button", name: "BACKTESTS", exact: true }],
+  SCANNER: [{ role: "button", name: "Scanner", exact: true }],
+  DETAIL: [{ role: "button", name: "Scanner", exact: true }],
+  DAILY: [{ role: "button", name: /^Daily list/ }],
+  DISCOVERY: [{ role: "button", name: "Discovery", exact: true }],
+  BOT: [{ role: "button", name: /^Bot · / }],
+  PERFORMANCE: [{ role: "button", name: "Bot performance", exact: true }],
+  LEARNING: [{ role: "button", name: "Learning", exact: true }],
+  LAB: [{ role: "button", name: "Strategy lab", exact: true }],
+  BACKTESTS: [{ role: "button", name: "Backtests", exact: true }],
 };
 
 try {
@@ -85,7 +85,10 @@ try {
   await page.goto(APP_URL, { waitUntil: "domcontentloaded" });
   await page.locator('nav[aria-label="Sections"]').waitFor({ timeout: 45_000 });
   if (market === "US") {
-    await page.getByLabel("Market").selectOption("US_EQUITIES");
+    await page
+      .getByRole("group", { name: "Market" })
+      .getByRole("button", { name: "US · USD" })
+      .click();
     await page.waitForTimeout(600);
   }
   await page.getByRole(matcher.role, { name: matcher.name }).first().click();

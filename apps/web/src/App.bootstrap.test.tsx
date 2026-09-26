@@ -239,7 +239,7 @@ describe("W9: partial bootstrap failure", () => {
 
     // The critical group (system/market/universe/candidates/contexts/alerts) still rendered the
     // board even though /api/backtests — an optional research endpoint — returned a 500.
-    expect(screen.getByText("LEARNING")).toBeInTheDocument();
+    expect(screen.getByText("Learning")).toBeInTheDocument();
   });
 });
 
@@ -312,7 +312,7 @@ describe("W9: render count at 150 symbols", () => {
 
     await waitFor(() =>
       expect(
-        screen.getByText(`DAILY LIST · ${symbols.length}`),
+        screen.getByText(`Daily list · ${symbols.length}`),
       ).toBeInTheDocument(),
     );
     const commitsAfterBootstrap = commitCount;

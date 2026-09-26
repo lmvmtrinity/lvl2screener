@@ -6,23 +6,27 @@ import {
   historicalFundedAccountId,
   historicalMarketRisk,
 } from "./paper-bot/funded-historical-config.js";
+import { planFundedHistoricalSession } from "./paper-bot/funded-historical-preview.js";
 import { runFundedHistoricalRange } from "./paper-bot/funded-historical-runner.js";
 import { FundedReportingService } from "./paper-bot/funded-reporting-service.js";
 
 const [backtestRunId, flag, extra] = process.argv.slice(2);
+const mode =
+  flag === "--apply" ? "apply" : flag === "--preview" ? "preview" : undefined;
 if (
   !backtestRunId ||
   !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
     backtestRunId,
   ) ||
-  flag !== "--apply" ||
+  !mode ||
   extra
 )
   throw new Error(
-    "Usage: funded-historical-session <completed backtest run UUID> --apply\n" +
-      "Preview was removed: it provisioned a funded run, account binding and observations " +
-      "before computing results, so it was not effect-free. Read an existing replay through " +
-      "GET /api/funded-replays, or use a policy-approved automation replay.",
+    "Usage: funded-historical-session <completed backtest run UUID> --preview|--apply\n" +
+      "--preview is read-only: it resolves the same baseline, sessions, dedicated account " +
+      "identity and risk configuration the applied path would use and writes nothing. " +
+      "--apply provisions the dedicated replay account/run and applies the deterministic " +
+      "funded order/ledger machinery. Read an existing replay through GET /api/funded-replays.",
   );
 if (!process.env.DATABASE_URL)
   throw new Error(
@@ -33,70 +37,78 @@ const pool = new Pool({ connectionString: process.env.DATABASE_URL, max: 4 });
 
 try {
   const store = new PostgresBacktestStore(pool);
-  const backtest = await store.get(backtestRunId);
-  if (!backtest)
-    throw new Error(
-      "Funded historical replay requires a COMPLETED backtest run",
+  if (mode === "preview") {
+    const preview = await planFundedHistoricalSession(
+      { backtestRunId },
+      { pool, config, store },
     );
-  const risk = historicalMarketRisk(config, backtest.marketId);
-  const accountId = historicalFundedAccountId(
-    backtest.marketId,
-    risk.initialCash,
-    risk.dailyLossLimit,
-  );
-  const result = await runFundedHistoricalRange(
-    { backtestRunId, accountId, apply: true },
-    {
-      pool,
-      config,
-      engine: new ScannerFeatureClient(
-        new URL(config.SCANNER_URL),
-        10_000,
-        config.SCANNER_SERVICE_TOKEN || undefined,
-      ),
-      store,
-      reporting: new FundedReportingService(pool),
-    },
-  );
-
-  if (result.sessionCount === 1) {
-    const session = result.sessions[0]!;
-    console.log(
-      JSON.stringify(
-        {
-          backtestRunId,
-          fundedRunId: session.fundedRunId,
-          accountId,
-          reusedRun: session.reusedRun,
-          applied: true,
-          sessionDate: session.sessionDate,
-          sessionStartAt: session.sessionStartAt,
-          scheduledCloseAt: session.scheduledCloseAt,
-          bridge: session.bridge,
-          replay: session.replay,
-          runStatus: session.runStatus,
-          projection: session.projection ?? null,
-        },
-        null,
-        2,
-      ),
-    );
+    console.log(JSON.stringify(preview, null, 2));
   } else {
-    console.log(
-      JSON.stringify(
-        {
-          backtestRunId,
-          marketId: result.marketId,
-          accountId,
-          currency: result.currency,
-          sessionCount: result.sessionCount,
-          sessions: result.sessions,
-          accountSummary: result.accountSummary,
-        },
-        null,
-        2,
-      ),
+    const backtest = await store.get(backtestRunId);
+    if (!backtest)
+      throw new Error(
+        "Funded historical replay requires a COMPLETED backtest run",
+      );
+    const risk = historicalMarketRisk(config, backtest.marketId);
+    const accountId = historicalFundedAccountId(
+      backtest.marketId,
+      risk.initialCash,
+      risk.dailyLossLimit,
     );
+    const result = await runFundedHistoricalRange(
+      { backtestRunId, accountId, apply: true },
+      {
+        pool,
+        config,
+        engine: new ScannerFeatureClient(
+          new URL(config.SCANNER_URL),
+          10_000,
+          config.SCANNER_SERVICE_TOKEN || undefined,
+        ),
+        store,
+        reporting: new FundedReportingService(pool),
+      },
+    );
+
+    if (result.sessionCount === 1) {
+      const session = result.sessions[0]!;
+      console.log(
+        JSON.stringify(
+          {
+            backtestRunId,
+            fundedRunId: session.fundedRunId,
+            accountId,
+            reusedRun: session.reusedRun,
+            applied: true,
+            sessionDate: session.sessionDate,
+            sessionStartAt: session.sessionStartAt,
+            scheduledCloseAt: session.scheduledCloseAt,
+            bridge: session.bridge,
+            replay: session.replay,
+            runStatus: session.runStatus,
+            projection: session.projection ?? null,
+          },
+          null,
+          2,
+        ),
+      );
+    } else {
+      console.log(
+        JSON.stringify(
+          {
+            backtestRunId,
+            marketId: result.marketId,
+            accountId,
+            currency: result.currency,
+            sessionCount: result.sessionCount,
+            sessions: result.sessions,
+            accountSummary: result.accountSummary,
+          },
+          null,
+          2,
+        ),
+      );
+    }
   }
 } finally {
   await pool.end();

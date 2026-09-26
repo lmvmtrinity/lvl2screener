@@ -21,6 +21,7 @@ import {
   FormField,
 } from "./components/ui/FormField.js";
 import { classes } from "./lib/classes.js";
+import { loadNavOrder, moveNavItem, saveNavOrder } from "./lib/nav-order.js";
 import { HeaderStatus } from "./components/HeaderStatus.js";
 import { ToastStack } from "./components/ToastStack.js";
 import { sendJson, ApiRequestError } from "./lib/api.js";
@@ -106,8 +107,8 @@ const PAGE_COPY: Record<AppView, { title: string; lede: string }> = {
     lede: "Today's symbols and their warm-up progress; the list refreshes automatically at each new session.",
   },
   discovery: {
-    title: "Candidate discovery",
-    lede: "Shadow evaluation of the provider catalog. Nothing is added to the daily list automatically while intake is disabled.",
+    title: "Discovery",
+    lede: "The pre-market selector fills an empty daily list at 08:45 ET from the previous session's liquid movers.",
   },
   bot: {
     title: "BOT evidence",
@@ -126,9 +127,38 @@ const PAGE_COPY: Record<AppView, { title: string; lede: string }> = {
     lede: "What evidence is accumulating, what is waiting, and what needs review.",
   },
   backtests: {
-    title: "Backtest & Studies",
-    lede: "Automation state, waiting reasons, and retained study results.",
+    title: "Backtests",
+    lede: "Running replays, automation evidence and the latest result per strategy.",
   },
+};
+
+/* The two markets the scanner supports, shown as a sidebar toggle. */
+const MARKET_OPTIONS: readonly ["CA_TSX" | "US_EQUITIES", string][] = [
+  ["CA_TSX", "TSX · CAD"],
+  ["US_EQUITIES", "US · USD"],
+];
+
+/* Default sidebar order; a viewer's drag order is saved in their browser. */
+const NAV_DEFAULT_ORDER: readonly AppView[] = [
+  "scanner",
+  "discovery",
+  "universe",
+  "bot",
+  "botPerformance",
+  "learning",
+  "lab",
+  "backtests",
+];
+
+const NAV_LABELS: Record<AppView, string> = {
+  scanner: "Scanner",
+  discovery: "Discovery",
+  universe: "Daily list",
+  bot: "Bot",
+  botPerformance: "Bot performance",
+  learning: "Learning",
+  lab: "Strategy lab",
+  backtests: "Backtests",
 };
 
 const NAV_TIPS: Record<AppView, string> = {
@@ -137,7 +167,7 @@ const NAV_TIPS: Record<AppView, string> = {
   universe:
     "The symbols scanned today. Paste a TradingView scan here; the count is how many symbols are configured.",
   discovery:
-    "Shadow discovery evidence, catalog freshness, fenced scheduler state, and the durable mode authority.",
+    "Today's pre-market seed, its ranked picks, seed history and the frozen full-catalog engine.",
   lab: "Build and version scanner profiles, then compare two configurations on the same evidence.",
   bot: "Automated forward paper evidence. Counts and performance remain separated by immutable profile configuration.",
   botPerformance:
@@ -185,6 +215,24 @@ export function App() {
   const [toasts, setToasts] = useState<ScannerAlert[]>([]);
   const [selected, setSelected] = useState<string>();
   const [view, setView] = useState<AppView>("scanner");
+  const [navOrder, setNavOrder] = useState(() =>
+    loadNavOrder(NAV_DEFAULT_ORDER),
+  );
+  const [draggingNav, setDraggingNav] = useState<AppView | null>(null);
+  const refocusNav = useRef<AppView | null>(null);
+  // Save once a drag settles rather than on every intermediate swap.
+  useEffect(() => {
+    if (!draggingNav) saveNavOrder(navOrder, NAV_DEFAULT_ORDER);
+  }, [navOrder, draggingNav]);
+  // Moving a DOM node drops its focus; keep it on the item moved by keyboard.
+  useEffect(() => {
+    const key = refocusNav.current;
+    if (!key) return;
+    refocusNav.current = null;
+    document
+      .querySelector<HTMLButtonElement>(`[data-nav-key="${key}"]`)
+      ?.focus();
+  }, [navOrder]);
   const [connection, setConnection] = useState<"LIVE" | "RECONNECTING">(
     "RECONNECTING",
   );
@@ -588,89 +636,137 @@ export function App() {
     );
 
   return (
-    <main>
-      <ToastStack alerts={toasts} dismiss={dismissToast} />
-      <header className="tw:-mx-8 tw:below-md:-mx-[14px]">
-        <div className="tw:relative tw:z-20 tw:flex tw:min-h-14 tw:items-center tw:justify-between tw:gap-[18px] tw:border-b tw:border-line tw:bg-bg tw:px-5 tw:py-[7px] tw:below-md:flex-wrap tw:below-md:gap-x-3 tw:below-md:gap-y-[7px] tw:below-md:px-[14px] tw:below-md:py-[10px]">
+    <div className="app-shell tw:grid tw:min-h-screen tw:grid-cols-[224px_minmax(0,1fr)] tw:below-md:grid-cols-[minmax(0,1fr)]">
+      <aside className="app-sidebar tw:sticky tw:top-0 tw:z-20 tw:flex tw:h-screen tw:flex-col tw:gap-5 tw:overflow-y-auto tw:border-r tw:border-line tw:bg-bg tw:px-4 tw:py-5 tw:below-md:static tw:below-md:h-auto tw:below-md:gap-3 tw:below-md:overflow-visible tw:below-md:border-r-0 tw:below-md:border-b tw:below-md:px-[14px] tw:below-md:py-3">
+        <div className="tw:px-[6px]">
           <Tip
             label="TSX intraday setup scanner. One shared market stream is evaluated by every enabled profile; each profile ranks it independently."
             placement="bottom-start"
           >
-            <p className="tw:m-0 tw:shrink-0 tw:cursor-help tw:font-mono tw:text-[0.69rem] tw:font-bold tw:leading-[1.4] tw:tracking-[0.14em] tw:text-ink-100 tw:below-sm:text-[0.63rem]">
+            <p className="tw:m-0 tw:cursor-help tw:font-mono tw:text-[0.69rem] tw:font-bold tw:leading-[1.4] tw:tracking-[0.14em] tw:text-accent">
               TSX INTRADAY SCANNER
             </p>
           </Tip>
-          <label className="tw:grid tw:gap-[2px] tw:font-mono tw:text-[0.55rem] tw:font-bold tw:tracking-[0.08em] tw:text-ink-550">
-            MARKET
-            <select
-              className="tw:rounded-[5px] tw:border tw:border-line tw:bg-bg tw:px-[5px] tw:py-[3px] tw:font-mono tw:text-[0.62rem] tw:font-bold tw:text-ink-100"
-              aria-label="Market"
-              value={selectedMarket}
-              onChange={(event) =>
-                setSelectedMarket(
-                  event.target.value as "CA_TSX" | "US_EQUITIES",
-                )
-              }
-            >
-              <option value="CA_TSX">TSX · CAD</option>
-              <option value="US_EQUITIES">US · USD</option>
-            </select>
-          </label>
-          <nav
-            className="tw:flex tw:flex-auto tw:min-w-0 tw:justify-start tw:gap-[3px] tw:below-md:order-3 tw:below-md:basis-full tw:below-md:overflow-x-auto tw:below-md:pb-[2px]"
-            aria-label="Sections"
+        </div>
+        <div className="tw:grid tw:gap-[6px] tw:px-[6px]">
+          <span
+            id="market-toggle-label"
+            className="tw:font-mono tw:text-[0.58rem] tw:font-bold tw:tracking-[0.1em] tw:uppercase tw:text-ink-550"
           >
-            {(
-              [
-                ["scanner", "SCANNER"],
-                ["discovery", "DISCOVERY"],
-                [
-                  "universe",
-                  `DAILY LIST · ${universe?.configuredSymbols?.length ?? 0}`,
-                ],
-                ["bot", "BOT"],
-                ["botPerformance", "BOT PERFORMANCE"],
-                ["learning", "LEARNING"],
-                ["lab", "STRATEGY LAB"],
-                ["backtests", "BACKTESTS"],
-              ] as [AppView, string][]
-            ).map(([key, label]) => {
-              const active = view === key;
-              const botDotClasses = active
-                ? classes(
-                    "tw:bg-on-accent tw:shadow-none",
-                    botIndicator.tone === "ok" && "tw:animate-status-pulse",
-                  )
-                : BOT_DOT_TONE_CLASSES[botIndicator.tone];
-              return (
+            Market
+          </span>
+          <div
+            className="tw:grid tw:grid-cols-2 tw:gap-[3px] tw:rounded-[9px] tw:border tw:border-line tw:bg-surface tw:p-[3px]"
+            role="group"
+            aria-labelledby="market-toggle-label"
+          >
+            {MARKET_OPTIONS.map(([value, label]) => (
+              <button
+                type="button"
+                key={value}
+                aria-pressed={selectedMarket === value}
+                className="tw:cursor-pointer tw:whitespace-nowrap tw:rounded-[7px] tw:border-0 tw:bg-transparent tw:px-2 tw:py-[7px] tw:font-sans tw:text-[0.78rem] tw:font-semibold tw:text-ink-400 tw:hover:text-ink-100 tw:aria-pressed:bg-surface-raised tw:aria-pressed:text-ink-50 tw:aria-pressed:shadow-[inset_0_0_0_1px_var(--line-accent)]"
+                onClick={() => setSelectedMarket(value)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+        <nav
+          className="tw:flex tw:flex-col tw:gap-[2px] tw:below-md:flex-row tw:below-md:overflow-x-auto tw:below-md:pb-[2px]"
+          aria-label="Sections"
+        >
+          {navOrder.map((key) => {
+            const active = view === key;
+            const label =
+              key === "universe"
+                ? `Daily list · ${universe?.configuredSymbols?.length ?? 0}`
+                : NAV_LABELS[key];
+            return (
+              <div
+                key={key}
+                draggable
+                className={classes(
+                  "tw:cursor-grab tw:rounded-[8px] tw:active:cursor-grabbing",
+                  draggingNav === key && "tw:opacity-40",
+                )}
+                onDragStart={(event) => {
+                  setDraggingNav(key);
+                  event.dataTransfer.effectAllowed = "move";
+                  event.dataTransfer.setData("text/plain", key);
+                }}
+                onDragOver={(event) => {
+                  if (!draggingNav) return;
+                  event.preventDefault();
+                  if (draggingNav !== key)
+                    setNavOrder((order) =>
+                      moveNavItem(
+                        order,
+                        order.indexOf(draggingNav),
+                        order.indexOf(key),
+                      ),
+                    );
+                }}
+                onDrop={(event) => event.preventDefault()}
+                onDragEnd={() => setDraggingNav(null)}
+              >
                 <Tip
                   label={
                     key === "bot"
                       ? `${botIndicator.summary}${botIndicator.detail.length ? ` (${botIndicator.detail.join("; ")})` : ""}`
                       : NAV_TIPS[key]
                   }
-                  key={key}
+                  placement="right"
                 >
                   <Button
-                    variant="nav"
+                    variant="sidebar"
+                    data-nav-key={key}
                     aria-current={active ? "page" : undefined}
+                    aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"
                     onClick={() => setView(key)}
+                    onKeyDown={(event) => {
+                      if (!event.altKey) return;
+                      const step =
+                        event.key === "ArrowUp" || event.key === "ArrowLeft"
+                          ? -1
+                          : event.key === "ArrowDown" ||
+                              event.key === "ArrowRight"
+                            ? 1
+                            : 0;
+                      if (!step) return;
+                      event.preventDefault();
+                      const index = navOrder.indexOf(key);
+                      setNavOrder(moveNavItem(navOrder, index, index + step));
+                      refocusNav.current = key;
+                    }}
                   >
                     {key === "bot" ? (
-                      <span className="nav-bot-status tw:inline-flex tw:items-center tw:gap-[7px]">
+                      <span className="nav-bot-status tw:inline-flex tw:items-center tw:gap-2">
                         <span
-                          className={`market-dot bot-dot ${botIndicator.tone} tw:h-[7px] tw:w-[7px] tw:rounded-full ${botDotClasses}`}
+                          className={`market-dot bot-dot ${botIndicator.tone} tw:h-[7px] tw:w-[7px] tw:rounded-full ${BOT_DOT_TONE_CLASSES[botIndicator.tone]}`}
                         />
-                        BOT · {botIndicator.label}
+                        Bot · {botIndicator.label}
                       </span>
                     ) : (
                       label
                     )}
                   </Button>
                 </Tip>
-              );
-            })}
-          </nav>
+              </div>
+            );
+          })}
+        </nav>
+        {navOrder.some((key, index) => key !== NAV_DEFAULT_ORDER[index]) && (
+          <button
+            type="button"
+            className="tw:-mt-3 tw:cursor-pointer tw:self-start tw:border-0 tw:bg-transparent tw:px-[10px] tw:py-0 tw:font-sans tw:text-[0.72rem] tw:text-ink-500 tw:hover:text-accent tw:below-md:mt-0"
+            onClick={() => setNavOrder([...NAV_DEFAULT_ORDER])}
+          >
+            Reset order
+          </button>
+        )}
+        <div className="tw:mt-auto tw:px-[6px] tw:below-md:mt-0">
           <HeaderStatus
             system={system}
             market={market}
@@ -682,303 +778,319 @@ export function App() {
             marketInactive={marketInactive}
           />
         </div>
-      </header>
-      <div className="tw:flex tw:flex-wrap tw:items-baseline tw:gap-x-[14px] tw:gap-y-2 tw:pt-[18px] tw:pb-[15px] tw:below-md:flex-col tw:below-md:items-start tw:below-md:gap-1 tw:below-md:pt-[15px] tw:below-md:pb-[13px]">
-        <h1>{PAGE_COPY[view].title}</h1>
-        <p className="tw:m-0 tw:text-[0.8rem] tw:text-ink-550">
-          {PAGE_COPY[view].lede}
-        </p>
-      </div>
-      {error && <p className="error-banner">{error}</p>}
-      {view === "scanner" ? (
-        <>
-          <section
-            className="tw:mb-3 tw:flex tw:items-center tw:gap-[9px] tw:rounded-input tw:border tw:border-line-bar tw:bg-surface tw:p-[5px]"
-            aria-label="Profile views and alerts"
-          >
-            <div
-              className="tw:flex tw:min-w-0 tw:flex-auto tw:gap-[7px] tw:overflow-x-auto"
-              role="tablist"
-            >
-              <Tip
-                label="Merged view: the single best setup per symbol across every enabled profile."
-                placement="bottom-start"
-              >
-                <Button
-                  variant="profile"
-                  role="tab"
-                  aria-selected={activeProfile === "ALL"}
-                  onClick={() => setActiveProfile("ALL")}
-                >
-                  ALL
-                </Button>
-              </Tip>
-              {profiles
-                .filter(
-                  (value) =>
-                    value.enabled &&
-                    (value.analysisKind ?? "SETUP") === "SETUP",
-                )
-                .map((profile) => (
-                  <Tip
-                    key={profile.id}
-                    label={
-                      <>
-                        <b>
-                          {displayStrategy(profile.strategyKey)}
-                          {profile.strategyVersion
-                            ? ` v${profile.strategyVersion}`
-                            : ""}
-                        </b>
-                        <br />
-                        {profile.configVersion
-                          ? `Config ${profile.configVersion} · `
-                          : ""}
-                        {(profile.qualification ?? "EXPLORATORY").replaceAll(
-                          "_",
-                          " ",
-                        )}
-                        <br />
-                        {profile.qualificationReason ??
-                          "No qualifying evidence is linked to this profile configuration."}
-                      </>
-                    }
-                  >
-                    <Button
-                      variant="profile"
-                      role="tab"
-                      aria-selected={activeProfile === profile.id}
-                      onClick={() => setActiveProfile(profile.id)}
-                    >
-                      {profile.name}
-                    </Button>
-                  </Tip>
-                ))}
-            </div>
-            <ScannerFilters
-              filters={boardFilters}
-              sectors={sectorOptions}
-              changed={setBoardFilters}
-            />
-            <Popover
-              label="Alert settings"
-              trigger={() => (
-                <>
-                  ALERTS · {notificationPreference === "enabled" ? "ON" : "OFF"}
-                  {soundEnabled ? " · SOUND" : ""}
-                </>
-              )}
+      </aside>
+      <main>
+        <ToastStack alerts={toasts} dismiss={dismissToast} />
+        <div className="tw:flex tw:flex-wrap tw:items-baseline tw:gap-x-[14px] tw:gap-y-2 tw:pt-7 tw:pb-5 tw:below-md:flex-col tw:below-md:items-start tw:below-md:gap-1 tw:below-md:pt-[15px] tw:below-md:pb-[13px]">
+          <h1>{PAGE_COPY[view].title}</h1>
+          <p className="tw:m-0 tw:text-[0.8rem] tw:text-ink-550">
+            {PAGE_COPY[view].lede}
+          </p>
+        </div>
+        {error && <p className="error-banner">{error}</p>}
+        {view === "scanner" ? (
+          <>
+            <section
+              className="tw:mb-3 tw:flex tw:items-center tw:gap-[9px] tw:rounded-input tw:border tw:border-line-bar tw:bg-surface tw:p-[5px]"
+              aria-label="Profile views and alerts"
             >
               <div
-                className="tw:flex tw:w-[min(310px,calc(100vw_-_32px))] tw:flex-col tw:items-stretch tw:gap-[11px]"
-                aria-label="Alert preferences"
+                className="tw:flex tw:min-w-0 tw:flex-auto tw:gap-[7px] tw:overflow-x-auto"
+                role="tablist"
               >
-                <div className="tw:flex tw:flex-1 tw:flex-col tw:gap-[3px]">
-                  <strong className="tw:text-[0.76rem]">
-                    Setup-instance alerts
-                  </strong>
-                  <span className="tw:text-[0.7rem] tw:text-ink-700">
-                    READY is durable and delivered once per setup instance.
-                    Context notifications stay off.
-                  </span>
-                </div>
                 <Tip
-                  label="Minimum minutes before the same setup instance may alert again. Set 0 for no cooldown."
-                  placement="left"
+                  label="Merged view: the single best setup per symbol across every enabled profile."
+                  placement="bottom-start"
                 >
-                  <FormField
-                    className="tw:relative tw:min-w-0"
-                    label="COOLDOWN"
+                  <Button
+                    variant="profile"
+                    role="tab"
+                    aria-selected={activeProfile === "ALL"}
+                    onClick={() => setActiveProfile("ALL")}
                   >
-                    <FieldInput
-                      className="tw:[appearance:textfield] tw:[&::-webkit-outer-spin-button]:appearance-none tw:[&::-webkit-inner-spin-button]:appearance-none tw:[&::-webkit-inner-spin-button]:m-0 tw:pr-[46px]"
-                      aria-label="Alert cooldown minutes"
-                      type="number"
-                      min="0"
-                      max="120"
-                      value={alertPolicy.cooldownMinutes}
-                      onChange={(event) =>
-                        void saveAlertPolicy({
-                          ...alertPolicy,
-                          cooldownMinutes: Math.max(
-                            0,
-                            Math.min(120, Number(event.target.value)),
-                          ),
-                        })
-                      }
-                    />
-                    <small className="tw:absolute tw:right-[11px] tw:bottom-[10px] tw:m-0 tw:font-mono tw:text-[0.58rem] tw:font-bold tw:tracking-[0.08em] tw:text-ink-750">
-                      MIN
-                    </small>
-                  </FormField>
+                    ALL
+                  </Button>
                 </Tip>
-                <Tip
-                  label="When a setup may alert a second time. NEW INSTANCE: once per setup instance only. AFTER INVALIDATION: alert again if it invalidates and re-forms."
-                  placement="left"
-                >
-                  <FormField className="tw:relative tw:min-w-0" label="RE-ARM">
-                    <FieldSelect
-                      className="tw:min-w-[150px]"
-                      aria-label="Alert re-arm rule"
-                      value={alertPolicy.rearmRule}
-                      onChange={(event) =>
-                        void saveAlertPolicy({
-                          ...alertPolicy,
-                          rearmRule: event.target
-                            .value as AlertPolicy["rearmRule"],
-                        })
+                {profiles
+                  .filter(
+                    (value) =>
+                      value.enabled &&
+                      (value.analysisKind ?? "SETUP") === "SETUP",
+                  )
+                  .map((profile) => (
+                    <Tip
+                      key={profile.id}
+                      label={
+                        <>
+                          <b>
+                            {displayStrategy(profile.strategyKey)}
+                            {profile.strategyVersion
+                              ? ` v${profile.strategyVersion}`
+                              : ""}
+                          </b>
+                          <br />
+                          {profile.configVersion
+                            ? `Config ${profile.configVersion} · `
+                            : ""}
+                          {(profile.qualification ?? "EXPLORATORY").replaceAll(
+                            "_",
+                            " ",
+                          )}
+                          <br />
+                          {profile.qualificationReason ??
+                            "No qualifying evidence is linked to this profile configuration."}
+                        </>
                       }
                     >
-                      <option value="NEW_SETUP_INSTANCE">NEW INSTANCE</option>
-                      <option value="AFTER_INVALIDATION">
-                        AFTER INVALIDATION
-                      </option>
-                    </FieldSelect>
-                  </FormField>
-                </Tip>
-                <div className="tw:flex tw:flex-row tw:flex-wrap tw:gap-[7px]">
-                  <Tip
-                    label="Context changes never raise notifications. Fixed by design, so context stays a filter rather than a trigger."
-                    placement="left"
-                  >
-                    <button
-                      type="button"
-                      className={ALERT_TOGGLE_CLASSES.disabled}
-                      disabled
-                    >
-                      CONTEXT · OFF
-                    </button>
-                  </Tip>
-                  <Tip
-                    label="Desktop notifications when a setup turns READY. Needs browser permission; blocked or unsupported browsers stay off."
-                    placement="left"
-                  >
-                    <button
-                      type="button"
-                      className={
-                        notificationPreference === "enabled"
-                          ? ALERT_TOGGLE_CLASSES.active
-                          : ALERT_TOGGLE_CLASSES.inactive
-                      }
-                      disabled={
-                        notificationPreference === "unsupported" ||
-                        notificationPreference === "blocked"
-                      }
-                      onClick={() => void toggleNotifications()}
-                    >
-                      BROWSER · {notificationPreference.toUpperCase()}
-                    </button>
-                  </Tip>
-                  <Tip
-                    label="Play a short tone when a READY alert fires. Requires one click on the page first, per browser autoplay rules."
-                    placement="left"
-                  >
-                    <button
-                      type="button"
-                      className={
-                        soundEnabled
-                          ? ALERT_TOGGLE_CLASSES.active
-                          : ALERT_TOGGLE_CLASSES.inactive
-                      }
-                      onClick={() => void toggleSound()}
-                    >
-                      SOUND · {soundEnabled ? "ON" : "OFF"}
-                    </button>
-                  </Tip>
-                </div>
+                      <Button
+                        variant="profile"
+                        role="tab"
+                        aria-selected={activeProfile === profile.id}
+                        onClick={() => setActiveProfile(profile.id)}
+                      >
+                        {profile.name}
+                      </Button>
+                    </Tip>
+                  ))}
               </div>
-            </Popover>
-          </section>
-          <ScannerBoard
-            rows={ranked}
-            modelRanks={modelRanks}
-            select={setSelected}
-            emptyMessage={
-              emptyBoardMessage(system?.operational.reasonCodes ?? []) ??
-              undefined
-            }
-          />
-          <AlertHistory alerts={alerts} select={setSelected} />
-        </>
-      ) : view === "universe" && universe ? (
-        <UniverseView
-          automation={universe}
-          updated={setUniverse}
-          marketId={selectedMarket}
-          marketChanged={setSelectedMarket}
-        />
-      ) : view === "discovery" ? (
-        <DiscoveryView marketId={selectedMarket} />
-      ) : (
-        // W9: research workspaces are code-split (see the `lazy(...)` declarations above), so
-        // switching into one of them for the first time triggers its chunk fetch here; `Suspense`
-        // just needs a fallback for that one moment, not a skeleton UI.
-        <Suspense fallback={<p className="tw:m-0 tw:text-ink-550">Loading…</p>}>
-          {view === "lab" ? (
-            <StrategyLab
-              profiles={profiles}
-              definitions={definitions}
-              updated={setProfiles}
-              marketId={selectedMarket}
-              onOpenBacktests={() => setView("backtests")}
-            />
-          ) : view === "backtests" ? (
-            <BacktestView
-              runs={backtests.filter((run) => run.marketId === selectedMarket)}
-              updateRuns={(updated) =>
-                setBacktests((current) => [
-                  ...updated,
-                  ...current.filter((run) => run.marketId !== selectedMarket),
-                ])
+              <ScannerFilters
+                filters={boardFilters}
+                sectors={sectorOptions}
+                changed={setBoardFilters}
+              />
+              <Popover
+                label="Alert settings"
+                trigger={() => (
+                  <>
+                    ALERTS ·{" "}
+                    {notificationPreference === "enabled" ? "ON" : "OFF"}
+                    {soundEnabled ? " · SOUND" : ""}
+                  </>
+                )}
+              >
+                <div
+                  className="tw:flex tw:w-[min(310px,calc(100vw_-_32px))] tw:flex-col tw:items-stretch tw:gap-[11px]"
+                  aria-label="Alert preferences"
+                >
+                  <div className="tw:flex tw:flex-1 tw:flex-col tw:gap-[3px]">
+                    <strong className="tw:text-[0.76rem]">
+                      Setup-instance alerts
+                    </strong>
+                    <span className="tw:text-[0.7rem] tw:text-ink-700">
+                      READY is durable and delivered once per setup instance.
+                      Context notifications stay off.
+                    </span>
+                  </div>
+                  <Tip
+                    label="Minimum minutes before the same setup instance may alert again. Set 0 for no cooldown."
+                    placement="left"
+                  >
+                    <FormField
+                      className="tw:relative tw:min-w-0"
+                      label="COOLDOWN"
+                    >
+                      <FieldInput
+                        className="tw:[appearance:textfield] tw:[&::-webkit-outer-spin-button]:appearance-none tw:[&::-webkit-inner-spin-button]:appearance-none tw:[&::-webkit-inner-spin-button]:m-0 tw:pr-[46px]"
+                        aria-label="Alert cooldown minutes"
+                        type="number"
+                        min="0"
+                        max="120"
+                        value={alertPolicy.cooldownMinutes}
+                        onChange={(event) =>
+                          void saveAlertPolicy({
+                            ...alertPolicy,
+                            cooldownMinutes: Math.max(
+                              0,
+                              Math.min(120, Number(event.target.value)),
+                            ),
+                          })
+                        }
+                      />
+                      <small className="tw:absolute tw:right-[11px] tw:bottom-[10px] tw:m-0 tw:font-mono tw:text-[0.58rem] tw:font-bold tw:tracking-[0.08em] tw:text-ink-750">
+                        MIN
+                      </small>
+                    </FormField>
+                  </Tip>
+                  <Tip
+                    label="When a setup may alert a second time. NEW INSTANCE: once per setup instance only. AFTER INVALIDATION: alert again if it invalidates and re-forms."
+                    placement="left"
+                  >
+                    <FormField
+                      className="tw:relative tw:min-w-0"
+                      label="RE-ARM"
+                    >
+                      <FieldSelect
+                        className="tw:min-w-[150px]"
+                        aria-label="Alert re-arm rule"
+                        value={alertPolicy.rearmRule}
+                        onChange={(event) =>
+                          void saveAlertPolicy({
+                            ...alertPolicy,
+                            rearmRule: event.target
+                              .value as AlertPolicy["rearmRule"],
+                          })
+                        }
+                      >
+                        <option value="NEW_SETUP_INSTANCE">NEW INSTANCE</option>
+                        <option value="AFTER_INVALIDATION">
+                          AFTER INVALIDATION
+                        </option>
+                      </FieldSelect>
+                    </FormField>
+                  </Tip>
+                  <div className="tw:flex tw:flex-row tw:flex-wrap tw:gap-[7px]">
+                    <Tip
+                      label="Context changes never raise notifications. Fixed by design, so context stays a filter rather than a trigger."
+                      placement="left"
+                    >
+                      <button
+                        type="button"
+                        className={ALERT_TOGGLE_CLASSES.disabled}
+                        disabled
+                      >
+                        CONTEXT · OFF
+                      </button>
+                    </Tip>
+                    <Tip
+                      label="Desktop notifications when a setup turns READY. Needs browser permission; blocked or unsupported browsers stay off."
+                      placement="left"
+                    >
+                      <button
+                        type="button"
+                        className={
+                          notificationPreference === "enabled"
+                            ? ALERT_TOGGLE_CLASSES.active
+                            : ALERT_TOGGLE_CLASSES.inactive
+                        }
+                        disabled={
+                          notificationPreference === "unsupported" ||
+                          notificationPreference === "blocked"
+                        }
+                        onClick={() => void toggleNotifications()}
+                      >
+                        BROWSER · {notificationPreference.toUpperCase()}
+                      </button>
+                    </Tip>
+                    <Tip
+                      label="Play a short tone when a READY alert fires. Requires one click on the page first, per browser autoplay rules."
+                      placement="left"
+                    >
+                      <button
+                        type="button"
+                        className={
+                          soundEnabled
+                            ? ALERT_TOGGLE_CLASSES.active
+                            : ALERT_TOGGLE_CLASSES.inactive
+                        }
+                        onClick={() => void toggleSound()}
+                      >
+                        SOUND · {soundEnabled ? "ON" : "OFF"}
+                      </button>
+                    </Tip>
+                  </div>
+                </div>
+              </Popover>
+            </section>
+            <ScannerBoard
+              rows={ranked}
+              modelRanks={modelRanks}
+              select={setSelected}
+              emptyMessage={
+                emptyBoardMessage(system?.operational.reasonCodes ?? []) ??
+                undefined
               }
-              marketId={selectedMarket}
-              onOpenUniverse={() => setView("universe")}
             />
-          ) : view === "bot" ? (
-            <BotView
-              marketId={selectedMarket}
-              paperBot={market?.paperBot}
-              onOpenPerformance={() => setView("botPerformance")}
-            />
-          ) : view === "botPerformance" ? (
-            <BotPerformanceView marketId={selectedMarket} />
-          ) : (
-            <LearningView marketId={selectedMarket} />
-          )}
-        </Suspense>
-      )}
-      <footer className="tw:mt-[22px] tw:-mx-8 tw:-mb-[18px] tw:flex tw:flex-wrap tw:gap-7 tw:border-t tw:border-line tw:px-8 tw:py-[9px] tw:font-mono tw:text-[0.62rem] tw:font-[650] tw:tracking-[0.1em] tw:text-ink-750 tw:below-md:-mx-[14px] tw:below-md:px-[14px]">
-        <Tip
-          label={
-            system
-              ? "The live market-data mode this API was started with. Never inferred client-side."
-              : "Mode has not loaded yet."
-          }
-          placement="top-start"
-        >
-          <span>MODE · {system ? system.mode.toUpperCase() : "—"}</span>
-        </Tip>
-        <span>API · {system?.version ?? "—"}</span>
-        <Tip
-          label={
-            system?.operational
-              ? system.operational.actionable
-                ? "Every actionability condition (auth, session, universe, benchmarks, engine sync, data freshness) is satisfied."
-                : `Not actionable: ${system.operational.reasonCodes.join(", ") || "waiting on dependencies"}.`
-              : "Actionability has not loaded yet."
-          }
-          placement="top-end"
-        >
-          <span>
-            SAFETY ·{" "}
-            {system?.operational
-              ? system.operational.actionable
-                ? "ACTIONABLE"
-                : "SIGNALS GATED"
-              : "—"}
-          </span>
-        </Tip>
-      </footer>
-    </main>
+            <AlertHistory alerts={alerts} select={setSelected} />
+          </>
+        ) : view === "universe" && universe ? (
+          <UniverseView
+            automation={universe}
+            updated={setUniverse}
+            marketId={selectedMarket}
+          />
+        ) : view === "discovery" ? (
+          <DiscoveryView
+            marketId={selectedMarket}
+            onOpenSymbol={(symbol) => {
+              setSelected(symbol);
+              setView("scanner");
+            }}
+          />
+        ) : (
+          // W9: research workspaces are code-split (see the `lazy(...)` declarations above), so
+          // switching into one of them for the first time triggers its chunk fetch here; `Suspense`
+          // just needs a fallback for that one moment, not a skeleton UI.
+          <Suspense
+            fallback={<p className="tw:m-0 tw:text-ink-550">Loading…</p>}
+          >
+            {view === "lab" ? (
+              <StrategyLab
+                profiles={profiles}
+                definitions={definitions}
+                updated={setProfiles}
+                marketId={selectedMarket}
+                onOpenBacktests={() => setView("backtests")}
+              />
+            ) : view === "backtests" ? (
+              <BacktestView
+                runs={backtests.filter(
+                  (run) => run.marketId === selectedMarket,
+                )}
+                updateRuns={(updated) =>
+                  setBacktests((current) => [
+                    ...updated,
+                    ...current.filter((run) => run.marketId !== selectedMarket),
+                  ])
+                }
+                marketId={selectedMarket}
+                onOpenUniverse={() => setView("universe")}
+              />
+            ) : view === "bot" ? (
+              <BotView
+                marketId={selectedMarket}
+                paperBot={market?.paperBot}
+                onOpenPerformance={() => setView("botPerformance")}
+              />
+            ) : view === "botPerformance" ? (
+              <BotPerformanceView marketId={selectedMarket} />
+            ) : (
+              <LearningView marketId={selectedMarket} />
+            )}
+          </Suspense>
+        )}
+        <footer className="tw:mt-[22px] tw:-mx-8 tw:-mb-[18px] tw:flex tw:flex-wrap tw:gap-7 tw:border-t tw:border-line tw:px-8 tw:py-[9px] tw:font-mono tw:text-[0.62rem] tw:font-[650] tw:tracking-[0.1em] tw:text-ink-750 tw:below-md:-mx-[14px] tw:below-md:px-[14px]">
+          <Tip
+            label={
+              system
+                ? "The live market-data mode this API was started with. Never inferred client-side."
+                : "Mode has not loaded yet."
+            }
+            placement="top-start"
+          >
+            <span>MODE · {system ? system.mode.toUpperCase() : "—"}</span>
+          </Tip>
+          <span>API · {system?.version ?? "—"}</span>
+          <Tip
+            label={
+              system?.operational
+                ? system.operational.actionable
+                  ? "Every actionability condition (auth, session, universe, benchmarks, engine sync, data freshness) is satisfied."
+                  : `Not actionable: ${system.operational.reasonCodes.join(", ") || "waiting on dependencies"}.`
+                : "Actionability has not loaded yet."
+            }
+            placement="top-end"
+          >
+            <span>
+              SAFETY ·{" "}
+              {system?.operational
+                ? system.operational.actionable
+                  ? "ACTIONABLE"
+                  : "SIGNALS GATED"
+                : "—"}
+            </span>
+          </Tip>
+        </footer>
+      </main>
+    </div>
   );
 }

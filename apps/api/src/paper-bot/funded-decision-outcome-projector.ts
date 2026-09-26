@@ -259,7 +259,13 @@ export class FundedDecisionOutcomeProjector {
         failed += 1;
       }
     }
-    const remaining = await this.repository.projectionGapCount(runId);
+    // Same bookkeeping as the repair pass: an uncapped candidate list is the
+    // complete set, so the failure count is the exact remainder; only a capped
+    // list can hide additional missing decisions.
+    const remaining =
+      candidates.length < limit
+        ? failed
+        : await this.repository.projectionGapCount(runId);
     return { projected, failed, remaining };
   }
 

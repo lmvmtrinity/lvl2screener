@@ -663,6 +663,22 @@ describe("funded comparison service", () => {
     );
   });
 
+  it("fails closed when a frozen source chunk no longer reproduces its digest", async () => {
+    const harness = buildHarness();
+    harness.repository.loadSessionChunks.mockResolvedValueOnce([]);
+    await expect(
+      harness.service.run(specId, {
+        attemptId: "attempt-source-gap",
+        maxSessions: 2,
+      }),
+    ).rejects.toMatchObject({
+      name: "FundedComparisonServiceError",
+      reason: "RETAINED_INPUT_MISSING",
+    });
+    expect(harness.finalizeCalls).toHaveLength(0);
+    expect(harness.getResult()).toBeUndefined();
+  });
+
   it("runs both sides for every incomplete session and finalizes exactly once", async () => {
     const harness = buildHarness();
     const outcome = await harness.service.run(specId, {

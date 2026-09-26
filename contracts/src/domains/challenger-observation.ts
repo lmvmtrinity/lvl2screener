@@ -420,6 +420,32 @@ export const challengerObservationReportSchema = z
       .nullable()
       .optional(),
     closedQuoteOutcomes: z.number().int().nonnegative(),
+    prospectiveEconomics: z
+      .object({
+        unit: challengerCurrencySchema,
+        status: z.enum(["BASELINE_LABELS_AVAILABLE", "UNAVAILABLE"]),
+        observedBaselineLabelDenominator: z.number().int().nonnegative(),
+        observedBaselineNetPnlAfterCosts: z.number().finite().nullable(),
+        decisionCounts: z
+          .object({
+            selected: z.number().int().nonnegative().nullable(),
+            rejected: z.number().int().nonnegative().nullable(),
+            noFill: z.number().int().nonnegative().nullable(),
+            invalid: z.number().int().nonnegative().nullable(),
+            missedWinner: z.number().int().nonnegative().nullable(),
+            unavailableReason: z.string().nullable(),
+          })
+          .strict(),
+        riskDiagnostics: z
+          .object({
+            drawdown: z.number().nonnegative().nullable(),
+            concentration: z.number().min(0).max(1).nullable(),
+            unavailableReason: z.string().nullable(),
+          })
+          .strict(),
+        unavailableReason: z.string().nullable(),
+      })
+      .strict(),
     prospectiveBrierScore: z.number().nonnegative().nullable(),
     comparison: sessionComparisonResultSchema.nullable(),
     comparisonUnavailableReason:

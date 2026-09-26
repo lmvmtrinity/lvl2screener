@@ -84,10 +84,10 @@ test.describe("pre-commissioning operator workflow", () => {
     await expect(page.getByText("BTO.TO READY (E2E)")).toBeVisible();
 
     const workspaces = [
-      [/^DAILY LIST/, "Daily candidate list"],
-      [/^STRATEGY LAB$/, "Strategy Lab"],
-      [/^LEARNING/, "Learning & Coordination"],
-      [/^SCANNER$/, "Live candidates"],
+      [/^Daily list/, "Daily candidate list"],
+      [/^Strategy lab$/, "Strategy Lab"],
+      [/^Learning$/, "Learning & Coordination"],
+      [/^Scanner$/, "Live candidates"],
     ] as const;
 
     for (const [button, heading] of workspaces) {
@@ -104,17 +104,23 @@ test.describe("pre-commissioning operator workflow", () => {
     request,
   }) => {
     await openDashboard(page);
-    await page.getByRole("button", { name: /^DAILY LIST/ }).click();
+    await page.getByRole("button", { name: /^Daily list/ }).click();
 
     const refreshResponse = page.waitForResponse(
       (response) =>
         new URL(response.url()).pathname === "/api/universe/refresh" &&
         response.request().method() === "POST",
     );
-    await page.getByRole("button", { name: "REFRESH NOW" }).click();
+    await page.getByRole("button", { name: "Refresh now" }).click();
     expect((await refreshResponse).status()).toBe(201);
 
-    await expect(page.locator(".universe-health")).toContainText("COMPLETED");
+    await expect(
+      page
+        .getByRole("region", { name: "Refresh activity" })
+        .getByRole("status"),
+    ).toContainText("Refresh completed");
+    await page.getByRole("button", { name: "More daily list tools" }).click();
+    await page.getByRole("menuitem", { name: "Refresh history" }).click();
     await expect(
       page.locator(".universe-history .universe-run").first(),
     ).toContainText("COMPLETED");
@@ -176,7 +182,7 @@ test.describe("pre-commissioning operator workflow", () => {
     request,
   }) => {
     await openDashboard(page);
-    await page.getByRole("button", { name: "STRATEGY LAB" }).click();
+    await page.getByRole("button", { name: "Strategy lab" }).click();
 
     const profileName = "E2E Momentum Profile";
     await page.getByLabel("Name").fill(profileName);

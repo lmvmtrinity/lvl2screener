@@ -55,6 +55,21 @@ it("refuses unsupported or unverified exposure", () => {
   ).toContain("COVERAGE_UNVERIFIED");
 });
 
+it("reports unverified coverage as an indicative excursion, never as available", () => {
+  const result = sampledExcursion({
+    ...base,
+    coverageVerified: false,
+    marks: [
+      { timestamp: "2026-09-01T14:01:00Z", bid: 98, admissible: true },
+      { timestamp: "2026-09-01T14:02:00Z", bid: 101, admissible: true },
+    ],
+  });
+  expect(result.status).toBe("INDICATIVE");
+  expect(result.reasonCodes).toEqual(["COVERAGE_UNVERIFIED"]);
+  expect(result.adversePct).toBeCloseTo(-2);
+  expect(result.favorablePct).toBeCloseTo(1);
+});
+
 it("refuses a completeness claim when replay excluded quotes for the instrument", () => {
   const result = sampledExcursion({
     ...base,

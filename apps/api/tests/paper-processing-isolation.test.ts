@@ -41,7 +41,7 @@ describe("live paper processing isolation", () => {
         new Map([["recovery", { timestamp: "2099-02-02T14:59:59Z" }]]),
         [],
       ),
-    ).toBe(true);
+    ).toBe("PROCESSED");
     expect(retainedQuotes).toHaveBeenCalledWith(
       ["candidate", "recovery"],
       "2099-02-02T15:00:00.000Z",
@@ -75,11 +75,84 @@ describe("live paper processing isolation", () => {
       process,
       operationalSnapshot: async () => ({ pendingFacts: 4_100 }),
     };
-    expect(await internal.processFundedPaperBot(new Map(), [])).toBe(true);
+    expect(await internal.processFundedPaperBot(new Map(), [])).toBe(
+      "PROCESSED",
+    );
     expect(process).toHaveBeenCalledWith(expect.anything(), {
       maxFacts: 500,
       maxDurationMs: 5_000,
     });
+  });
+
+  it("drains older funded facts while waiting without stamping current success", async () => {
+    const service = new QuestradeDataService(
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+    const internal = service as unknown as Record<string, any>;
+    internal.clock = () => new Date("2099-02-02T15:00:00Z");
+    internal.paperFundedBound = false;
+    internal.paperFundedCyclePending = false;
+    internal.paperFundedOperational = { pendingFacts: 1 };
+    const priorDrain = vi.fn(async () => 1);
+    const currentDrain = vi.fn(async () => 1);
+    internal.paperFundedRecoveryAdapters = new Map([
+      [
+        "prior",
+        {
+          drainEnqueued: priorDrain,
+        },
+      ],
+    ]);
+    internal.paperFundedAdapter = {
+      drainEnqueued: currentDrain,
+      operationalSnapshot: async () => ({ pendingFacts: 0 }),
+    };
+
+    internal.scheduleFundedDrainCatchUp();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    await internal.paperFundedWork;
+
+    expect(priorDrain).toHaveBeenCalledOnce();
+    expect(currentDrain).not.toHaveBeenCalled();
+    expect(internal.fundedLastSuccessAt).toBeUndefined();
+  });
+
+  it("scheduled waiting leaves the prior success time intact and drains older facts", async () => {
+    const service = new QuestradeDataService(
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+    const internal = service as unknown as Record<string, any>;
+    internal.clock = () => new Date("2099-02-02T15:00:00Z");
+    internal.paperFundedAdapter = {
+      drainEnqueued: vi.fn(async () => 1),
+      operationalSnapshot: vi.fn(async () => ({ pendingFacts: 0 })),
+    };
+    internal.paperFundedBound = false;
+    internal.paperFundedRecoveryAdapters = new Map([
+      ["prior", { drainEnqueued: vi.fn(async () => 1) }],
+    ]);
+    internal.paperFundedOperational = { pendingFacts: 1 };
+    internal.fundedLastSuccessAt = "2099-02-02T14:00:00.000Z";
+    internal.processFundedPaperBot = vi.fn(async () => "WAITING");
+
+    internal.scheduleFundedPaperBot(new Map(), []);
+    await internal.paperFundedWork;
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    await internal.paperFundedWork;
+
+    expect(internal.fundedLastSuccessAt).toBe("2099-02-02T14:00:00.000Z");
+    expect(
+      internal.paperFundedRecoveryAdapters.get("prior").drainEnqueued,
+    ).toHaveBeenCalledOnce();
+    expect(internal.paperFundedAdapter.drainEnqueued).not.toHaveBeenCalled();
   });
   it("starts both market timers without waiting for either first cycle", async () => {
     vi.useFakeTimers();
@@ -135,7 +208,7 @@ describe("live paper processing isolation", () => {
     };
     internal.processFundedPaperBot = vi.fn(async () => {
       await gate.promise;
-      return true;
+      return "PROCESSED";
     });
     await internal.processPaperBot([], []);
     await internal.processPaperBot([], []);

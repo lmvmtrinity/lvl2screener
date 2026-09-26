@@ -30,6 +30,7 @@ const snapshotHeader = z.object({
   admittedCount: z.number().int().positive(),
   members: z.array(z.object({ raw: z.unknown() })),
 });
+const catalogStatusHeader = snapshotHeader.omit({ members: true });
 export function validatedSnapshot(value: unknown): CatalogSnapshot {
   const parsed = snapshotHeader.parse(value);
   const raws = parsed.members.map((member) => member.raw);
@@ -69,6 +70,18 @@ class TransactionCatalogStore implements CatalogSnapshotStore {
       [marketId],
     );
     return result.rows[0] ? validatedSnapshot(result.rows[0].snapshot) : null;
+  }
+  async loadLatestHeader(
+    marketId: MarketId,
+  ): Promise<Omit<CatalogSnapshot, "members"> | null> {
+    marketIdSchema.parse(marketId);
+    const result = await this.db.query<{ snapshot: unknown }>(
+      "SELECT snapshot - 'members' AS snapshot FROM discovery_catalog_cache WHERE market_id=$1",
+      [marketId],
+    );
+    return result.rows[0]
+      ? catalogStatusHeader.parse(result.rows[0].snapshot)
+      : null;
   }
   async save(snapshot: CatalogSnapshot): Promise<void> {
     const validated = validatedSnapshot(snapshot);

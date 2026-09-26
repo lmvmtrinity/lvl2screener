@@ -7,6 +7,7 @@ import { PostgresResearchEvidenceStore } from "./research-evidence-repository.js
 import type { ResearchRuntimeIdentityProvider } from "./research-runtime-identity.js";
 import { verifyStudyProfiles } from "./study-profile-scope.js";
 import { canonicalJson } from "./research-coverage.js";
+import { assertBoundedRuleCandidateStudyPlan } from "./bounded-rule-candidates.js";
 export type StudyAdmission = (plan: FrozenStudyPlan) => Promise<void>;
 export function createStudyAdmission(
   pool: Pool,
@@ -14,6 +15,7 @@ export function createStudyAdmission(
 ): StudyAdmission {
   return async (raw) => {
     const plan = executableFrozenStudyPlanSchema.parse(raw);
+    assertBoundedRuleCandidateStudyPlan(plan);
     const runtime = await identity.current();
     if (!runtime) throw new Error("RESEARCH_RUNTIME_UNAVAILABLE");
     if (

@@ -31,6 +31,7 @@ import type {
   QuoteSizeUnit,
   Quote,
   RawCandle,
+  SymbolSnapshot,
   MarketDataRequestOptions,
 } from "./types.js";
 
@@ -121,6 +122,47 @@ export class QuestradeAdapter implements MarketDataAdapter {
           symbolId: value.symbolId,
           marketCap: value.marketCap,
           sector: normalizeSectorKey(value.industrySector),
+        })),
+      );
+    }
+    return result;
+  }
+
+  /** Batched listing snapshots (previous close, average volumes, market cap). */
+  async getSymbolSnapshots(
+    symbolIds: number[],
+    options?: MarketDataRequestOptions,
+  ): Promise<SymbolSnapshot[]> {
+    const uniqueIds = [...new Set(symbolIds)];
+    const result: SymbolSnapshot[] = [];
+    for (let index = 0; index < uniqueIds.length; index += 50) {
+      const ids = uniqueIds.slice(index, index + 50);
+      const details = await this.withSession(
+        "P3",
+        (session) =>
+          this.transport.getSymbolDetails(
+            session.apiServer,
+            session.accessToken,
+            ids,
+          ),
+        options,
+        "FUNDAMENTALS",
+        ids.length,
+      );
+      result.push(
+        ...details.map((value) => ({
+          symbol: value.symbol,
+          symbolId: value.symbolId,
+          marketCap: value.marketCap,
+          prevDayClosePrice: value.prevDayClosePrice ?? null,
+          averageVol3Months: value.averageVol3Months ?? null,
+          averageVol20Days: value.averageVol20Days ?? null,
+          securityType: value.securityType ?? null,
+          listingExchange: value.listingExchange ?? null,
+          currency: value.currency ?? null,
+          description: value.description ?? null,
+          isTradable: value.isTradable ?? null,
+          isQuotable: value.isQuotable ?? null,
         })),
       );
     }
@@ -262,7 +304,13 @@ export class QuestradeAdapter implements MarketDataAdapter {
       if (!(error instanceof QuestradeHttpError) || error.status !== 401)
         throw error;
       this.assertRequestActive(requestOptions);
-      session = await this.tokenManager.refresh();
+      // Conditional boundary: stale rejections for an older generation reuse
+      // the newer session; only a genuine 401 against the current generation
+      // starts one new refresh. Single retry is preserved: a second 401
+      // propagates visibly instead of looping.
+      const rejectedSession = session;
+      session =
+        await this.tokenManager.refreshAfterUnauthorized(rejectedSession);
       this.assertRequestActive(requestOptions);
       this.observe(requestOptions.observation, "HTTP_401_RETRY");
       return this.request(priority, () => operation(session), requestOptions);

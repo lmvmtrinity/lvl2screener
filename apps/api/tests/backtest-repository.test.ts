@@ -109,6 +109,7 @@ describe("PostgresBacktestStore replay input snapshots", () => {
     const store = new PostgresBacktestStore(pool as never);
     const input = {
       name: "historical",
+      marketId: "CA_TSX" as const,
       startDate: "2026-08-25",
       endDate: "2026-08-25",
       strategies: ["ORB_RETEST"] as const,

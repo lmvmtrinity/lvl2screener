@@ -112,6 +112,7 @@ export class TradingViewShadowComparator {
   private readonly parityStore: DiscoveryParityStore;
   private readonly clock: () => Date;
   private readonly logger?: ShadowComparatorOptions["logger"];
+  private statusCache?: { expiresAt: number; value: DiscoveryParityStatus };
 
   constructor(options: ShadowComparatorOptions) {
     this.marketId = options.marketId;
@@ -353,6 +354,7 @@ export class TradingViewShadowComparator {
     });
 
     await this.parityStore.save(audit);
+    this.statusCache = undefined;
 
     this.logger?.info({
       event: "DISCOVERY_PARITY_AUDIT_RECORDED",
@@ -371,26 +373,38 @@ export class TradingViewShadowComparator {
   }
 
   async getStatus(): Promise<DiscoveryParityStatus> {
+    const now = this.clock().getTime();
+    if (this.statusCache && now < this.statusCache.expiresAt)
+      return this.statusCache.value;
     const latest = await this.parityStore.loadLatest(this.marketId);
-    const recent = await this.parityStore.listAudits(this.marketId, 20);
-    const auditCount = await this.parityStore.countAudits(this.marketId);
-
+    const summary = this.parityStore.statusSummary
+      ? await this.parityStore.statusSummary(this.marketId)
+      : null;
+    const recent = summary
+      ? null
+      : await this.parityStore.listAudits(this.marketId, 20);
+    const auditCount =
+      summary?.auditCount ??
+      (await this.parityStore.countAudits(this.marketId));
     const averageOverlapRatio =
-      recent.length > 0
+      summary?.averageOverlapRatio ??
+      (recent?.length
         ? Number(
             (
               recent.reduce((acc, curr) => acc + curr.overlapRatio, 0) /
               recent.length
             ).toFixed(4),
           )
-        : null;
+        : null);
 
-    return discoveryParityStatusSchema.parse({
+    const value = discoveryParityStatusSchema.parse({
       marketId: this.marketId,
       latestAudit: latest,
       auditCount,
       averageOverlapRatio,
       lastAuditedAt: latest?.auditedAt ?? null,
     });
+    this.statusCache = { expiresAt: now + 20_000, value };
+    return value;
   }
 }

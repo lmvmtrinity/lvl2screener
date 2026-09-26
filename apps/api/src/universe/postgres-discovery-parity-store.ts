@@ -14,6 +14,10 @@ export interface DiscoveryParityStore {
   ): Promise<DiscoveryParityAudit[]>;
   getAudit(id: string): Promise<DiscoveryParityAudit | null>;
   countAudits(marketId: MarketId): Promise<number>;
+  statusSummary?(marketId: MarketId): Promise<{
+    auditCount: number;
+    averageOverlapRatio: number | null;
+  }>;
 }
 
 /**
@@ -168,6 +172,31 @@ export class PostgresDiscoveryParityStore implements DiscoveryParityStore {
       [marketId],
     );
     return Number(result.rows[0]?.count ?? 0);
+  }
+
+  async statusSummary(marketId: MarketId): Promise<{
+    auditCount: number;
+    averageOverlapRatio: number | null;
+  }> {
+    const result = await this.pool.query<{
+      audit_count: string;
+      average_overlap_ratio: string | null;
+    }>(
+      `SELECT
+         (SELECT count(*)::text FROM discovery_parity_audit WHERE market_id=$1) AS audit_count,
+         (SELECT round(avg(overlap_ratio)::numeric, 4)::text FROM (
+           SELECT overlap_ratio FROM discovery_parity_audit
+           WHERE market_id=$1 ORDER BY audited_at DESC, id DESC LIMIT 20
+         ) recent) AS average_overlap_ratio`,
+      [marketId],
+    );
+    return {
+      auditCount: Number(result.rows[0]?.audit_count ?? 0),
+      averageOverlapRatio:
+        result.rows[0]?.average_overlap_ratio === null
+          ? null
+          : Number(result.rows[0]?.average_overlap_ratio),
+    };
   }
 
   private mapRow(row: Record<string, unknown>): DiscoveryParityAudit {

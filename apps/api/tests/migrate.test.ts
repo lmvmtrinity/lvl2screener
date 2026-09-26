@@ -20,6 +20,12 @@ function migration(
   };
 }
 
+async function loadMigrationsThrough138(): Promise<readonly Migration[]> {
+  return (await loadMigrations()).filter(
+    ({ filename }) => Number.parseInt(filename.slice(0, 3), 10) <= 138,
+  );
+}
+
 type LedgerRecord = {
   filename: string;
   checksum: string;
@@ -120,9 +126,31 @@ describe("migration runner", () => {
     expect(migrations.map(({ filename }) => filename)).toEqual(
       [...migrations.map(({ filename }) => filename)].sort(),
     );
-    expect(migrations).toHaveLength(132);
-    expect(migrations.at(-1)?.filename).toBe(
-      "132-funded-comparison-records.sql",
+    expect(migrations).toHaveLength(156);
+    expect(migrations.at(-1)?.filename).toBe("156-historical-archive.sql");
+    // Migration 145 keeps the current funded run inside the planner's run_id
+    // statistics. With the default 10% analyze scale factor a multi-million-row
+    // inbox is re-analyzed only after hundreds of thousands of changes, so the
+    // new run is estimated at one row and per-fact primary-key lookups filter
+    // the whole run through a run-prefixed index instead.
+    const analyzeCadence = migrations.find(
+      (migration) =>
+        migration.filename === "145-funded-inbox-analyze-cadence.sql",
+    );
+    expect(analyzeCadence?.requirements).toEqual([
+      { table: "foundation_schema_version", foundationVersion: 145 },
+    ]);
+    for (const table of ["paper_funded_fact", "paper_funded_event"]) {
+      expect(analyzeCadence?.sql).toContain(
+        `ALTER TABLE ${table} SET (
+  autovacuum_analyze_scale_factor = 0,
+  autovacuum_analyze_threshold = 5000
+);`,
+      );
+      expect(analyzeCadence?.sql).toContain(`ANALYZE ${table};`);
+    }
+    expect(analyzeCadence?.sql).toContain(
+      "VALUES(145, 'Analyze funded inbox and events on a fixed change cadence')",
     );
     const causal = migrations.find(
       (migration) => migration.filename === "131-funded-causal-provenance.sql",
@@ -444,7 +472,9 @@ describe("migration runner", () => {
 
     // Migration 132 adds the immutable FP03 comparison records additively and
     // never rewrites 130 or 131.
-    const comparison = migrations.at(-1);
+    const comparison = migrations.find(
+      (migration) => migration.filename === "132-funded-comparison-records.sql",
+    );
     expect(comparison?.sql).toContain("FUNDED_COMPARISON");
     expect(comparison?.sql).toContain(
       "CREATE UNIQUE INDEX IF NOT EXISTS backtest_run_id_market_unique",
@@ -548,6 +578,208 @@ describe("migration runner", () => {
         definitionIncludes: "UNIQUE (run_id)",
       },
     });
+    // Migration 133 only relaxes NOT NULL for the duplicate snapshot copy.
+    // Stage 1 stops writing it; the column is dropped by a later deployment.
+    const snapshotNullable = migrations.find(
+      (migration) =>
+        migration.filename === "133-strategy-signal-snapshot-json-nullable.sql",
+    );
+    expect(snapshotNullable?.sql).toContain(
+      "ALTER TABLE strategy_signal ALTER COLUMN feature_snapshot_json DROP NOT NULL",
+    );
+    expect(snapshotNullable?.sql).not.toContain("DROP COLUMN");
+    expect(snapshotNullable?.requirements).toEqual([
+      { table: "foundation_schema_version", foundationVersion: 133 },
+    ]);
+    expect(snapshotNullable?.sql).toContain(
+      "VALUES(133, 'Strategy signal duplicate snapshot copy made nullable')",
+    );
+    // Migration 134 drops lookup indexes superseded by the market/profile
+    // scoped indexes. The feature-snapshot index is the FK child index used by
+    // retention deletes and must survive.
+    const dropSuperseded = migrations.find(
+      (migration) => migration.filename === "134-drop-superseded-indexes.sql",
+    );
+    expect(dropSuperseded?.requirements).toEqual([
+      { table: "foundation_schema_version", foundationVersion: 133 },
+    ]);
+    expect(dropSuperseded?.sql).toContain(
+      "DROP INDEX IF EXISTS strategy_signal_latest_idx",
+    );
+    expect(dropSuperseded?.sql).toContain(
+      "DROP INDEX IF EXISTS strategy_evaluation_profile_latest_idx",
+    );
+    expect(dropSuperseded?.sql).toContain(
+      "DROP INDEX IF EXISTS strategy_evaluation_opportunities_idx",
+    );
+    expect(dropSuperseded?.sql).not.toContain(
+      "DROP INDEX IF EXISTS strategy_evaluation_feature_snapshot_idx",
+    );
+    expect(dropSuperseded?.sql).toContain(
+      "VALUES(134, 'Drop superseded strategy lookup indexes')",
+    );
+    // Migration 135 makes the funded repair/projection SIGNAL branch readable
+    // through a selective partial index instead of scanning every completed
+    // fact for the run.
+    const signalIndex = migrations.find(
+      (migration) =>
+        migration.filename === "135-funded-signal-fact-partial-index.sql",
+    );
+    expect(signalIndex?.requirements).toEqual([
+      { table: "foundation_schema_version", foundationVersion: 134 },
+    ]);
+    expect(signalIndex?.sql).toContain(
+      "CREATE INDEX IF NOT EXISTS paper_funded_fact_signal_outcome_idx",
+    );
+    expect(signalIndex?.sql).toContain(
+      "WHERE (fact->>'type')='SIGNAL' AND outcome IS NOT NULL",
+    );
+    expect(signalIndex?.sql).toContain(
+      "VALUES(135, 'Index completed SIGNAL facts per funded run')",
+    );
+    // Migration 136 adds the authority-disabled FP04 shadow-observation
+    // persistence additively: immutable gate policy/enrollment/batch/attempt
+    // identity, append-only results, projections, labels, reports and receipts.
+    const shadow = migrations.find(
+      (migration) => migration.filename === "136-funded-shadow-observation.sql",
+    );
+    const shadowRequirements = shadow?.requirements ?? [];
+    const requirementFor = (table: string) =>
+      shadowRequirements.find((requirement) => requirement.table === table);
+    expect(requirementFor("funded_shadow_gate_policy")?.columns).toEqual(
+      expect.arrayContaining(["stage_b_approval", "gate_policy_digest"]),
+    );
+    expect(requirementFor("funded_shadow_gate_policy")?.indexes).toEqual(
+      expect.arrayContaining([
+        "funded_shadow_gate_policy_id_market_currency_uq",
+      ]),
+    );
+    expect(requirementFor("funded_shadow_gate_policy")?.triggers).toEqual(
+      expect.arrayContaining([
+        "funded_shadow_gate_policy_validate",
+        "funded_shadow_gate_policy_immutable",
+      ]),
+    );
+    expect(requirementFor("funded_shadow_gate_policy")?.constraint).toEqual({
+      name: "funded_shadow_gate_policy_stage_b_check",
+      definitionIncludes: "referenceSessionCount",
+    });
+    expect(requirementFor("funded_shadow_enrollment")?.columns).toEqual(
+      expect.arrayContaining([
+        "champion_policy_digest",
+        "challenger_artifact_digest",
+        "effective_from",
+        "enrollment_digest",
+      ]),
+    );
+    expect(requirementFor("funded_shadow_enrollment")?.triggers).toEqual(
+      expect.arrayContaining([
+        "funded_shadow_enrollment_validate",
+        "funded_shadow_enrollment_immutable",
+      ]),
+    );
+    expect(requirementFor("funded_shadow_enrollment")?.constraint).toEqual({
+      name: "funded_shadow_enrollment_challenger_fk",
+      definitionIncludes: "challenger_artifact_digest",
+    });
+    expect(requirementFor("funded_shadow_attempt")?.columns).toEqual(
+      expect.arrayContaining([
+        "decision_sequence",
+        "decision_input_digest",
+        "deadline_at",
+        "attempt_digest",
+      ]),
+    );
+    expect(requirementFor("funded_shadow_attempt")?.triggers).toEqual(
+      expect.arrayContaining([
+        "funded_shadow_attempt_validate",
+        "funded_shadow_attempt_immutable",
+      ]),
+    );
+    expect(requirementFor("funded_shadow_attempt")?.constraint).toEqual({
+      name: "funded_shadow_attempt_input_check",
+      definitionIncludes: "UNAVAILABLE",
+    });
+    expect(requirementFor("funded_shadow_attempt_result")?.columns).toEqual(
+      expect.arrayContaining([
+        "disposition",
+        "prediction_id",
+        "failure_reason",
+        "result_digest",
+      ]),
+    );
+    expect(requirementFor("funded_shadow_attempt_result")?.triggers).toEqual(
+      expect.arrayContaining([
+        "funded_shadow_attempt_result_validate",
+        "funded_shadow_attempt_result_immutable",
+      ]),
+    );
+    expect(requirementFor("funded_shadow_attempt_result")?.constraint).toEqual({
+      name: "funded_shadow_attempt_result_pairing_check",
+      definitionIncludes: "TIMELY_PREDICTION",
+    });
+    expect(requirementFor("funded_shadow_report")?.columns).toEqual(
+      expect.arrayContaining(["report", "report_digest"]),
+    );
+    expect(requirementFor("funded_shadow_report")?.triggers).toEqual(
+      expect.arrayContaining([
+        "funded_shadow_report_validate",
+        "funded_shadow_report_immutable",
+      ]),
+    );
+    expect(requirementFor("funded_shadow_report")?.constraint).toEqual({
+      name: "funded_shadow_report_no_authority_check",
+      definitionIncludes: "authorityEffect",
+    });
+    expect(requirementFor("foundation_schema_version")).toEqual({
+      table: "foundation_schema_version",
+      foundationVersion: 136,
+    });
+    expect(shadow?.sql).toContain("reject_funded_shadow_mutation");
+    expect(shadow?.sql).toContain("funded_shadow_batch_projection_validate");
+    expect(shadow?.sql).toContain("funded_shadow_label_validate");
+    expect(shadow?.sql).toContain(
+      "VALUES (136, 'Prospective funded champion/challenger shadow observation')",
+    );
+    // Migration 137 hardens the FP04 database boundary without rewriting 136.
+    const shadowHardening = migrations.find(
+      (migration) =>
+        migration.filename === "137-funded-shadow-boundary-hardening.sql",
+    );
+    expect(shadowHardening?.requirements).toEqual([
+      {
+        table: "funded_shadow_gate_policy",
+        constraint: {
+          name: "funded_shadow_gate_policy_window_check",
+          definitionIncludes: "minDecisions",
+        },
+      },
+      {
+        table: "funded_shadow_report",
+        constraint: {
+          name: "funded_shadow_report_no_authority_check",
+          definitionIncludes: "authorityEffect",
+        },
+      },
+      {
+        table: "funded_shadow_batch_projection",
+        constraint: {
+          name: "funded_shadow_batch_projection_batch_ownership_fk",
+          definitionIncludes: "market_id",
+        },
+      },
+      { table: "foundation_schema_version", foundationVersion: 137 },
+    ]);
+    expect(shadowHardening?.sql).toContain(
+      "'authorityEffect') IS NOT DISTINCT FROM 'NONE'",
+    );
+    expect(shadowHardening?.sql).toContain(
+      "batch_enrollment <> NEW.enrollment_id",
+    );
+    expect(shadowHardening?.sql).toContain("terminal attempt result");
+    expect(shadowHardening?.sql).toContain(
+      "VALUES (137, 'Funded shadow observation boundary hardening')",
+    );
     const refusalSidecar = migrations.find(
       (migration) =>
         migration.filename === "129-funded-refusal-inbox-sidecar.sql",
@@ -843,6 +1075,214 @@ describe("migration runner", () => {
     ).resolves.toEqual({ applied: [], seeded: [] });
   });
 
+  it("accepts the exact contiguous 139-144 rollback suffix after migration 138", async () => {
+    const client = new FakeClient();
+    client.tables.add("schema_migration");
+    const migrations = await loadMigrationsThrough138();
+    client.ledger = migrations.map(({ filename, checksum }) => ({
+      filename,
+      checksum,
+      seeded: false,
+    }));
+    client.ledger.push(
+      {
+        filename: "139-strategy-learning-trial-ledger.sql",
+        checksum:
+          "b3d15e76935c8a4511430c129752b8651c3e7a14f43db065a9ea32f6cdccb08f",
+        seeded: false,
+      },
+      {
+        filename: "140-signal-model-experiments.sql",
+        checksum:
+          "ab1239eacb32bf58ee4567422c733b65876c9eddfce4eb0e8075edd8d1e89fb0",
+        seeded: false,
+      },
+      {
+        filename: "141-backtest-opportunity-capture.sql",
+        checksum:
+          "5931fb2445e4fd1ce9590aaf988027920bd56e6b9febfa0186dc98f89851d7c9",
+        seeded: false,
+      },
+      {
+        filename: "142-signal-model-research-plan-v2.sql",
+        checksum:
+          "083585f20e4f3b0fcd63afaea9ce8e64be78e18529c43da0167e87e247e51938",
+        seeded: false,
+      },
+      {
+        filename: "143-strategy-study-test-session-claims.sql",
+        checksum:
+          "c6b9f6b0dc800d33d66dbbb534982fde5506436d1c07c7594623ede1ce0e5d4a",
+        seeded: false,
+      },
+      {
+        filename: "144-signal-model-prospective-candidate.sql",
+        checksum:
+          "f12c7bc0228835f08891b832b22f84f9700b6434e1ebca0c281c24e9d4bbf03c",
+        seeded: false,
+      },
+    );
+
+    await expect(
+      migrate(fakePool(client) as never, { migrations }),
+    ).resolves.toEqual({ applied: [], seeded: [] });
+    expect(client.executed).toEqual([]);
+    expect(client.ledger).toHaveLength(migrations.length + 6);
+  });
+
+  it.each([
+    "139-strategy-learning-trial-ledger.sql",
+    "140-signal-model-experiments.sql",
+    "141-backtest-opportunity-capture.sql",
+    "142-signal-model-research-plan-v2.sql",
+    "143-strategy-study-test-session-claims.sql",
+    "144-signal-model-prospective-candidate.sql",
+  ])("rejects a checksum mismatch for %s", async (filename) => {
+    const client = new FakeClient();
+    client.tables.add("schema_migration");
+    const migrations = await loadMigrationsThrough138();
+    client.ledger = migrations.map(({ filename, checksum }) => ({
+      filename,
+      checksum,
+      seeded: false,
+    }));
+    const futureNames = [
+      "139-strategy-learning-trial-ledger.sql",
+      "140-signal-model-experiments.sql",
+      "141-backtest-opportunity-capture.sql",
+      "142-signal-model-research-plan-v2.sql",
+      "143-strategy-study-test-session-claims.sql",
+      "144-signal-model-prospective-candidate.sql",
+    ];
+    const correctChecksums = [
+      "b3d15e76935c8a4511430c129752b8651c3e7a14f43db065a9ea32f6cdccb08f",
+      "ab1239eacb32bf58ee4567422c733b65876c9eddfce4eb0e8075edd8d1e89fb0",
+      "5931fb2445e4fd1ce9590aaf988027920bd56e6b9febfa0186dc98f89851d7c9",
+      "083585f20e4f3b0fcd63afaea9ce8e64be78e18529c43da0167e87e247e51938",
+      "c6b9f6b0dc800d33d66dbbb534982fde5506436d1c07c7594623ede1ce0e5d4a",
+      "f12c7bc0228835f08891b832b22f84f9700b6434e1ebca0c281c24e9d4bbf03c",
+    ];
+    client.ledger.push(
+      ...futureNames.map((futureFilename, index) => ({
+        filename: futureFilename,
+        checksum:
+          futureFilename === filename
+            ? "0".repeat(64)
+            : correctChecksums[index]!,
+        seeded: false,
+      })),
+    );
+
+    await expect(
+      migrate(fakePool(client) as never, { migrations }),
+    ).rejects.toThrow(`Checksum mismatch for ${filename}`);
+  });
+
+  it("rejects a gap or an unknown migration interleaved in the known future suffix", async () => {
+    const migrations = await loadMigrationsThrough138();
+    const scenarios: {
+      futureRecords: LedgerRecord[];
+      expectedError: string;
+    }[] = [
+      {
+        futureRecords: [
+          {
+            filename: "139-strategy-learning-trial-ledger.sql",
+            checksum:
+              "b3d15e76935c8a4511430c129752b8651c3e7a14f43db065a9ea32f6cdccb08f",
+            seeded: false,
+          },
+          {
+            filename: "141-backtest-opportunity-capture.sql",
+            checksum:
+              "5931fb2445e4fd1ce9590aaf988027920bd56e6b9febfa0186dc98f89851d7c9",
+            seeded: false,
+          },
+          {
+            filename: "142-signal-model-research-plan-v2.sql",
+            checksum:
+              "083585f20e4f3b0fcd63afaea9ce8e64be78e18529c43da0167e87e247e51938",
+            seeded: false,
+          },
+        ],
+        expectedError:
+          "Migration ledger skips an earlier migration before 141-backtest-opportunity-capture.sql",
+      },
+      {
+        futureRecords: [
+          {
+            filename: "139-strategy-learning-trial-ledger.sql",
+            checksum:
+              "b3d15e76935c8a4511430c129752b8651c3e7a14f43db065a9ea32f6cdccb08f",
+            seeded: false,
+          },
+          {
+            filename: "140-unrecognized.sql",
+            checksum: "0".repeat(64),
+            seeded: false,
+          },
+        ],
+        expectedError: "unknown migration 140-unrecognized.sql",
+      },
+      {
+        futureRecords: [
+          {
+            filename: "139-strategy-learning-trial-ledger.sql",
+            checksum:
+              "b3d15e76935c8a4511430c129752b8651c3e7a14f43db065a9ea32f6cdccb08f",
+            seeded: false,
+          },
+          {
+            filename: "140-signal-model-experiments.sql",
+            checksum:
+              "ab1239eacb32bf58ee4567422c733b65876c9eddfce4eb0e8075edd8d1e89fb0",
+            seeded: false,
+          },
+          {
+            filename: "141-backtest-opportunity-capture.sql",
+            checksum:
+              "5931fb2445e4fd1ce9590aaf988027920bd56e6b9febfa0186dc98f89851d7c9",
+            seeded: false,
+          },
+          {
+            filename: "142-signal-model-research-plan-v2.sql",
+            checksum:
+              "083585f20e4f3b0fcd63afaea9ce8e64be78e18529c43da0167e87e247e51938",
+            seeded: false,
+          },
+          {
+            filename: "143-strategy-study-test-session-claims.sql",
+            checksum:
+              "c6b9f6b0dc800d33d66dbbb534982fde5506436d1c07c7594623ede1ce0e5d4a",
+            seeded: false,
+          },
+          {
+            filename: "144-unrecognized.sql",
+            checksum: "0".repeat(64),
+            seeded: false,
+          },
+        ],
+        expectedError: "unknown migration 144-unrecognized.sql",
+      },
+    ];
+    for (const { futureRecords, expectedError } of scenarios) {
+      const client = new FakeClient();
+      client.tables.add("schema_migration");
+      client.ledger = [
+        ...migrations.map(({ filename, checksum }) => ({
+          filename,
+          checksum,
+          seeded: false,
+        })),
+        ...futureRecords,
+      ];
+
+      await expect(
+        migrate(fakePool(client) as never, { migrations }),
+      ).rejects.toThrow(expectedError);
+    }
+  });
+
   it("declares only known released digests as production compatibility exceptions", async () => {
     const migrations = await loadMigrations();
     expect(
@@ -869,6 +1309,21 @@ describe("migration runner", () => {
         ?.acceptedChecksums,
     ).toEqual([
       "63cf83195c36cf8dddd5ff16d54b5bb80064214b322cdd20be58dd0d903cb2b7",
+    ]);
+    expect(
+      migrations.find(
+        (value) => value.filename === "054-strategy-retention-optimization.sql",
+      )?.acceptedChecksums,
+    ).toEqual([
+      "68277a03cbd18fec77b4fd1dcf246954320f8414772c0161a2d667dc05dffbcb",
+    ]);
+    expect(
+      migrations.find(
+        (value) =>
+          value.filename === "078-paper-qualification-label-boundaries.sql",
+      )?.acceptedChecksums,
+    ).toEqual([
+      "ff0d5785e441598f1799abb2ab360a64a23194bc08a7e19635b235ad7685f666",
     ]);
   });
 

@@ -6,12 +6,14 @@ import { PostgresCoverageRequestRepository } from "../backtests/coverage-request
 import { PostgresResearchCoverageSource } from "../backtests/research-coverage-source.js";
 import { PostgresResearchEvidenceStore } from "../backtests/research-evidence-repository.js";
 import { contentHash } from "../backtests/research-coverage.js";
+import { challengerCoverageKey } from "../backtests/research-runtime-supersession.js";
 import { researchSessionDates } from "../backtests/research-lineage-service.js";
 import { PostgresChallengerExperimentStore } from "./challenger-experiment-repository.js";
 import {
   evidenceWorkKey,
   PostgresEvidenceAutomationRepository,
 } from "./evidence-automation-repository.js";
+import { calendarPolicyHashFor } from "../universe/market-calendar.js";
 
 /** Routine read-side preparation for explicitly enrolled experiments only.
  * Runs on evidence catch-up, never on the latency-sensitive observation path.
@@ -43,16 +45,6 @@ export class ChallengerCoverageAutomation {
       for (const date of records.acceptancePlan.comparison.expectedSessions.filter(
         (value) => value < today,
       )) {
-        const key = `challenger-coverage:${experiment.id}:${date}`;
-        if (
-          (
-            await this.pool.query(
-              "SELECT id FROM research_coverage_request WHERE idempotency_key=$1",
-              [key],
-            )
-          ).rowCount
-        )
-          continue;
         const runtime = await this.runtime.current();
         const identity = {
           kind: "COVERAGE" as const,
@@ -78,6 +70,20 @@ export class ChallengerCoverageAutomation {
           );
           return prepared;
         }
+        // Runtime-bound immutable identity: a runtime replacement creates a new
+        // request row while the previous request and its failure stay retained.
+        // Repeated polling under the same runtime finds this key and creates
+        // nothing further (idempotent per runtime).
+        const key = challengerCoverageKey(experiment.id, date, runtime);
+        if (
+          (
+            await this.pool.query(
+              "SELECT id FROM research_coverage_request WHERE idempotency_key=$1",
+              [key],
+            )
+          ).rowCount
+        )
+          continue;
         const policy = { ...this.policies[marketId], marketId };
         const cutoff = this.now().toISOString();
         const recipe: FrozenCoverageRecipe = {
@@ -114,9 +120,11 @@ export class ChallengerCoverageAutomation {
             policy: "retained-universe-membership-v1",
             marketId,
           }),
-          calendarPolicyHash: contentHash({
-            policy: "retained-session-calendar-v1",
+          calendarPolicyHash: calendarPolicyHashFor({
+            marketId,
             timezone: policy.timezone,
+            sessionDates: [date],
+            inputCutoff: cutoff,
           }),
         };
         const evidence = new PostgresResearchEvidenceStore(this.pool);

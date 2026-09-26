@@ -299,6 +299,55 @@ def test_incremental_candidate_warmup_preserves_existing_session_state() -> None
     assert "OPENING_RANGE_UNAVAILABLE" in readiness.reasons
 
 
+def test_retiring_a_candidate_clears_its_state_and_keeps_the_others() -> None:
+    engine = warmed_engine_with_benchmark()
+    engine.ingest_quotes([quote()])
+    added_id = UUID("44444444-4444-4444-8444-444444444444")
+    added = InstrumentRef(instrument_id=added_id, symbol="ADD.TO")
+    candle = CandleRecord(
+        instrument_id=added_id,
+        symbol="ADD.TO",
+        timeframe="OneDay",
+        start=SESSION_START - timedelta(days=1),
+        end=SESSION_START,
+        open=100,
+        high=101,
+        low=99,
+        close=100.5,
+        volume=10_000,
+        is_complete=True,
+    )
+    engine.warm_instrument(added, [candle])
+    retained_memory = object()
+    engine.strategies._memory[(INSTRUMENT_ID, "ORB_RETEST")] = object()  # type: ignore[assignment]
+    engine.strategies._memory[(added_id, "ORB_RETEST")] = retained_memory  # type: ignore[assignment]
+
+    assert engine.retire_instruments([INSTRUMENT_ID]) == [INSTRUMENT_ID]
+
+    assert INSTRUMENT_ID not in engine._instruments
+    assert not engine.is_candidate(INSTRUMENT_ID)
+    assert all(key[0] != INSTRUMENT_ID for key in engine._candles)
+    assert INSTRUMENT_ID not in engine._candle_series
+    assert INSTRUMENT_ID not in engine._quotes
+    assert INSTRUMENT_ID not in engine._snapshots
+    assert engine.strategies._memory == {(added_id, "ORB_RETEST"): retained_memory}
+    # The other candidate and the benchmark keep their session state.
+    assert engine.is_candidate(added_id)
+    assert engine._candles[(added_id, "OneDay", candle.start)] == candle
+    assert BENCHMARK_ID in engine._instruments
+
+
+def test_retiring_ignores_unknown_ids_and_refuses_benchmarks() -> None:
+    engine = warmed_engine_with_benchmark()
+    unknown = UUID("55555555-5555-4555-8555-555555555555")
+
+    assert engine.retire_instruments([unknown]) == []
+    with pytest.raises(ValueError, match="Benchmark"):
+        engine.retire_instruments([BENCHMARK_ID])
+    assert BENCHMARK_ID in engine._instruments
+    assert engine.is_candidate(INSTRUMENT_ID)
+
+
 @pytest.mark.parametrize("missing", [None, "opening", "history", "current", "future"])
 def test_discovery_readiness_requires_continuous_session_coverage(missing: str | None) -> None:
     engine = FeatureEngine()

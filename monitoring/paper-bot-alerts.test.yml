@@ -248,3 +248,106 @@ tests:
             exp_annotations:
               summary: Most recent discovery run failed
               description: Inspect the retained discovery failure, catalog/input provenance and scheduler state. A failed run must not produce intake additions or be reported as a zero-match result.
+  - interval: 1m
+    input_series:
+      - series: 'scanner_paper_bot_funded_shadow_active_enrollments{instance="test",job="paper-bot-ca"}'
+        values: "1x24"
+      - series: 'scanner_paper_bot_funded_shadow_pending_attempts{instance="test",job="paper-bot-ca"}'
+        values: "3x24"
+      - series: 'scanner_paper_bot_funded_shadow_oldest_pending_attempt_age_ms{instance="test",job="paper-bot-ca"}'
+        values: "360000x24"
+      - series: 'scanner_paper_bot_funded_shadow_missed_deadline_total{instance="test",job="paper-bot-ca"}'
+        values: "0 0 0 0 1x20"
+      - series: 'scanner_paper_bot_funded_shadow_reconcile_failures_total{instance="test",job="paper-bot-ca"}'
+        values: "0 0 0 0 0 1x19"
+      - series: 'scanner_paper_bot_funded_shadow_observer_failures_total{instance="test",job="paper-bot-ca"}'
+        values: "0x24"
+      - series: 'scanner_paper_bot_funded_shadow_ownership_refusals_total{instance="test",job="paper-bot-ca"}'
+        values: "0 0 0 0 0 0 1x18"
+      - series: 'scanner_paper_bot_funded_shadow_fallback_batches_total{instance="test",job="paper-bot-ca"}'
+        values: "0 0 0 0 0 0 0 0 1x16"
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: FundedShadowObserverBacklog
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              instance: test
+              job: paper-bot-ca
+            exp_annotations:
+              summary: Funded shadow observation has stale sealed attempts
+              description: An active SHADOW enrollment retains sealed attempts without a terminal result for over five minutes. Inspect the observer lease, scanner inference and reconciliation passes. This pauses enrollment evidence; it never grants authority and never triggers a challenger rollback.
+      - eval_time: 12m
+        alertname: FundedShadowPredictionDeadlineMissed
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              instance: test
+              job: paper-bot-ca
+            exp_annotations:
+              summary: Funded shadow predictions missed their deadlines
+              description: One or more funded shadow attempts reached their database-owned prediction deadline without a timely prediction. The affected batches fall back to champion order and remain counted; inspect observer scheduling and scanner latency rather than backdating a prediction.
+      - eval_time: 12m
+        alertname: FundedShadowReconciliationFailed
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              instance: test
+              job: paper-bot-ca
+            exp_annotations:
+              summary: Funded shadow observer or reconciliation failed
+              description: The funded shadow observer recorded a failure while sealing, projecting, labelling or loading a frozen identity. Funded champion processing is unaffected; investigate the observer separately and never bypass a frozen gate to clear the alert.
+      - eval_time: 12m
+        alertname: FundedShadowOwnershipRefused
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              instance: test
+              job: paper-bot-ca
+            exp_annotations:
+              summary: Funded shadow ownership or market boundary refused
+              description: A funded shadow observation refused a cross-market or mismatched champion identity. Preserve the refusal and the exact identities; never substitute another market, account, model or artifact to continue observation.
+      - eval_time: 24m
+        alertname: FundedShadowFallback
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              instance: test
+              job: paper-bot-ca
+            exp_annotations:
+              summary: Funded shadow batches fell back to champion order
+              description: One or more simultaneous batches used whole-batch champion order because a prediction was missing, late or identity-invalid. Fallbacks remain in coverage denominators and make the covering gate ineligible; never impute a prediction or selectively drop the affected batch.
+  - interval: 1m
+    input_series:
+      - series: 'scanner_paper_bot_funded_shadow_active_enrollments{instance="test",job="paper-bot-ca"}'
+        values: "1x30"
+      - series: 'scanner_paper_bot_funded_shadow_pending_attempts{instance="test",job="paper-bot-ca"}'
+        values: "0x30"
+      - series: 'scanner_paper_bot_funded_shadow_oldest_pending_attempt_age_ms{instance="test",job="paper-bot-ca"}'
+        values: "0x30"
+      - series: 'scanner_paper_bot_funded_shadow_missed_deadline_total{instance="test",job="paper-bot-ca"}'
+        values: "0x30"
+      - series: 'scanner_paper_bot_funded_shadow_reconcile_failures_total{instance="test",job="paper-bot-ca"}'
+        values: "0x30"
+      - series: 'scanner_paper_bot_funded_shadow_observer_failures_total{instance="test",job="paper-bot-ca"}'
+        values: "0x30"
+      - series: 'scanner_paper_bot_funded_shadow_ownership_refusals_total{instance="test",job="paper-bot-ca"}'
+        values: "0x30"
+      - series: 'scanner_paper_bot_funded_shadow_fallback_batches_total{instance="test",job="paper-bot-ca"}'
+        values: "0x30"
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: FundedShadowObserverBacklog
+        exp_alerts: []
+      - eval_time: 30m
+        alertname: FundedShadowPredictionDeadlineMissed
+        exp_alerts: []
+      - eval_time: 30m
+        alertname: FundedShadowReconciliationFailed
+        exp_alerts: []
+      - eval_time: 30m
+        alertname: FundedShadowOwnershipRefused
+        exp_alerts: []
+      - eval_time: 30m
+        alertname: FundedShadowFallback
+        exp_alerts: []

@@ -24,6 +24,27 @@ it("shows unavailable predictive evidence and has no activation control", () => 
         coveredNoOpportunitySessions: 0,
         excludedPausedSessions: 0,
         closedQuoteOutcomes: 0,
+        prospectiveEconomics: {
+          unit: "CAD",
+          status: "UNAVAILABLE",
+          observedBaselineLabelDenominator: 0,
+          observedBaselineNetPnlAfterCosts: null,
+          decisionCounts: {
+            selected: null,
+            rejected: null,
+            noFill: null,
+            invalid: null,
+            missedWinner: null,
+            unavailableReason: "NO_FROZEN_DECISION_OR_FILL_CLASSIFICATION",
+          },
+          riskDiagnostics: {
+            drawdown: null,
+            concentration: null,
+            unavailableReason:
+              "NO_CAUSAL_PORTFOLIO_SEQUENCE_IN_CHALLENGER_LABELS",
+          },
+          unavailableReason: "NO_VISIBLE_CLOSED_NET_PNL_LABELS",
+        },
         prospectiveBrierScore: null,
         comparison: null,
         comparisonUnavailableReason: "COVERAGE_UNVERIFIED",
@@ -58,6 +79,27 @@ it("discloses paired comparison settings without offering promotion", () => {
         coveredNoOpportunitySessions: 0,
         excludedPausedSessions: 0,
         closedQuoteOutcomes: 1,
+        prospectiveEconomics: {
+          unit: "CAD",
+          status: "UNAVAILABLE",
+          observedBaselineLabelDenominator: 0,
+          observedBaselineNetPnlAfterCosts: null,
+          decisionCounts: {
+            selected: null,
+            rejected: null,
+            noFill: null,
+            invalid: null,
+            missedWinner: null,
+            unavailableReason: "NO_FROZEN_DECISION_OR_FILL_CLASSIFICATION",
+          },
+          riskDiagnostics: {
+            drawdown: null,
+            concentration: null,
+            unavailableReason:
+              "NO_CAUSAL_PORTFOLIO_SEQUENCE_IN_CHALLENGER_LABELS",
+          },
+          unavailableReason: "NO_VISIBLE_CLOSED_NET_PNL_LABELS",
+        },
         prospectiveBrierScore: 0.125,
         comparison: {
           version: "paired-session-v1",

@@ -39,7 +39,7 @@ required provider permissions during commissioning using sanitized samples.
 `universe/` owns provider enumeration and the dated manual watchlist. Questrade
 symbol search is not treated as a complete exchange catalog. `TSX_UNIVERSE_SYMBOLS`
 is an optional seed, not a recurring replacement for the stored daily list.
-Automatic external-catalog discovery has provider/cache infrastructure implemented; screening and intake remain inactive.
+The external-catalog discovery engine is frozen with mode `OFF` ([ADR-018](../adr/018-pre-market-daily-seed-replaces-discovery-engine.md); archived plan). The pre-market daily seed uses batched `symbols?ids=` details (previous close, average volumes, market cap) and one daily-candle request per survivor through the shared scheduler.
 
 `normalizers.ts` and market policies preserve symbol, market, native currency,
 exchange aliases, tick and displayed-size provenance. Canadian board-lot sizes
@@ -92,6 +92,17 @@ in a rolling hour. Startup, universe refresh and session/recovery reloads share
 the allowance; an attempt is counted before its first history request, including
 failed or partial fetches. Refused startup/refresh retries are checked before
 universe enrichment so they do not start another round of broker requests.
+
+Daily-list edits (add, replace, remove) are not full reloads. The universe
+evaluates only the symbols an edit adds and carries every unchanged member
+forward; the live scanner session retires removed candidates
+(`/internal/v1/instruments/retire`) and warms added ones with the same 21-day
+intraday and 90-day daily windows as a full warm-up. An edit therefore costs
+broker requests only for the symbols it adds, removals cost none, and neither
+consumes this allowance. An edit falls back to a full refresh, and counts
+against the allowance, when the session is not in sync, a full refresh is
+pending, the engine cannot edit a live session, or the previous evaluations are
+not held in memory (for example after a restart that used stored membership).
 
 Scanner failures also delay recovery by 30, 60, 120, 240 and then at most 300
 seconds. Repeated poll ticks during a pause do not consume an attempt or extend

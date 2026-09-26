@@ -144,10 +144,58 @@ class TestUniverseManager {
   }
 }
 
+/** Editable list whose edits go through the incremental path. */
+class EditableTestUniverseManager extends TestUniverseManager {
+  symbols = ["BTO.TO", "BAM.TO"];
+  private listed = new Map<string, PersistedInstrument>();
+
+  constructor(
+    private readonly editAdapter: MarketDataAdapter,
+    private readonly editRepository: MarketDataRepository,
+  ) {
+    super(editAdapter, editRepository);
+  }
+
+  override async enrich(): Promise<PersistedInstrument[]> {
+    this.listed = new Map(
+      (await this.resolve(this.symbols)).map((value) => [value.symbol, value]),
+    );
+    return [...this.listed.values()];
+  }
+
+  async replaceSymbols(symbols: string[]): Promise<void> {
+    this.symbols = symbols;
+  }
+
+  async applyListEdit() {
+    const added = this.symbols.filter((symbol) => !this.listed.has(symbol));
+    const removed = [...this.listed.keys()].filter(
+      (symbol) => !this.symbols.includes(symbol),
+    );
+    for (const symbol of removed) this.listed.delete(symbol);
+    for (const instrument of await this.resolve(added))
+      this.listed.set(instrument.symbol, instrument);
+    return { instruments: [...this.listed.values()], added, removed };
+  }
+
+  private async resolve(symbols: string[]): Promise<PersistedInstrument[]> {
+    if (!symbols.length) return [];
+    const instruments = await Promise.all(
+      symbols.map(async (symbol) => {
+        const matches = await this.editAdapter.searchSymbols(symbol);
+        return matches.find((value) => value.symbol === symbol)!;
+      }),
+    );
+    const persisted = await this.editRepository.upsertInstruments(instruments);
+    return persisted.filter((value) => symbols.includes(value.symbol));
+  }
+}
+
 function fixture(
   initialNow = "2026-08-24T13:25:00Z",
   quoteBatchSize = 50,
   marketId: MarketId = "CA_TSX",
+  editable = false,
 ) {
   let now = new Date(initialNow);
   const clock = () => new Date(now);
@@ -176,7 +224,9 @@ function fixture(
     "QUESTRADE_MOCK",
     limiter,
   );
-  const metadata = new TestUniverseManager(adapter, repository);
+  const metadata = editable
+    ? new EditableTestUniverseManager(adapter, repository)
+    : new TestUniverseManager(adapter, repository);
   const candleService = new QuestradeCandleService(adapter, repository);
   const service = new QuestradeDataService(
     adapter,
@@ -201,6 +251,125 @@ function emptyEngineResult(): EngineResultBatch {
 }
 
 describe("Questrade candle service", () => {
+  it("fetches from a two-bar watermark and emits only new or corrected bars", async () => {
+    const start = new Date("2026-08-25T13:30:00Z");
+    const candle: Candle = {
+      symbolId: 1,
+      interval: "OneMinute",
+      start,
+      end: new Date(start.getTime() + 60_000),
+      open: 10,
+      high: 11,
+      low: 9,
+      close: 10,
+      volume: 100,
+      source: "QUESTRADE",
+      isComplete: true,
+    };
+    const initial = Array.from({ length: 4 }, (_, minute) => ({
+      ...candle,
+      start: new Date(start.getTime() + minute * 60_000),
+      end: new Date(start.getTime() + (minute + 1) * 60_000),
+    }));
+    let rows = initial;
+    const getCandles = vi.fn(
+      async (
+        _symbolId: number,
+        _interval: string,
+        _range: { startTime: Date },
+      ) => rows,
+    );
+    const saveCandles = vi.fn(async (_candles: Candle[]) => undefined);
+    const service = new QuestradeCandleService(
+      { getCandles } as unknown as MarketDataAdapter,
+      { saveCandles } as unknown as MarketDataRepository,
+    );
+    const instrument = {
+      symbolId: 1,
+    } as PersistedInstrument;
+    const market = {
+      startTime: start,
+      endTime: new Date(start.getTime() + 6 * 60_000),
+    } as Parameters<typeof service.collect>[1];
+
+    expect(
+      await service.collect([instrument], market, market.endTime, [
+        "OneMinute",
+      ]),
+    ).toEqual(initial);
+    expect(
+      await service.collect([instrument], market, market.endTime, [
+        "OneMinute",
+      ]),
+    ).toEqual([]);
+    expect(getCandles.mock.calls[1]?.[2].startTime).toEqual(initial[1]!.start);
+    rows = [{ ...initial[3]!, close: 12 }];
+    expect(
+      await service.collect([instrument], market, market.endTime, [
+        "OneMinute",
+      ]),
+    ).toEqual(rows);
+    expect(saveCandles.mock.calls.map(([value]) => value.length)).toEqual([
+      4, 0, 1,
+    ]);
+    service.reset();
+    expect(
+      await service.collect([instrument], market, market.endTime, [
+        "OneMinute",
+      ]),
+    ).toEqual(rows);
+  });
+
+  it("re-reads the whole session every 15 minutes and emits only late or revised bars", async () => {
+    const start = new Date("2026-08-25T13:30:00Z");
+    const bar = (minute: number, close = 10): Candle => ({
+      symbolId: 1,
+      interval: "OneMinute",
+      start: new Date(start.getTime() + minute * 60_000),
+      end: new Date(start.getTime() + (minute + 1) * 60_000),
+      open: 10,
+      high: 11,
+      low: 9,
+      close,
+      volume: 100,
+      source: "QUESTRADE",
+      isComplete: true,
+    });
+    // Minute 2 is missing at first and published only after the watermark
+    // has moved past it.
+    let rows = [0, 1, 3, 4, 5].map((minute) => bar(minute));
+    const getCandles = vi.fn(
+      async (
+        _symbolId: number,
+        _interval: string,
+        range: { startTime: Date },
+      ) => rows.filter((value) => value.start >= range.startTime),
+    );
+    const service = new QuestradeCandleService(
+      { getCandles } as unknown as MarketDataAdapter,
+      {
+        saveCandles: vi.fn(async () => undefined),
+      } as unknown as MarketDataRepository,
+    );
+    const instrument = { symbolId: 1 } as PersistedInstrument;
+    const market = {
+      startTime: start,
+      endTime: new Date(start.getTime() + 390 * 60_000),
+    } as Parameters<typeof service.collect>[1];
+    const at = (minute: number) => new Date(start.getTime() + minute * 60_000);
+
+    await service.collect([instrument], market, at(6), ["OneMinute"]);
+    rows = [0, 1, 2, 3, 4, 5, 6].map((minute) => bar(minute));
+    expect(
+      await service.collect([instrument], market, at(7), ["OneMinute"]),
+    ).toEqual([bar(6)]);
+    expect(getCandles.mock.calls[1]?.[2].startTime).toEqual(at(3));
+    expect(
+      await service.collect([instrument], market, at(21), ["OneMinute"]),
+    ).toEqual([bar(2)]);
+    expect(getCandles.mock.calls[2]?.[2].startTime).toEqual(start);
+  });
+
   it("bounds collection concurrency and retries transient provider failures", async () => {
     let active = 0;
     let maximumActive = 0;
@@ -256,8 +425,8 @@ describe("Questrade candle service", () => {
 
 describe("Questrade data service", () => {
   it("reports a committed candidate paste separately from a failed refresh", async () => {
-    const { service } = fixture();
-    vi.spyOn(service, "refreshUniverse").mockRejectedValueOnce(
+    const { metadata, service } = fixture();
+    vi.spyOn(metadata, "enrich").mockRejectedValueOnce(
       new Error("quote unavailable"),
     );
 
@@ -271,6 +440,123 @@ describe("Questrade data service", () => {
 
     expect(result.pasteReport.accepted).toHaveLength(1);
     expect(result.refreshError).toBe("quote unavailable");
+  });
+
+  it("keeps warm-up consistent when the universe changes during startup", async () => {
+    const { candleService, service } = fixture();
+    const ingested: { symbols: number[]; known: number[] }[] = [];
+    const engine = {
+      startSession: vi.fn(async () => undefined),
+      ingestCandles: vi.fn(
+        async (candles: Candle[], instruments: PersistedInstrument[]) => {
+          ingested.push({
+            symbols: candles.map((candle) => candle.symbolId),
+            known: instruments.map((instrument) => instrument.symbolId),
+          });
+        },
+      ),
+      ingestQuotes: vi.fn(async () => emptyEngineResult()),
+    };
+    service.setFeatureEngine(engine, {
+      saveFeatureSnapshots: async () => undefined,
+    });
+    const collectRange = candleService.collectRange.bind(candleService);
+    let swapped = false;
+    vi.spyOn(candleService, "collectRange").mockImplementation(
+      async (...args) => {
+        const candles = await collectRange(...args);
+        if (!swapped) {
+          swapped = true;
+          // A concurrent universe refresh deactivates yesterday's candidates.
+          (
+            service as unknown as { instruments: PersistedInstrument[] }
+          ).instruments = [];
+        }
+        return candles;
+      },
+    );
+
+    await service.initialize();
+
+    expect(ingested.length).toBeGreaterThan(0);
+    for (const { symbols, known } of ingested)
+      for (const symbol of symbols) expect(known).toContain(symbol);
+    expect(service.getOperationalStatusInput().scannerSynchronized).toBe(false);
+  });
+
+  it("applies a list edit by retiring and warming only the changed symbols", async () => {
+    const { candleService, service } = fixture(
+      undefined,
+      undefined,
+      undefined,
+      true,
+    );
+    const engine = {
+      startSession: vi.fn(async () => undefined),
+      ingestCandles: vi.fn(async () => undefined),
+      ingestQuotes: vi.fn(async () => emptyEngineResult()),
+      warmInstrument: vi.fn(async (instrument: PersistedInstrument) => ({
+        instrumentId: instrument.id,
+        ready: true,
+        dailyHistoryCount: 20,
+        historicalIntradaySessionCount: 5,
+        currentSessionOneMinuteCount: 0,
+        openingRangeComplete: false,
+        benchmarkReady: true,
+        reasons: [],
+      })),
+      retireInstruments: vi.fn(async (instruments: PersistedInstrument[]) =>
+        instruments.map((value) => value.id),
+      ),
+    };
+    service.setFeatureEngine(engine, {
+      saveFeatureSnapshots: async () => undefined,
+    });
+    await service.initialize();
+    expect(engine.startSession).toHaveBeenCalledTimes(1);
+    const history = vi.spyOn(candleService, "collectRange");
+
+    await service.replaceUniverseSymbols(["BTO.TO", "QBR.B.TO"]);
+
+    // No session restart and no full warm-up: only the added symbol's history.
+    expect(engine.startSession).toHaveBeenCalledTimes(1);
+    expect(history.mock.calls.length).toBeGreaterThan(0);
+    for (const [instruments] of history.mock.calls)
+      expect(instruments.map((value) => value.symbol)).toEqual(["QBR.B.TO"]);
+    expect(
+      engine.retireInstruments.mock.calls.flatMap(([values]) =>
+        values.map((value) => value.symbol),
+      ),
+    ).toEqual(["BAM.TO"]);
+    expect(
+      engine.warmInstrument.mock.calls.map(([instrument]) => instrument.symbol),
+    ).toEqual(["QBR.B.TO"]);
+    expect(
+      service
+        .getInstruments()
+        .map((value) => value.symbol)
+        .filter((symbol) => ["BTO.TO", "BAM.TO", "QBR.B.TO"].includes(symbol))
+        .sort(),
+    ).toEqual(["BTO.TO", "QBR.B.TO"]);
+    expect(service.getOperationalStatusInput().scannerSynchronized).toBe(true);
+  });
+
+  it("falls back to a full refresh when the engine cannot edit a live session", async () => {
+    const { service } = fixture(undefined, undefined, undefined, true);
+    const engine = {
+      startSession: vi.fn(async () => undefined),
+      ingestCandles: vi.fn(async () => undefined),
+      ingestQuotes: vi.fn(async () => emptyEngineResult()),
+    };
+    service.setFeatureEngine(engine, {
+      saveFeatureSnapshots: async () => undefined,
+    });
+    await service.initialize();
+
+    await service.replaceUniverseSymbols(["BTO.TO", "QBR.B.TO"]);
+
+    expect(engine.startSession).toHaveBeenCalledTimes(2);
+    expect(service.getOperationalStatusInput().scannerSynchronized).toBe(true);
   });
 
   it("keeps a failed warm-up out of sync until the recovery delay expires", async () => {

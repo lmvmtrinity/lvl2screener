@@ -145,6 +145,9 @@ export function parseEodhdCatalog(
  * Its caller must hold a cross-process refresh lease. */
 export interface CatalogSnapshotStore {
   loadLatest(marketId: MarketId): Promise<CatalogSnapshot | null>;
+  loadLatestHeader?(
+    marketId: MarketId,
+  ): Promise<Omit<CatalogSnapshot, "members"> | null>;
   save(snapshot: CatalogSnapshot): Promise<void>;
   withRefreshLease?<T>(
     marketId: MarketId,

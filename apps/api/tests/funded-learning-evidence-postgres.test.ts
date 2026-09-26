@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { Pool } from "pg";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { migrate } from "../src/database/migrate.js";
 import { isolatedDatabaseUrl } from "./isolated-database.js";
 import { PostgresFundedLedgerStore } from "../src/paper-bot/funded-ledger-repository.js";
@@ -353,6 +353,80 @@ describe.skipIf(!databaseUrl)(
           (version) => version.status,
         ),
       ).toEqual(["DECISION_ACCEPTED", "FILLED"]);
+    });
+
+    it("keeps projection quiet when a later quote only advances an open filled order", async () => {
+      const sessionDate = "2025-06-10";
+      const seeded = await seed({ sessionDate });
+      const adapter = await createAdapter(seeded);
+      const closeAt = `${sessionDate}T${scheduledCloseTime}`;
+      const fillAt = `${sessionDate}T14:31:00.000Z`;
+      await insertQuoteSnapshot(seeded.instrumentId, fillAt, {
+        bid: 10.01,
+        ask: 10.03,
+      });
+      await adapter.process({
+        at: fillAt,
+        sessionDate,
+        scheduledCloseAt: closeAt,
+        observations: [seeded.observation],
+        invalidations: [],
+        quotes: [quoteFact(seeded.instrumentId, fillAt, 10.01, 10.03)],
+      });
+      const order = () =>
+        pool.query<{ revision: string; execution_status: string }>(
+          `SELECT revision,state->'execution'->>'status' AS execution_status
+           FROM paper_entry_order WHERE run_id=$1 AND order_id=$2`,
+          [seeded.runId, seeded.observation.id],
+        );
+      const beforeOrder = (await order()).rows[0]!;
+      expect(beforeOrder.execution_status).toBe("OPEN");
+      const beforeWatermark = await evidence().decisionWorkWatermark(
+        seeded.runId,
+      );
+      const projector = vi.spyOn(
+        (
+          adapter as unknown as {
+            projector: FundedDecisionOutcomeProjector;
+          }
+        ).projector,
+        "projectPending",
+      );
+
+      const laterAt = `${sessionDate}T14:32:00.000Z`;
+      await insertQuoteSnapshot(seeded.instrumentId, laterAt, {
+        bid: 10.1,
+        ask: 10.12,
+      });
+      await adapter.process({
+        at: laterAt,
+        sessionDate,
+        scheduledCloseAt: closeAt,
+        observations: [],
+        invalidations: [],
+        quotes: [quoteFact(seeded.instrumentId, laterAt, 10.1, 10.12)],
+      });
+
+      const afterOrder = (await order()).rows[0]!;
+      expect(afterOrder.execution_status).toBe("OPEN");
+      expect(Number(afterOrder.revision)).toBeGreaterThan(
+        Number(beforeOrder.revision),
+      );
+      expect(await evidence().decisionWorkWatermark(seeded.runId)).toEqual(
+        beforeWatermark,
+      );
+      expect(projector).not.toHaveBeenCalled();
+
+      await adapter.process({
+        at: `${sessionDate}T14:33:00.000Z`,
+        sessionDate,
+        scheduledCloseAt: closeAt,
+        observations: [],
+        invalidations: [],
+        quotes: [],
+      });
+      expect(projector).not.toHaveBeenCalled();
+      projector.mockRestore();
     });
 
     it("revisits a decision through accepted, pending, filled and closed cycles exactly once", async () => {

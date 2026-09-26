@@ -196,4 +196,116 @@ describe.skipIf(!databaseUrl)("strategy study PostgreSQL acceptance", () => {
       status: "NOT_SELECTED",
     });
   });
+
+  it("reserves frozen TEST dates across study IDs for the unchanged baseline scope", async () => {
+    const readyToTest = async (value: FrozenStudyPlan) => {
+      await store.register(value);
+      for (const stage of ["TRAIN", "VALIDATION"] as const) {
+        await store.claim(value.experimentId, stage);
+        await store.saveResult(value.experimentId, {
+          stage,
+          binding,
+          baselineRunId,
+          challengerRunId,
+          baselineClosedTrades: 1,
+          challengerClosedTrades: 1,
+          challengerAverageR: 1,
+          sessions: [],
+        });
+      }
+      await store.select(value.experimentId, {
+        selected: true,
+        baselineProfileConfigId: value.baselineProfileConfigId,
+        challengerProfileConfigId: value.challengerProfileConfigId,
+        developmentResultHashes: ["1".repeat(64), "2".repeat(64)],
+      });
+    };
+    const executable = (value: FrozenStudyPlan, testDate: string) => ({
+      ...value,
+      inputs: {
+        ...value.inputs,
+        TEST: {
+          ...value.inputs.TEST,
+          baseline: makeBacktest("test baseline", testDate),
+          challenger: makeBacktest("test challenger", testDate),
+        },
+      },
+      comparison: { ...value.comparison, expectedSessions: [testDate] },
+      sessionPlan: {
+        version: "study-session-plan-v2" as const,
+        sessions: {
+          TRAIN: ["2026-09-01"],
+          VALIDATION: ["2026-09-02"],
+          TEST: [testDate],
+        },
+      },
+    });
+    const first = executable(
+      {
+        ...plan,
+        experimentId: randomUUID(),
+        baselineProfileConfigId: "10000000-0000-4000-8000-000000000091",
+        challengerProfileConfigId: "10000000-0000-4000-8000-000000000091",
+      },
+      "2026-09-03",
+    );
+    const sameScope = executable(
+      {
+        ...first,
+        experimentId: randomUUID(),
+        challengerProfileConfigId: "10000000-0000-4000-8000-000000000093",
+      },
+      "2026-09-03",
+    );
+    const disjoint = executable(
+      { ...first, experimentId: randomUUID() },
+      "2026-09-04",
+    );
+    const unproven: FrozenStudyPlan = {
+      ...first,
+      experimentId: randomUUID(),
+    };
+    delete unproven.sessionPlan;
+
+    await readyToTest(first);
+    await readyToTest(sameScope);
+    const overlappingClaims = await Promise.allSettled([
+      store.claim(first.experimentId, "TEST"),
+      store.claim(sameScope.experimentId, "TEST"),
+    ]);
+    expect(
+      overlappingClaims.filter(
+        (claim) => claim.status === "fulfilled" && claim.value,
+      ),
+    ).toHaveLength(1);
+    expect(
+      overlappingClaims.filter((claim) => claim.status === "rejected"),
+    ).toHaveLength(1);
+    const rejected = overlappingClaims.find(
+      (claim) => claim.status === "rejected",
+    );
+    expect(rejected?.status === "rejected" && rejected.reason.message).toBe(
+      "STRATEGY_STUDY_TEST_SESSION_ALREADY_RESERVED",
+    );
+    const rejectedStudy = await store.get(sameScope.experimentId);
+    expect(rejectedStudy?.receiptKeys).not.toContain("TEST_CLAIM");
+    await readyToTest(disjoint);
+    await expect(store.claim(disjoint.experimentId, "TEST")).resolves.toBe(
+      true,
+    );
+    const reservations = await pool.query<{ count: string; dates: string[] }>(
+      `SELECT count(*)::text AS count,array_agg(session_date::text ORDER BY session_date) AS dates
+         FROM strategy_study_test_session_reservation
+        WHERE source_digest=$1 AND baseline_profile_config_id=$2`,
+      [binding.inputHash, first.baselineProfileConfigId],
+    );
+    expect(reservations.rows[0]).toEqual({
+      count: "2",
+      dates: ["2026-09-03", "2026-09-04"],
+    });
+    await readyToTest(unproven);
+    await expect(store.claim(unproven.experimentId, "TEST")).rejects.toThrow(
+      "STRATEGY_STUDY_TEST_SCOPE_UNPROVEN",
+    );
+  });
 });

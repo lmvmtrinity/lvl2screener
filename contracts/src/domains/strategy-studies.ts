@@ -6,6 +6,184 @@ import {
   sessionPairSchema,
 } from "./research-evidence.js";
 import { createBacktestSchema } from "./backtests.js";
+import { marketIdSchema } from "./markets.js";
+import { strategyNameSchema, strategyParametersSchema } from "./strategies.js";
+
+/** Explicit numeric and boolean-like dimensions supported by bounded rule search. */
+export const boundedSearchParameterBounds = {
+  rvolAtTimeMin: { minimum: 0, maximum: 20, kind: "numeric" },
+  spreadHardMaxPct: { minimum: 0.000001, maximum: 5, kind: "numeric" },
+  atrPctMin: { minimum: 0, maximum: 20, kind: "numeric" },
+  breakoutVolumeRatioMin: { minimum: 0.000001, maximum: 20, kind: "numeric" },
+  retestTolerancePct: { minimum: 0, maximum: 5, kind: "numeric" },
+  scoreCutoff: { minimum: 0, maximum: 100, kind: "numeric" },
+  breakoutBufferPct: { minimum: 0, maximum: 5, kind: "numeric" },
+  relativeStrengthMinPct: { minimum: 0, maximum: 20, kind: "numeric" },
+  flagpoleMinAtr: { minimum: 0.000001, maximum: 10, kind: "numeric" },
+  flagRetracementMaxPct: { minimum: 0.000001, maximum: 100, kind: "numeric" },
+  setupTimeoutMinutes: { minimum: 5, maximum: 120, kind: "numeric" },
+  consolidationBarsMin: { minimum: 1, maximum: 20, kind: "numeric" },
+  consolidationRangeMaxPct: { minimum: 0.000001, maximum: 10, kind: "numeric" },
+  flagDurationBarsMin: { minimum: 1, maximum: 10, kind: "numeric" },
+  flagDurationBarsMax: { minimum: 1, maximum: 10, kind: "numeric" },
+  flagpoleMinSlopeAtrPerBar: { minimum: 0, maximum: 5, kind: "numeric" },
+  volumeContractionMaxPct: { minimum: 0.000001, maximum: 100, kind: "numeric" },
+  retestVolumeContractionEnabled: { minimum: 0, maximum: 1, kind: "toggle" },
+  retestHighBreakEnabled: { minimum: 0, maximum: 1, kind: "toggle" },
+  retestRejectionEnabled: { minimum: 0, maximum: 1, kind: "toggle" },
+  retestVolumeContractionMaxRatio: {
+    minimum: 0.000001,
+    maximum: 1,
+    kind: "numeric",
+  },
+  rejectionLowerWickBodyMin: {
+    minimum: 0.000001,
+    maximum: 20,
+    kind: "numeric",
+  },
+  rejectionUpperWickRangeMaxPct: { minimum: 0, maximum: 100, kind: "numeric" },
+  rejectionCloseLocationMinPct: { minimum: 0, maximum: 100, kind: "numeric" },
+  rsiPivotLeftBars: { minimum: 1, maximum: 10, kind: "numeric" },
+  rsiPivotRightBars: { minimum: 1, maximum: 10, kind: "numeric" },
+  rsiPivotMinSpacingBars: { minimum: 1, maximum: 50, kind: "numeric" },
+  rsiPivotMaxSpacingBars: { minimum: 1, maximum: 100, kind: "numeric" },
+  rsiDivergenceMinPoints: { minimum: 0, maximum: 100, kind: "numeric" },
+  rsiDivergenceVolumeContractionMaxRatio: {
+    minimum: 0.000001,
+    maximum: 1,
+    kind: "numeric",
+  },
+  rsiSetupTimeoutMinutes: { minimum: 5, maximum: 120, kind: "numeric" },
+  dailyEmaFilterEnabled: { minimum: 0, maximum: 1, kind: "toggle" },
+} as const;
+export const boundedSearchParameterSchema = z.enum(
+  Object.keys(boundedSearchParameterBounds) as [
+    keyof typeof boundedSearchParameterBounds,
+    ...(keyof typeof boundedSearchParameterBounds)[],
+  ],
+);
+const boundedIntegerParameters = new Set([
+  "scoreCutoff",
+  "setupTimeoutMinutes",
+  "consolidationBarsMin",
+  "flagDurationBarsMin",
+  "flagDurationBarsMax",
+  "rsiPivotLeftBars",
+  "rsiPivotRightBars",
+  "rsiPivotMinSpacingBars",
+  "rsiPivotMaxSpacingBars",
+  "rsiSetupTimeoutMinutes",
+]);
+const strictStrategyParametersSchema = strategyParametersSchema.strict();
+export const boundedSearchDimensionSchema = z
+  .object({
+    key: boundedSearchParameterSchema,
+    values: z.array(z.number().finite()).min(1),
+  })
+  .strict();
+export const boundedRuleSearchSpaceSchema = z
+  .object({
+    version: z.literal("bounded-rule-search-space-v1"),
+    strategy: strategyNameSchema,
+    marketId: marketIdSchema,
+    baselineParameters: strictStrategyParametersSchema,
+    dimensions: z.array(boundedSearchDimensionSchema).min(1),
+    maxCandidates: z.number().int().min(1).max(100),
+  })
+  .strict()
+  .superRefine((space, context) => {
+    const seen = new Set<string>();
+    let count = 1;
+    for (const [index, dimension] of space.dimensions.entries()) {
+      if (seen.has(dimension.key))
+        context.addIssue({
+          code: "custom",
+          path: ["dimensions", index, "key"],
+          message: "Search dimensions must be unique",
+        });
+      seen.add(dimension.key);
+      const bound = boundedSearchParameterBounds[dimension.key];
+      if (
+        dimension.values.some(
+          (value) =>
+            value < bound.minimum ||
+            value > bound.maximum ||
+            (bound.kind === "toggle" && value !== 0 && value !== 1) ||
+            (boundedIntegerParameters.has(dimension.key) &&
+              !Number.isInteger(value)),
+        )
+      )
+        context.addIssue({
+          code: "custom",
+          path: ["dimensions", index, "values"],
+          message: "Search value is outside the approved parameter bounds",
+        });
+      if (
+        dimension.values.some(
+          (value) => value === space.baselineParameters[dimension.key],
+        )
+      )
+        context.addIssue({
+          code: "custom",
+          path: ["dimensions", index, "values"],
+          message: "Search values must differ from the baseline",
+        });
+      if (new Set(dimension.values).size !== dimension.values.length)
+        context.addIssue({
+          code: "custom",
+          path: ["dimensions", index, "values"],
+          message: "Search values must be unique",
+        });
+      count *= dimension.values.length + 1;
+    }
+    if (count - 1 > space.maxCandidates)
+      context.addIssue({
+        code: "custom",
+        path: ["maxCandidates"],
+        message: "Search space exceeds its declared candidate budget",
+      });
+    try {
+      strictStrategyParametersSchema.parse(space.baselineParameters);
+    } catch {
+      context.addIssue({
+        code: "custom",
+        path: ["baselineParameters"],
+        message: "Baseline contains unknown or invalid strategy parameters",
+      });
+    }
+  });
+export type BoundedRuleSearchSpace = z.infer<
+  typeof boundedRuleSearchSpaceSchema
+>;
+export const boundedRuleCandidateSchema = z
+  .object({
+    version: z.literal("bounded-rule-candidate-v1"),
+    searchSpaceHash: z.string().regex(/^[a-f0-9]{64}$/),
+    candidateHash: z.string().regex(/^[a-f0-9]{64}$/),
+    strategy: strategyNameSchema,
+    marketId: marketIdSchema,
+    parameters: strictStrategyParametersSchema,
+    changes: z
+      .array(
+        z
+          .object({
+            key: boundedSearchParameterSchema,
+            from: z.number().finite(),
+            to: z.number().finite(),
+          })
+          .strict(),
+      )
+      .min(1),
+    neighborDescription: z.string().min(1),
+  })
+  .strict();
+export type BoundedRuleCandidate = z.infer<typeof boundedRuleCandidateSchema>;
+export const approvedBoundedRuleCandidateSchema = boundedRuleCandidateSchema
+  .extend({ approvalStatus: z.literal("APPROVED") })
+  .strict();
+export type ApprovedBoundedRuleCandidate = z.infer<
+  typeof approvedBoundedRuleCandidateSchema
+>;
 
 export const studyVariantSchema = z.enum([
   "RETEST_CONTRACTION",
@@ -13,6 +191,7 @@ export const studyVariantSchema = z.enum([
   "RETEST_HIGH_BREAK",
   "DAILY_EMA",
   "RSI_SEQUENCE",
+  "NUMERIC_PARAMETER",
 ]);
 export type StudyVariant = z.infer<typeof studyVariantSchema>;
 
@@ -76,6 +255,7 @@ export const frozenStudyPlanSchema = z
     sessionPlan: studySessionPlanSchema.optional(),
     minimumClosedTradesPerDevelopmentSegment: z.number().int().positive(),
     minimumValidationAverageR: z.number().finite(),
+    boundedRuleCandidate: approvedBoundedRuleCandidateSchema.optional(),
   })
   .strict()
   .superRefine((plan, context) => {

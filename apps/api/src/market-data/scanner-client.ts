@@ -1,7 +1,7 @@
 import {
   backtestReplayResultSchema,
   backtestSignalReplayResultSchema,
-  engineResultBatchSchema,
+  expandLiveEngineResultBatch,
   discoveryEvaluationInputSchema,
   discoveryEvaluationResultSchema,
   fundedExecutionInferenceOutputSchema,
@@ -18,6 +18,7 @@ import {
   type ScannerProfile,
   type StatisticalPredictionBatch,
   type StatisticalTrainingResult,
+  type SignalModelResearchTrainingRequest,
   type MarketId,
 } from "@tsx-scanner/contracts";
 import { request as httpRequest } from "node:http";
@@ -80,6 +81,12 @@ export interface FeatureEngineSink {
     candles: Candle[],
     marketId?: MarketId,
   ): Promise<WarmupReadiness>;
+  /** Drops candidates from the live session without resetting the others.
+   * Resolves to the instrument ids the scanner actually held. */
+  retireInstruments?(
+    instruments: PersistedInstrument[],
+    marketId?: MarketId,
+  ): Promise<string[]>;
   ingestQuotes(
     quotes: Quote[],
     instruments: PersistedInstrument[],
@@ -97,6 +104,7 @@ export class ScannerFeatureClient implements FeatureEngineSink {
     // services/scanner/app/main.py), so this is the boundary an in-network attacker (or a host
     // process reaching a debug-profile scanner port) still has to clear.
     private readonly serviceToken?: string,
+    private readonly researchScannerUrl: URL = scannerUrl,
   ) {}
 
   async researchRuntimeIdentity(): Promise<unknown> {
@@ -294,6 +302,20 @@ export class ScannerFeatureClient implements FeatureEngineSink {
     );
   }
 
+  async retireInstruments(
+    instruments: PersistedInstrument[],
+    marketId?: MarketId,
+  ): Promise<string[]> {
+    if (!instruments.length) return [];
+    const response = z.object({ retired: z.array(z.string().uuid()) }).parse(
+      await this.post("/internal/v1/instruments/retire", {
+        marketId: marketIdFor(instruments, marketId),
+        instrumentIds: instruments.map((instrument) => instrument.id),
+      }),
+    );
+    return response.retired;
+  }
+
   async ingestQuotes(
     quotes: Quote[],
     instruments: PersistedInstrument[],
@@ -330,7 +352,7 @@ export class ScannerFeatureClient implements FeatureEngineSink {
         };
       }),
     });
-    return engineResultBatchSchema.parse(response);
+    return expandLiveEngineResultBatch(response);
   }
 
   async runBacktest(payload: unknown): Promise<BacktestReplayResult> {
@@ -399,6 +421,17 @@ export class ScannerFeatureClient implements FeatureEngineSink {
       ),
     );
   }
+  async trainSignalModelResearch(
+    payload: SignalModelResearchTrainingRequest,
+  ): Promise<StatisticalTrainingResult> {
+    return statisticalTrainingResultSchema.parse(
+      await this.post(
+        "/internal/v1/signal-model-research/train",
+        payload,
+        120_000,
+      ),
+    );
+  }
   async predictStatistical(
     payload: unknown,
     requestSignal?: AbortSignal,
@@ -454,7 +487,7 @@ export class ScannerFeatureClient implements FeatureEngineSink {
     // through node:http, where the configured AbortSignal is the only
     // deadline, instead of extending short live-path requests.
     if (timeoutMs >= 300_000) return this.postLongRunning(path, body, signal);
-    const response = await fetch(new URL(path, this.scannerUrl), {
+    const response = await fetch(new URL(path, this.urlFor(path)), {
       method: "POST",
       headers: {
         "content-type": "application/json",
@@ -484,7 +517,7 @@ export class ScannerFeatureClient implements FeatureEngineSink {
     body: unknown,
     signal: AbortSignal,
   ): Promise<unknown> {
-    const url = new URL(path, this.scannerUrl);
+    const url = new URL(path, this.urlFor(path));
     const payload = JSON.stringify(body);
     return new Promise((resolve, reject) => {
       const transport = url.protocol === "https:" ? httpsRequest : httpRequest;
@@ -540,6 +573,18 @@ export class ScannerFeatureClient implements FeatureEngineSink {
       );
       request.end(payload);
     });
+  }
+
+  /** Research work (replay, training) runs on the research scanner. Live-latency
+   * calls, including model predictions with deadlines, stay on the live scanner. */
+  private urlFor(path: string): URL {
+    return path.startsWith("/internal/v1/backtests") ||
+      path === "/internal/v1/statistical-models/train" ||
+      path === "/internal/v1/signal-model-research/train" ||
+      path === "/internal/v1/funded-execution-models/train" ||
+      path === "/internal/v1/system/runtime-identity"
+      ? this.researchScannerUrl
+      : this.scannerUrl;
   }
 }
 

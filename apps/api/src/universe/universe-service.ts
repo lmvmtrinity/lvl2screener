@@ -19,6 +19,8 @@ import type {
 } from "../questrade/types.js";
 import type { PersistedInstrument } from "../market-data/repository.js";
 
+import type { DailySeedIntakeGuard } from "./daily-seed-intake-guard.js";
+
 export interface UniverseCatalogSymbol {
   symbol: string;
   marketCap: number | null;
@@ -62,6 +64,7 @@ export interface UniverseWatchlistStore {
     tradingDate: string,
     candidates: CandidateIntakeEntry[],
     marketId?: "CA_TSX" | "US_EQUITIES",
+    guard?: DailySeedIntakeGuard,
   ): Promise<CandidateIntakeEntry[]>;
 }
 
@@ -71,7 +74,10 @@ interface EditableUniverseProvider extends AutomatedUniverseProvider {
   getWatchlistDate(): string;
   getCandidateIntakeStatuses?(): Promise<CandidateIntakeStatus[]>;
   replaceSymbols(symbols: string[]): Promise<void>;
-  updateCandidates(input: UpdateCandidateIntake): Promise<CandidatePasteReport>;
+  updateCandidates(
+    input: UpdateCandidateIntake,
+    guard?: DailySeedIntakeGuard,
+  ): Promise<CandidatePasteReport>;
   reloadConfigured?(): Promise<void>;
 }
 
@@ -89,13 +95,17 @@ export interface UniverseStore {
     provider: string,
     policy: UniversePolicy,
     startedAt: Date,
+    refreshKind?: UniverseRefreshRun["refreshKind"],
   ): Promise<UniverseRefreshRun>;
+  /** `evaluatedCount` defaults to every evaluation; a list edit passes only
+   * the members it freshly evaluated. */
   complete(
     runId: string,
     evaluations: UniverseEvaluation[],
     warnings: string[],
     completedAt: Date,
     minimumSize: number,
+    evaluatedCount?: number,
   ): Promise<{
     run: UniverseRefreshRun;
     instruments: PersistedInstrument[];
@@ -119,13 +129,23 @@ export interface UniverseStore {
   } | null>;
 }
 
+/** Outcome of an incremental daily-list edit. `instruments` is the full
+ * activated set after the edit; `added` and `removed` are listed symbols. */
+export interface ListEditResult {
+  instruments: PersistedInstrument[];
+  added: string[];
+  removed: string[];
+}
+
 export interface UniverseManager {
   enrich(allowLastKnownGood?: boolean): Promise<PersistedInstrument[]>;
+  applyListEdit?(): Promise<ListEditResult | null>;
   getAutomation?(): UniverseAutomation;
   listRuns?(limit?: number): Promise<UniverseRefreshRun[]>;
   replaceSymbols?(symbols: string[]): Promise<void>;
   updateCandidates?(
     input: UpdateCandidateIntake,
+    guard?: DailySeedIntakeGuard,
   ): Promise<CandidatePasteReport>;
   reloadConfiguredCandidates?(): Promise<void>;
   getCandidateIntakeStatuses?(): Promise<CandidateIntakeStatus[]>;
@@ -314,9 +334,15 @@ export class ConfiguredTsxUniverseProvider implements AutomatedUniverseProvider 
 
   async updateCandidates(
     input: UpdateCandidateIntake,
+    guard?: DailySeedIntakeGuard,
   ): Promise<CandidatePasteReport> {
-    await this.hydrate();
     const tradingDate = marketDate(this.clock(), this.marketId);
+    if (
+      guard &&
+      (guard.marketId !== this.marketId || guard.tradingDate !== tradingDate)
+    )
+      throw new Error("DAILY_SEED_RESCAN_IDENTITY");
+    await this.hydrate(guard !== undefined);
     const report = emptyPasteReport();
     const retained = input.operation === "ADD" ? this.candidates : [];
     const candidates = new Map(
@@ -384,13 +410,23 @@ export class ConfiguredTsxUniverseProvider implements AutomatedUniverseProvider 
       return report;
     }
     const symbols = values.map((value) => value.normalizedSymbol);
+    if (guard && !this.store?.applyManualCandidates)
+      throw new Error("DAILY_SEED_RESCAN_TRANSACTION_REQUIRED");
     const applied = this.store?.applyManualCandidates
       ? await this.store.applyManualCandidates(
           this.name,
           input.operation,
           tradingDate,
-          values,
+          input.operation === "ADD"
+            ? values.filter(
+                (value) =>
+                  !retained.some(
+                    (old) => old.normalizedSymbol === value.normalizedSymbol,
+                  ),
+              )
+            : values,
           this.marketId,
+          guard,
         )
       : values;
     if (!this.store?.applyManualCandidates)
@@ -407,13 +443,15 @@ export class ConfiguredTsxUniverseProvider implements AutomatedUniverseProvider 
     return report;
   }
 
-  private async hydrate(): Promise<void> {
+  private async hydrate(readOnly = false): Promise<void> {
     const today = marketDate(this.clock(), this.marketId);
     if (this.hydrated && this.watchlistDate === today) return;
     const persisted = await this.store?.loadConfiguredSymbols(
       this.name,
       this.marketId,
     );
+    if (readOnly && persisted && persisted.tradingDate > today)
+      throw new Error("DAILY_SEED_RESCAN_IDENTITY");
     if (persisted?.tradingDate === today) {
       this.symbols = normalizeConfiguredSymbols(
         persisted.symbols,
@@ -442,21 +480,23 @@ export class ConfiguredTsxUniverseProvider implements AutomatedUniverseProvider 
     } else if (persisted) {
       this.symbols = [];
       this.candidates = [];
-      await this.store?.saveConfiguredSymbols(
-        this.name,
-        this.symbols,
-        today,
-        this.candidates,
-        this.marketId,
-      );
+      if (!readOnly)
+        await this.store?.saveConfiguredSymbols(
+          this.name,
+          this.symbols,
+          today,
+          this.candidates,
+          this.marketId,
+        );
     } else {
-      await this.store?.saveConfiguredSymbols(
-        this.name,
-        this.symbols,
-        today,
-        this.candidates,
-        this.marketId,
-      );
+      if (!readOnly)
+        await this.store?.saveConfiguredSymbols(
+          this.name,
+          this.symbols,
+          today,
+          this.candidates,
+          this.marketId,
+        );
     }
     this.watchlistDate = today;
     this.hydrated = true;
@@ -480,6 +520,10 @@ export class AutomatedUniverseService implements UniverseManager {
   private latestRun: UniverseRefreshRun | null = null;
   private members: UniverseMember[] = [];
   private refreshInFlight?: Promise<PersistedInstrument[]>;
+  /** Evaluations of the last run completed by this process, keyed by symbol;
+   * list edits carry unchanged members forward from here. */
+  private lastEvaluations: Map<string, UniverseEvaluation> | null = null;
+  private lastInstruments: PersistedInstrument[] = [];
 
   constructor(
     private readonly provider: AutomatedUniverseProvider,
@@ -548,15 +592,79 @@ export class AutomatedUniverseService implements UniverseManager {
 
   async updateCandidates(
     input: UpdateCandidateIntake,
+    guard?: DailySeedIntakeGuard,
   ): Promise<CandidatePasteReport> {
     if (!isEditableProvider(this.provider))
       throw new Error("This universe provider is not editable");
-    return this.provider.updateCandidates(input);
+    return this.provider.updateCandidates(input, guard);
   }
 
   async reloadConfiguredCandidates(): Promise<void> {
     if (!isEditableProvider(this.provider)) return;
     await this.provider.reloadConfigured?.();
+  }
+
+  /**
+   * Applies a daily-list edit without re-evaluating the whole list: symbols
+   * added since the last completed run are resolved and evaluated, every other
+   * member is carried forward with its original metricsAsOf, and removed
+   * symbols are dropped. The run still records the full resulting membership,
+   * so point-in-time replay resolves it like any completed refresh.
+   *
+   * Returns null when the previous evaluations are not held in memory (for
+   * example after a restart that fell back to stored membership); the caller
+   * then performs a full refresh.
+   */
+  async applyListEdit(): Promise<ListEditResult | null> {
+    if (!isEditableProvider(this.provider)) return null;
+    if (this.refreshInFlight) await this.refreshInFlight.catch(() => undefined);
+    if (this.latestRun?.status !== "COMPLETED") return null;
+    const previous = this.lastEvaluations;
+    if (!previous) return null;
+    const catalog = deduplicateCatalog(await this.provider.listSymbols());
+    const listed = new Set(catalog.map((entry) => entry.symbol));
+    const added = catalog.filter((entry) => !previous.has(entry.symbol));
+    const removed = [...previous.keys()].filter(
+      (symbol) => !listed.has(symbol),
+    );
+    if (!added.length && !removed.length)
+      return { instruments: this.lastInstruments, added: [], removed: [] };
+
+    const startedAt = this.clock();
+    const running = await this.store.begin(
+      this.provider.name,
+      this.policy,
+      startedAt,
+      "LIST_EDIT",
+    );
+    this.latestRun = running;
+    try {
+      const fresh = await this.evaluate(added, startedAt);
+      const freshBySymbol = new Map(
+        fresh.map((value) => [value.member.symbol, value]),
+      );
+      const evaluations = catalog.map(
+        (entry) =>
+          freshBySymbol.get(entry.symbol) ?? previous.get(entry.symbol)!,
+      );
+      const instruments = await this.completeRun(
+        running,
+        evaluations,
+        fresh.length,
+      );
+      return {
+        instruments,
+        added: added.map((entry) => entry.symbol),
+        removed,
+      };
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Unknown universe list edit error";
+      this.latestRun = await this.store.fail(running.id, message, this.clock());
+      throw error;
+    }
   }
 
   private async refresh(): Promise<PersistedInstrument[]> {
@@ -569,107 +677,8 @@ export class AutomatedUniverseService implements UniverseManager {
     this.latestRun = running;
     try {
       const catalog = deduplicateCatalog(await this.provider.listSymbols());
-      const resolved = await Promise.all(
-        catalog.map(async (entry) => {
-          const matches = await this.adapter.searchSymbols(entry.symbol);
-          return {
-            entry,
-            instrument: matches.find(
-              (value) => value.symbol.toUpperCase() === entry.symbol,
-            ),
-          };
-        }),
-      );
-      const instruments = resolved.flatMap((value) =>
-        value.instrument ? [value.instrument] : [],
-      );
-      const fundamentals = this.adapter.getFundamentals
-        ? await this.adapter.getFundamentals(
-            instruments.map((value) => value.symbolId),
-          )
-        : [];
-      const fundamentalsById = new Map(
-        fundamentals.map((value) => [value.symbolId, value]),
-      );
-      const enriched = resolved.map(({ entry, instrument }) => {
-        const details = instrument
-          ? fundamentalsById.get(instrument.symbolId)
-          : undefined;
-        return {
-          instrument,
-          entry: {
-            ...entry,
-            marketCap: details?.marketCap ?? entry.marketCap,
-            sector: details?.sector ?? entry.sector,
-          },
-        };
-      });
-      const quoteBatches = chunk(
-        instruments.map((value) => value.symbolId),
-        50,
-      );
-      const quotes = (
-        await Promise.all(
-          quoteBatches.map((ids) => this.adapter.getQuotes(ids)),
-        )
-      ).flat();
-      const quotesById = new Map(
-        quotes.map((value) => [value.symbolId, value]),
-      );
-      const dailyById = new Map<number, Candle[]>();
-      await Promise.all(
-        instruments.map(async (instrument) => {
-          dailyById.set(
-            instrument.symbolId,
-            await this.adapter.getCandles(instrument.symbolId, "OneDay", {
-              startTime: new Date(startedAt.getTime() - 150 * 86_400_000),
-              endTime: startedAt,
-            }),
-          );
-        }),
-      );
-      const manual = isManualProvider(this.provider);
-      const evaluations = enriched.map(({ entry, instrument }) =>
-        instrument
-          ? {
-              instrument,
-              member: buildMember(
-                entry,
-                instrument,
-                quotesById.get(instrument.symbolId),
-                dailyById.get(instrument.symbolId) ?? [],
-                this.policy,
-                startedAt,
-                manual,
-              ),
-            }
-          : {
-              member: emptyMember(
-                entry,
-                startedAt,
-                "METADATA_UNAVAILABLE",
-                this.policy,
-              ),
-            },
-      );
-      const warnings = evaluations
-        .filter((value) =>
-          value.member.reasons.includes("METADATA_UNAVAILABLE"),
-        )
-        .map(
-          (value) =>
-            `${value.member.symbol}: provider symbol could not be resolved by Questrade`,
-        );
-      const completed = await this.store.complete(
-        running.id,
-        evaluations,
-        warnings,
-        this.clock(),
-        manual ? 0 : this.minimumSize,
-      );
-      this.latestRun = completed.run;
-      this.members = completed.members;
-      return completed.instruments;
+      const evaluations = await this.evaluate(catalog, startedAt);
+      return await this.completeRun(running, evaluations, evaluations.length);
     } catch (error) {
       const message =
         error instanceof Error
@@ -678,6 +687,131 @@ export class AutomatedUniverseService implements UniverseManager {
       this.latestRun = await this.store.fail(running.id, message, this.clock());
       throw error;
     }
+  }
+
+  private async completeRun(
+    running: UniverseRefreshRun,
+    evaluations: UniverseEvaluation[],
+    evaluatedCount: number,
+  ): Promise<PersistedInstrument[]> {
+    const warnings = evaluations
+      .filter((value) => value.member.reasons.includes("METADATA_UNAVAILABLE"))
+      .map(
+        (value) =>
+          `${value.member.symbol}: provider symbol could not be resolved by Questrade`,
+      );
+    const completed = await this.store.complete(
+      running.id,
+      evaluations,
+      warnings,
+      this.clock(),
+      isManualProvider(this.provider) ? 0 : this.minimumSize,
+      evaluatedCount,
+    );
+    this.latestRun = completed.run;
+    this.members = completed.members;
+    this.lastInstruments = completed.instruments;
+    const membersBySymbol = new Map(
+      completed.members.map((member) => [member.symbol, member]),
+    );
+    this.lastEvaluations = new Map(
+      evaluations.map((value) => [
+        value.member.symbol,
+        {
+          ...value,
+          member: membersBySymbol.get(value.member.symbol) ?? value.member,
+        },
+      ]),
+    );
+    return completed.instruments;
+  }
+
+  /** Resolves and evaluates catalog entries against the eligibility policy. */
+  private async evaluate(
+    catalog: UniverseCatalogSymbol[],
+    startedAt: Date,
+  ): Promise<UniverseEvaluation[]> {
+    if (!catalog.length) return [];
+    const resolved = await Promise.all(
+      catalog.map(async (entry) => {
+        const matches = await this.adapter.searchSymbols(entry.symbol);
+        return {
+          entry,
+          instrument: matches.find(
+            (value) => value.symbol.toUpperCase() === entry.symbol,
+          ),
+        };
+      }),
+    );
+    const instruments = resolved.flatMap((value) =>
+      value.instrument ? [value.instrument] : [],
+    );
+    const fundamentals =
+      this.adapter.getFundamentals && instruments.length
+        ? await this.adapter.getFundamentals(
+            instruments.map((value) => value.symbolId),
+          )
+        : [];
+    const fundamentalsById = new Map(
+      fundamentals.map((value) => [value.symbolId, value]),
+    );
+    const enriched = resolved.map(({ entry, instrument }) => {
+      const details = instrument
+        ? fundamentalsById.get(instrument.symbolId)
+        : undefined;
+      return {
+        instrument,
+        entry: {
+          ...entry,
+          marketCap: details?.marketCap ?? entry.marketCap,
+          sector: details?.sector ?? entry.sector,
+        },
+      };
+    });
+    const quoteBatches = chunk(
+      instruments.map((value) => value.symbolId),
+      50,
+    );
+    const quotes = (
+      await Promise.all(quoteBatches.map((ids) => this.adapter.getQuotes(ids)))
+    ).flat();
+    const quotesById = new Map(quotes.map((value) => [value.symbolId, value]));
+    const dailyById = new Map<number, Candle[]>();
+    await Promise.all(
+      instruments.map(async (instrument) => {
+        dailyById.set(
+          instrument.symbolId,
+          await this.adapter.getCandles(instrument.symbolId, "OneDay", {
+            startTime: new Date(startedAt.getTime() - 150 * 86_400_000),
+            endTime: startedAt,
+          }),
+        );
+      }),
+    );
+    const manual = isManualProvider(this.provider);
+    return enriched.map(({ entry, instrument }) =>
+      instrument
+        ? {
+            instrument,
+            member: buildMember(
+              entry,
+              instrument,
+              quotesById.get(instrument.symbolId),
+              dailyById.get(instrument.symbolId) ?? [],
+              this.policy,
+              startedAt,
+              manual,
+            ),
+          }
+        : {
+            member: emptyMember(
+              entry,
+              startedAt,
+              "METADATA_UNAVAILABLE",
+              this.policy,
+            ),
+          },
+    );
   }
 }
 
@@ -1097,7 +1231,7 @@ function average(values: number[]): number | null {
     : Math.round(values.reduce((sum, value) => sum + value, 0) / values.length);
 }
 
-function calculateAtr14(candles: Candle[]): number | null {
+export function calculateAtr14(candles: Candle[]): number | null {
   if (candles.length < 15) return null;
   const ranges = candles.slice(1).map((candle, index) => {
     const previousClose = candles[index]!.close;

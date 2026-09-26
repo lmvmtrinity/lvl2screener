@@ -233,6 +233,7 @@ POST /internal/v1/candles/batch
 POST /internal/v1/quotes/batch
 POST /internal/v1/discovery/evaluate
 POST /internal/v1/instruments/warm
+POST /internal/v1/instruments/retire
 GET  /internal/v1/candidates
 GET  /internal/v1/symbol/{instrument_id}/features
 POST /internal/v1/backtests

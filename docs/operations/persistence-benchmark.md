@@ -6,4 +6,5 @@ Set BENCHMARK_NOTES to describe other services, market/session conditions, disk 
 
 ## Validation guidance
 
+
 Capture representative peak-service load, database wait events, locks, I/O latency and statement execution plans for strategy-result writes. Repeat on intended deployment hardware. Extend the funded snapshot probe to long-running event histories and evaluate compaction before high-volume deployment. Compare identical symbol/strategy counts and input density before changing capacity limits. Do not interpret these isolated passes as production latency certification or relax the 500 ms target to hide an attributed miss.

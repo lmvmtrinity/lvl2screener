@@ -12,10 +12,14 @@
     "paper-evidence": "tsx src/paper-evidence.ts",
     "funded-replay": "tsx src/funded-replay.ts",
     "funded-historical-replay": "tsx src/funded-historical-replay.ts",
+    "funded-comparison": "tsx src/funded-comparison.ts",
+    "funded-shadow": "tsx src/funded-shadow.ts",
+    "funded-stage-b-readiness": "tsx src/paper-bot/stage-b-readiness-cli.ts",
     "start": "node dist/index.js",
     "dev": "tsx watch src/index.ts",
     "test": "vitest run",
-    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json"
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json",
+    "historical-import": "tsx src/historical-import.ts"
   },
   "dependencies": {
     "@fastify/cors": "^11.1.0",

@@ -45,16 +45,18 @@ export function checkCapturedHistoryRange(
   availability: CapturedHistoryAvailability,
 ): BacktestPolicyViolation | null {
   const { earliestDate, latestDate } = availability.replay;
+  const archive = availability.source === "HISTORICAL_ARCHIVE";
   if (!earliestDate || !latestDate)
     return {
       code: "HISTORY_UNAVAILABLE",
-      message:
-        "Captured quote history is empty; collect quote snapshots before starting research.",
+      message: archive
+        ? "The historical archive is empty; run historical-import before an archive replay."
+        : "Captured quote history is empty; collect quote snapshots before starting research.",
     };
   if (input.startDate < earliestDate || input.endDate > latestDate)
     return {
       code: "HISTORY_UNAVAILABLE",
-      message: `Captured quote history is available from ${earliestDate} through ${latestDate}; requested range ${input.startDate} through ${input.endDate} cannot be replayed completely.`,
+      message: `${archive ? "Archived quote history" : "Captured quote history"} is available from ${earliestDate} through ${latestDate}; requested range ${input.startDate} through ${input.endDate} cannot be replayed completely.`,
     };
   return null;
 }

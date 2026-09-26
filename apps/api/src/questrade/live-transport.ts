@@ -42,6 +42,15 @@ const rawSymbolDetailSchema = z.object({
   symbolId: z.number().int().positive(),
   marketCap: z.number().nullable().optional(),
   industrySector: z.string().nullable().optional(),
+  prevDayClosePrice: z.number().nullable().optional(),
+  averageVol3Months: z.number().nullable().optional(),
+  averageVol20Days: z.number().nullable().optional(),
+  securityType: z.string().nullable().optional(),
+  listingExchange: z.string().nullable().optional(),
+  currency: z.string().nullable().optional(),
+  description: z.string().nullable().optional(),
+  isTradable: z.boolean().nullable().optional(),
+  isQuotable: z.boolean().nullable().optional(),
 });
 const symbolDetailsSchema = z.object({
   symbols: z.array(rawSymbolDetailSchema),
@@ -162,6 +171,15 @@ export class LiveQuestradeTransport
       symbolId: symbol.symbolId,
       marketCap: symbol.marketCap ?? null,
       industrySector: symbol.industrySector ?? null,
+      prevDayClosePrice: symbol.prevDayClosePrice ?? null,
+      averageVol3Months: symbol.averageVol3Months ?? null,
+      averageVol20Days: symbol.averageVol20Days ?? null,
+      securityType: symbol.securityType ?? null,
+      listingExchange: symbol.listingExchange ?? null,
+      currency: symbol.currency ?? null,
+      description: symbol.description ?? null,
+      isTradable: symbol.isTradable ?? null,
+      isQuotable: symbol.isQuotable ?? null,
     }));
   }
 

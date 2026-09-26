@@ -9,6 +9,7 @@ import {
   type ChallengerExperiment,
   type ChallengerObservationReport,
   type ChallengerOutcome,
+  type ChallengerCurrency,
   type MarketId,
   type SessionComparisonResult,
 } from "@tsx-scanner/contracts";
@@ -33,6 +34,7 @@ export type { ChallengerAttempt } from "@tsx-scanner/contracts";
 export type ChallengerQuoteOutcome = {
   status: "CLOSED" | "OPEN" | "CLOSE_PENDING" | "NO_FILL" | "PENDING";
   rMultiple: number | null;
+  netPnl?: number | null;
   /** Null is an explicit lack of a durable first-availability receipt. */
   labelAvailableAt: string | null;
   exitAt?: string | null;
@@ -44,6 +46,7 @@ export type ChallengerReportRow = ChallengerAttemptRecord & {
 
 export type ChallengerReportInputs = {
   experimentId: string;
+  currency: ChallengerCurrency;
   asOf: string;
   attempts: readonly ChallengerReportRow[];
   unknownCapture?: number;
@@ -94,6 +97,8 @@ export function buildChallengerObservationReport(
   let inputInvalid = 0;
   let revoked = 0;
   let closedQuoteOutcomes = 0;
+  let netPnlAfterCosts = 0;
+  let netPnlLabels = 0;
   const brier: number[] = [];
   for (const row of visible) {
     const outcome = outcomeAtAsOf(row.outcome, asOf);
@@ -102,6 +107,14 @@ export function buildChallengerObservationReport(
       labelVisibleAt(row.quoteOutcome, inputs.asOf)
     ) {
       closedQuoteOutcomes += 1;
+      if (
+        row.quoteOutcome.netPnl !== undefined &&
+        row.quoteOutcome.netPnl !== null &&
+        Number.isFinite(row.quoteOutcome.netPnl)
+      ) {
+        netPnlAfterCosts += row.quoteOutcome.netPnl;
+        netPnlLabels += 1;
+      }
     }
     if (!outcome) {
       pending += 1;
@@ -181,6 +194,28 @@ export function buildChallengerObservationReport(
       inputs.sessionCountsUnavailableReason ?? null,
     frozenAcceptance: inputs.frozenAcceptance ?? null,
     closedQuoteOutcomes,
+    prospectiveEconomics: {
+      unit: inputs.currency,
+      status: netPnlLabels > 0 ? "BASELINE_LABELS_AVAILABLE" : "UNAVAILABLE",
+      observedBaselineLabelDenominator: netPnlLabels,
+      observedBaselineNetPnlAfterCosts:
+        netPnlLabels > 0 ? netPnlAfterCosts : null,
+      decisionCounts: {
+        selected: null,
+        rejected: null,
+        noFill: null,
+        invalid: null,
+        missedWinner: null,
+        unavailableReason: "NO_FROZEN_DECISION_OR_FILL_CLASSIFICATION",
+      },
+      riskDiagnostics: {
+        drawdown: null,
+        concentration: null,
+        unavailableReason: "NO_CAUSAL_PORTFOLIO_SEQUENCE_IN_CHALLENGER_LABELS",
+      },
+      unavailableReason:
+        netPnlLabels > 0 ? null : "NO_VISIBLE_CLOSED_NET_PNL_LABELS",
+    },
     prospectiveBrierScore:
       brier.length > 0
         ? brier.reduce((sum, value) => sum + value, 0) / brier.length
@@ -250,23 +285,25 @@ export class PostgresChallengerReportingService implements ChallengerReportingAp
       outcome: unknown | null;
       quote_status: ChallengerQuoteOutcome["status"] | null;
       r_multiple: string | number | null;
+      net_pnl: string | number | null;
       exit_at: Date | null;
       label_available_at: Date | null;
     }>(
       `SELECT a.experiment_id,a.observation_id,a.model_version,a.input_hash,
               a.observed_at,a.recorded_at,a.deadline_at,a.input_snapshot,
               CASE WHEN o.completed_at <= $2::timestamptz THEN o.outcome ELSE NULL END AS outcome,
-              le.label->>'status' AS quote_status,le.label->>'rMultiple' AS r_multiple,le.exit_at,
+              le.label->>'status' AS quote_status,le.label->>'rMultiple' AS r_multiple,
+              le.label->>'netPnl' AS net_pnl,le.exit_at,
               le.label_available_at
          FROM challenger_attempt a
          LEFT JOIN challenger_outcome o
            ON o.experiment_id=a.experiment_id AND o.observation_id=a.observation_id
-        LEFT JOIN challenger_label_evidence le ON le.observation_id=a.observation_id AND le.model='QUOTE'
+        LEFT JOIN challenger_label_evidence le ON le.observation_id=a.observation_id AND le.market_id=$3 AND le.model='QUOTE'
           AND le.label_available_at<=$2::timestamptz AND le.exit_at<=$2::timestamptz
         WHERE a.experiment_id=$1
           AND a.recorded_at <= $2::timestamptz
         ORDER BY a.observed_at,a.observation_id`,
-      [id, asOf],
+      [id, asOf, experiment.scope.marketId],
     );
     const reportRows: ChallengerReportRow[] = rows.rows.map((row) => ({
       experimentId: row.experiment_id,
@@ -282,6 +319,7 @@ export class PostgresChallengerReportingService implements ChallengerReportingAp
         ? {
             status: row.quote_status,
             rMultiple: row.r_multiple === null ? null : Number(row.r_multiple),
+            netPnl: row.net_pnl === null ? null : Number(row.net_pnl),
             labelAvailableAt: row.label_available_at?.toISOString() ?? null,
             exitAt: row.exit_at?.toISOString() ?? null,
           }
@@ -317,6 +355,7 @@ export class PostgresChallengerReportingService implements ChallengerReportingAp
     );
     return buildChallengerObservationReport({
       experimentId: id,
+      currency: experiment.scope.currency,
       asOf,
       attempts: reportRows,
       unknownCapture: unknownCapture.count,

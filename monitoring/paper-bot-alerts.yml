@@ -225,3 +225,43 @@ groups:
         annotations:
           summary: Backtest automation queue appears stalled
           description: Scheduled automation is enabled and an outstanding replay has not completed for over 24 hours. Inspect the worker lease, scanner runtime and retained-input coverage; a queued item is not evidence of progress.
+      - alert: FundedShadowObserverBacklog
+        expr: scanner_paper_bot_funded_shadow_active_enrollments > 0 and scanner_paper_bot_funded_shadow_pending_attempts > 0 and scanner_paper_bot_funded_shadow_oldest_pending_attempt_age_ms > 300000
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Funded shadow observation has stale sealed attempts
+          description: An active SHADOW enrollment retains sealed attempts without a terminal result for over five minutes. Inspect the observer lease, scanner inference and reconciliation passes. This pauses enrollment evidence; it never grants authority and never triggers a challenger rollback.
+      - alert: FundedShadowPredictionDeadlineMissed
+        expr: increase(scanner_paper_bot_funded_shadow_missed_deadline_total[30m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Funded shadow predictions missed their deadlines
+          description: One or more funded shadow attempts reached their database-owned prediction deadline without a timely prediction. The affected batches fall back to champion order and remain counted; inspect observer scheduling and scanner latency rather than backdating a prediction.
+      - alert: FundedShadowReconciliationFailed
+        expr: increase(scanner_paper_bot_funded_shadow_reconcile_failures_total[30m]) > 0 or increase(scanner_paper_bot_funded_shadow_observer_failures_total[30m]) > 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: Funded shadow observer or reconciliation failed
+          description: The funded shadow observer recorded a failure while sealing, projecting, labelling or loading a frozen identity. Funded champion processing is unaffected; investigate the observer separately and never bypass a frozen gate to clear the alert.
+      - alert: FundedShadowOwnershipRefused
+        expr: increase(scanner_paper_bot_funded_shadow_ownership_refusals_total[30m]) > 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: Funded shadow ownership or market boundary refused
+          description: A funded shadow observation refused a cross-market or mismatched champion identity. Preserve the refusal and the exact identities; never substitute another market, account, model or artifact to continue observation.
+      - alert: FundedShadowFallback
+        expr: scanner_paper_bot_funded_shadow_active_enrollments > 0 and increase(scanner_paper_bot_funded_shadow_fallback_batches_total[1h]) > 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: Funded shadow batches fell back to champion order
+          description: One or more simultaneous batches used whole-batch champion order because a prediction was missing, late or identity-invalid. Fallbacks remain in coverage denominators and make the covering gate ineligible; never impute a prediction or selectively drop the affected batch.

@@ -14,7 +14,10 @@ describe("copyable environment example", () => {
     expect(config.APP_MASTER_KEY).toBeUndefined();
     expect(config.QUESTRADE_REFRESH_TOKEN).toBeUndefined();
     expect(config.EODHD_API_TOKEN).toBeUndefined();
-    expect(config.US_PAPER_TRADING_ENABLED).toBe(false);
+    // The example runs both markets with US paper trading enabled.
+    expect(config.ENABLED_MARKETS).toEqual(["CA_TSX", "US_EQUITIES"]);
+    expect(config.US_MARKET_DATA_ENABLED).toBe(true);
+    expect(config.US_PAPER_TRADING_ENABLED).toBe(true);
   });
 
   it("accepts the documented live substitutions and optional US observation", () => {
@@ -26,12 +29,11 @@ describe("copyable environment example", () => {
       EODHD_API_TOKEN: "synthetic-catalog-token",
     };
     expect(loadConfig(live).MARKET_DATA_MODE).toBe("live");
-    const bothMarkets = loadConfig({
+    const observationOnly = loadConfig({
       ...live,
-      ENABLED_MARKETS: "CA_TSX,US_EQUITIES",
-      US_MARKET_DATA_ENABLED: "true",
+      US_PAPER_TRADING_ENABLED: "false",
     });
-    expect(bothMarkets.ENABLED_MARKETS).toEqual(["CA_TSX", "US_EQUITIES"]);
-    expect(bothMarkets.US_PAPER_TRADING_ENABLED).toBe(false);
+    expect(observationOnly.ENABLED_MARKETS).toEqual(["CA_TSX", "US_EQUITIES"]);
+    expect(observationOnly.US_PAPER_TRADING_ENABLED).toBe(false);
   });
 });

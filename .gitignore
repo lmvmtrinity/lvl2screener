@@ -16,6 +16,7 @@ __pycache__/
 .env
 .env.*
 !.env.example
+.codex/
 monitoring/alertmanager.generated.yml
 monitoring/alertmanager.email.generated.yml
 monitoring/secrets/
@@ -30,3 +31,7 @@ scripts/visual/.vite-cache/
 
 # Content-addressed optional research build identity
 apps/api/research-runtime.json
+# Immutable deployment receipts and rollback refs are host-local (image IDs
+# differ per builder). They survive subsequent builds because they live outside
+# image layers. Record the tested receipt contents in the release PR instead.
+/deployment/

@@ -56,6 +56,55 @@ A generic refactor, dashboard fix, or request to improve learning does not
 supersede these rules. Routine fixes and read-only reviews that preserve them do
 not require additional approval.
 
+## September 24, 2026 persistence cadence
+
+The user authorized a storage and write reduction for live strategy observations.
+The API retains every state-change event and its matching `strategy_signal` row
+with the original event payload. A setup row is also written as soon as its
+state, score, setup instance, or entry, stop or target reference changes, and a
+context row as soon as its status or context score changes. Otherwise it writes
+the signal/evaluation/context row and its feature snapshot on a 60-second
+heartbeat. `STRATEGY_PERSIST_HEARTBEAT_MS=0` restores every-poll
+persistence. A process restart or a cache miss writes the next observation;
+the cache advances only after the strategy transaction commits. No strategy
+threshold, training qualification gate, research source digest, or promotion
+authority changes. The reduced row cadence is a new evidence collection regime,
+so before and after row counts must be interpreted with that boundary in mind.
+
+The September 24 cost reduction changes the funded paper clock outside the
+close collection window from every two seconds to once a minute while no
+funded fact or close-pending order is waiting. Pending facts and close-pending
+orders retain the two-second recovery cadence. This changes the density of idle
+clock facts; it does not change the learning qualification gates, trading
+assumptions, or retained economic evidence.
+
+## September 24, 2026 spread gate stabilization
+
+The user authorized stabilizing the setup spread gate. Migration 153 moves every
+setup profile to a new immutable configuration version ending
+`+spread-stable-v1`, which blocks only a spread that stays above the limit for 3
+quotes and 5 seconds, re-arms below 80% of the limit, and allows at least 3
+ticks. Parameter defaults reproduce the legacy single-quote gate, so earlier
+configuration versions and their evidence are unchanged. The new versions are a
+new compatible cohort: learning gates, qualification and comparisons count them
+separately and never pool them with legacy versions.
+
+
+Later changes to these values require a new configuration version and a
+replay comparison.
+
+## September 24, 2026 trade reference floors
+
+The user authorized widening tight setup stops and raising close targets.
+Migration 154 moves every setup profile to a new configuration version ending
+`+levels-v1` (a stop floor of 0.15 × daily ATR14 or 4 spreads, whichever is
+wider, and a 1.5 R minimum target). Parameter defaults keep structural stops and
+nearest-resistance targets, so earlier versions and their evidence are
+unchanged and form separate cohorts. Qualification backtests now apply the
+paper bot's entry economics. Excursions from unverified coverage are
+`INDICATIVE` and never evidence.
+
+
 ## Review practice
 
 Review evidence quality weekly: completed outcomes by compatible group,
@@ -63,6 +112,7 @@ unresolved exits, missing features/provenance, overlap exclusions, and coverage
 across symbols and market conditions. Re-estimate collection time after 5–10
 completed trading sessions. This documents the review practice; it does not
 create a recurring automation or authorize notifications.
+
 
 The existing requirement for positive returns in historical validation windows
 before training deserves a separate research review: it may exclude cases where

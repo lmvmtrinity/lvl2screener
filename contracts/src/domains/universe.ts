@@ -82,11 +82,16 @@ export const universeRefreshStatusSchema = z.enum([
   "COMPLETED",
   "FAILED",
 ]);
+/** A full refresh re-evaluates every symbol; a list edit evaluates only the
+ * symbols it adds and carries unchanged members forward. */
+export const universeRefreshKindSchema = z.enum(["FULL", "LIST_EDIT"]);
+export type UniverseRefreshKind = z.infer<typeof universeRefreshKindSchema>;
 export const universeRefreshRunSchema = z.object({
   id: z.string().uuid(),
   marketId: marketIdSchema.default("CA_TSX"),
   provider: z.string().min(1),
   policyVersion: z.string().min(1),
+  refreshKind: universeRefreshKindSchema.default("FULL"),
   status: universeRefreshStatusSchema,
   discoveredCount: z.number().int().nonnegative(),
   evaluatedCount: z.number().int().nonnegative(),

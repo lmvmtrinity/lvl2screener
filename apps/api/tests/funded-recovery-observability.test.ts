@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { QuestradeDataService } from "../src/market-data/service.js";
+import { FundedPriorRunActiveError } from "../src/paper-bot/funded-order-service.js";
 
 /**
  * Exercise the narrow failure boundary without constructing a live Questrade
@@ -33,11 +34,65 @@ function fundedSnapshot(service: Record<string, any>) {
 }
 
 describe("funded recovery observability", () => {
+  it("treats a prior-run ownership wait as waiting, without a recovery failure", async () => {
+    let failures = 0;
+    const service = Object.create(QuestradeDataService.prototype) as Record<
+      string,
+      any
+    >;
+    const errors: unknown[] = [];
+    service.paperBotRunId = "run-current";
+    service.paperBotStore = {};
+    service.paperFundedBound = false;
+    service.paperFundedConfig = {
+      pool: { query: async () => ({ rows: [] }) },
+      accountId: "account-1",
+      currency: "CAD",
+      initialCash: 2_000,
+      dailyLossLimit: 500,
+    };
+    service.paperFundedRecoveryAdapters = new Map();
+    service.paperBotSessionDate = "2026-09-06";
+    service.paperBotScheduledCloseAt = "2026-09-06T20:00:00.000Z";
+    service.instruments = [];
+    service.clock = () => new Date("2026-09-06T14:00:00.000Z");
+    service.sessions = {
+      getMarket: () => ({ startTime: new Date("2026-09-06T13:30:00.000Z") }),
+    };
+    service.logger = {
+      info: () => undefined,
+      error: (event: unknown) => errors.push(event),
+    };
+    service.paperFundedAdapter = {
+      bind: async () => {
+        throw new FundedPriorRunActiveError("run-prior");
+      },
+      operationalSnapshot: async () => ({
+        closePendingOrders: 0,
+        oldestClosePendingAgeMs: null,
+        riskVetoesTotal: 0,
+        coverageGapsTotal: 0,
+        recoveryFailuresTotal: failures,
+        lastCycleLatencyMs: null,
+      }),
+      recordRecoveryFailure: () => ++failures,
+    };
+
+    await expect(service.processFundedPaperBot(new Map(), [])).resolves.toBe(
+      "WAITING",
+    );
+    expect(failures).toBe(0);
+    expect(service.paperFundedLastError).toBeUndefined();
+    expect(service.fundedLastSuccessAt).toBeUndefined();
+    expect(service.paperFundedCycleState).toBe("WAITING");
+    expect(errors).toEqual([]);
+  });
+
   it("publishes the first failure before any successful funded snapshot", async () => {
     const service = fixture();
 
     await expect(service.processFundedPaperBot(new Map(), [])).resolves.toBe(
-      false,
+      "FAILED",
     );
 
     expect(fundedSnapshot(service)).toMatchObject({

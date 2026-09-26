@@ -1,10 +1,11 @@
 from zoneinfo import ZoneInfo
+from math import isfinite
 from uuid import UUID, uuid4
 
 from .models import BacktestParameters, CandleRecord, ContextEvaluation, FeatureSnapshot, ScannerProfileConfig, SessionStart, SetupScoreComponents, SetupScoreContribution, StrategyEvaluation, StrategyParameters, StrategyState, StrategyStateEvent
 from .scoring import SPREAD_PREFERRED_MAX_PCT, score_setup
 from .strategies import CONTEXT_REGISTRY, STRATEGY_REGISTRY
-from .strategies.base import StrategyContext, StrategyMemory, formation_evidence
+from .strategies.base import StrategyContext, StrategyMemory, formation_evidence, min_tick
 
 STRATEGY_VERSION = "1.0.0"
 CONFIG_VERSION = "phase4-default-v1"
@@ -24,8 +25,50 @@ def _clock_minutes(value: str) -> int:
     return hours * 60 + minutes
 
 
+def _spread_limit_pct(f: FeatureSnapshot, parameters: StrategyParameters) -> float:
+    limit = parameters.spread_hard_max_pct
+    if parameters.spread_min_ticks > 0 and f.price > 0:
+        limit = max(limit, parameters.spread_min_ticks * min_tick(f.price) / f.price * 100)
+    return limit
+
+
+def _spread_gate(memory: StrategyMemory, f: FeatureSnapshot, parameters: StrategyParameters) -> str:
+    """Classify the spread for one instrument/profile quote.
+
+    BLOCKED: the spread stayed above the limit for the confirmation window.
+    RECOVERING: a previous block holds until the spread falls into the recovery band.
+    PENDING: above the limit but not yet confirmed. OK: within the limit.
+    The default parameters confirm on the first wide quote and release at the
+    limit itself, which reproduces the historical single-quote gate exactly.
+    """
+    limit = _spread_limit_pct(f, parameters)
+    if f.spread_pct > limit:
+        if memory.spread_wide_since is None:
+            memory.spread_wide_since = f.timestamp
+            memory.spread_wide_quotes = 0
+        memory.spread_wide_quotes += 1
+        elapsed = (f.timestamp - memory.spread_wide_since).total_seconds()
+        if (
+            memory.spread_blocked
+            or (memory.spread_wide_quotes >= parameters.spread_confirm_quotes
+                and elapsed >= parameters.spread_confirm_seconds)
+        ):
+            memory.spread_blocked = True
+            return "BLOCKED"
+        return "PENDING"
+    memory.spread_wide_since = None
+    memory.spread_wide_quotes = 0
+    if memory.spread_blocked and f.spread_pct > limit * parameters.spread_recovery_pct / 100:
+        return "RECOVERING"
+    memory.spread_blocked = False
+    return "OK"
+
+
 class StrategyEngine:
-    def __init__(self, parameters: BacktestParameters | None = None, config_version: str = CONFIG_VERSION) -> None:
+    def __init__(self, parameters: BacktestParameters | None = None, config_version: str = CONFIG_VERSION, *, collect_entry_filter_diagnostics: bool = False) -> None:
+        self._collect_entry_filter_diagnostics = collect_entry_filter_diagnostics
+        self.entry_filter_diagnostics: dict[str, dict[str, dict[str, int]]] = {}
+        self._blocked_instances: set[tuple[str, str, UUID, UUID | None]] = set()
         self._memory: dict[tuple[UUID, str], StrategyMemory] = {}
         self._session: SessionStart | None = None
         self._parameters = parameters or BacktestParameters()
@@ -35,6 +78,13 @@ class StrategyEngine:
 
     def reset(self) -> None:
         self._memory.clear()
+        self.entry_filter_diagnostics.clear()
+        self._blocked_instances.clear()
+
+    def forget(self, instrument_ids: set[UUID]) -> None:
+        """Drop strategy memory for instruments leaving the live session."""
+        for key in [key for key in self._memory if key[0] in instrument_ids]:
+            del self._memory[key]
 
     def start_session(self, session: SessionStart) -> None:
         values = [session.opening_range.start, session.opening_range.end, session.scanning.start,
@@ -79,6 +129,7 @@ class StrategyEngine:
             previous = memory.state
             state, reasons = self._next(strategy, memory, snapshot, context, profile.parameters)
             state, reasons = self._apply_session_gate(state, reasons, snapshot, profile)
+            state, reasons = self._apply_entry_filters(state, reasons, previous, snapshot, context, profile)
             memory.state = state
             evaluation = self._evaluation(profile, memory, context, state, reasons, snapshot)
             evaluations.append(evaluation)
@@ -108,6 +159,54 @@ class StrategyEngine:
             ))
         return evaluations, events, contexts
 
+    def _apply_entry_filters(self, state: StrategyState, reasons: list[str], previous: StrategyState, snapshot: FeatureSnapshot, context: StrategyContext, profile: ScannerProfileConfig) -> tuple[StrategyState, list[str]]:
+        """Filter only promotions, after existing strategy and session gates.
+
+        Diagnostics count blocked evaluations and distinct formation identities,
+        not hypothetical trades. A blocked formation can become READY later.
+        """
+        if state != "READY" or previous == "READY":
+            return state, reasons
+        parameters = profile.parameters
+        blocked: list[str] = []
+        if parameters.latest_ready_time is not None:
+            if self._session is None:
+                blocked.append("READY_WINDOW_UNAVAILABLE")
+            else:
+                local = snapshot.timestamp.astimezone(ZoneInfo(self._session.timezone))
+                if local.hour * 60 + local.minute >= _clock_minutes(parameters.latest_ready_time):
+                    blocked.append("READY_WINDOW_CLOSED")
+        if profile.strategy in ("PRIOR_DAY_HIGH_BREAKOUT", "HIGH_OF_DAY_BREAKOUT"):
+            for limit, value in ((parameters.max_vwap_distance_atr, snapshot.distance_from_vwap_atr),
+                                 (parameters.max_change_from_open_atr, snapshot.change_from_open_atr)):
+                if limit > 0 and (value is None or not isfinite(value)):
+                    blocked.append("ENTRY_EXTENSION_UNAVAILABLE")
+                elif limit > 0 and value is not None and value > limit:
+                    blocked.append("OVEREXTENDED_ENTRY")
+        if profile.strategy == "VWAP_HOLD" and parameters.min_sector_relative_strength_pct > 0:
+            benchmark = context.sector_benchmark
+            stock_return = snapshot.change_from_open_pct
+            if (benchmark is None or benchmark.timestamp is None or benchmark.change_from_open_pct is None
+                    or not benchmark.actionable or benchmark.data_status != "REALTIME"
+                    or not 0 <= (snapshot.timestamp - benchmark.timestamp).total_seconds() <= context.benchmark_max_staleness_seconds
+                    or stock_return is None or not isfinite(stock_return) or not isfinite(benchmark.change_from_open_pct)):
+                blocked.append("SECTOR_ENTRY_UNAVAILABLE")
+            elif stock_return - benchmark.change_from_open_pct < parameters.min_sector_relative_strength_pct:
+                blocked.append("SECTOR_RELATIVE_STRENGTH_BELOW_MINIMUM")
+        if not blocked:
+            return state, reasons
+        blocked = list(dict.fromkeys(blocked))
+        if self._collect_entry_filter_diagnostics:
+            memory = self._memory.get((snapshot.instrument_id, str(profile.profile_id)))
+            for reason in blocked:
+                counts = self.entry_filter_diagnostics.setdefault(profile.strategy, {}).setdefault(reason, {"blockedEvaluations": 0, "blockedInstances": 0})
+                counts["blockedEvaluations"] += 1
+                identity = (str(profile.profile_id), reason, snapshot.instrument_id, memory.setup_instance_id if memory else None)
+                if identity not in self._blocked_instances:
+                    self._blocked_instances.add(identity)
+                    counts["blockedInstances"] += 1
+        return "FORMING", [*reasons, *blocked]
+
     def _apply_session_gate(self, state: StrategyState, reasons: list[str], snapshot: FeatureSnapshot, profile: ScannerProfileConfig) -> tuple[StrategyState, list[str]]:
         if self._session is None or state in ("HALTED", "DATA_STALE", "INVALIDATED"):
             return state, reasons
@@ -136,8 +235,13 @@ class StrategyEngine:
             return "HALTED", [*base, "HALTED"]
         if not f.actionable or f.data_status != "REALTIME":
             return "DATA_STALE", [*base, "DATA_STALE"]
-        if f.spread_pct > parameters.spread_hard_max_pct:
+        spread_state = _spread_gate(memory, f, parameters)
+        if spread_state == "BLOCKED":
             return ("INVALIDATED" if memory.state in ("FORMING", "READY") else "INACTIVE"), [*base, "SPREAD_TOO_WIDE"]
+        if spread_state == "RECOVERING":
+            return ("INVALIDATED" if memory.state in ("FORMING", "READY") else "INACTIVE"), [*base, "SPREAD_TOO_WIDE", "SPREAD_RECOVERING"]
+        if spread_state == "PENDING":
+            base = [*base, "SPREAD_WIDE_UNCONFIRMED"]
         if f.warming_up:
             return "INACTIVE", [*base, "FEATURES_WARMING_UP"]
         if f.atr_pct is None or f.atr_pct < parameters.atr_pct_min:
@@ -154,7 +258,12 @@ class StrategyEngine:
         module = STRATEGY_REGISTRY.get(strategy)
         if module is None:
             raise ValueError(f"Unknown strategy module {strategy}")
-        return module.next_state(memory, f, context, parameters, base)
+        state, reasons = module.next_state(memory, f, context, parameters, base)
+        # A setup never becomes READY on a quote whose spread is above the limit;
+        # it waits for the spread to settle or for the gate to confirm the block.
+        if spread_state == "PENDING" and state == "READY" and memory.state != "READY":
+            return "FORMING", [*reasons, "WAITING_FOR_SPREAD"]
+        return state, reasons
 
     def _base_reasons(self, f: FeatureSnapshot) -> list[str]:
         reasons = ["REALTIME_DATA"] if f.data_status == "REALTIME" and f.actionable else []
@@ -188,7 +297,10 @@ class StrategyEngine:
             setup_instance_id=memory.setup_instance_id,
             stop_policy=profile.parameters.stop_policy,
             pattern_stop_reference=memory.stop_level,
-            stop_selection_reason=("PATTERN" if stop == memory.stop_level else "SUPPORT") if stop is not None else None,
+            stop_selection_reason=(
+                "MINIMUM_DISTANCE" if memory.stop_floored
+                else "PATTERN" if stop == memory.stop_level else "SUPPORT"
+            ) if stop is not None else None,
             formation_evidence=formation_evidence(memory, module.key),
             reason_codes=list(dict.fromkeys(reasons)), entry_reference=entry, stop_reference=stop,
             target_reference=target, estimated_rr=rr, feature_snapshot=f)

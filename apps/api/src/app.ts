@@ -17,6 +17,7 @@ import { registerPaperReportingRoutes } from "./routes/paper-reporting.js";
 import { registerLearningRoutes } from "./routes/learning.js";
 import { registerDiscoveryRoutes } from "./routes/discovery.js";
 import { registerStrategyStudyRoutes } from "./routes/strategy-studies.js";
+import { registerSignalModelResearchRoutes } from "./routes/signal-model-research.js";
 import { registerChallengerExperimentRoutes } from "./routes/challenger-experiments.js";
 
 // W9: app.ts is a navigation/composition layer, not a route implementation file. Each vertical's
@@ -43,6 +44,7 @@ export type {
   ResearchEvidenceApi,
   CoverageRequestApi,
   StrategyStudyApi,
+  SignalModelResearchApi,
   ChallengerExperimentApi,
   PaperReportingApi,
   FundedReportingApi,
@@ -90,6 +92,7 @@ export async function buildApp(options: BuildAppOptions) {
   registerLearningRoutes(app, options);
   registerDiscoveryRoutes(app, options);
   registerStrategyStudyRoutes(app, options);
+  registerSignalModelResearchRoutes(app, options);
   registerChallengerExperimentRoutes(app, options);
 
   return app;

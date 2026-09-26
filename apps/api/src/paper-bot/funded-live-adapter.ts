@@ -22,7 +22,10 @@ import type {
 } from "./types.js";
 import { fundedReservationDebit } from "./financials.js";
 import { FundedDecisionEvidenceRepository } from "./funded-decision-evidence-repository.js";
-import type { DecisionRefusalRequest } from "./funded-decision-evidence-repository.js";
+import type {
+  DecisionRefusalRequest,
+  FundedDecisionWorkWatermark,
+} from "./funded-decision-evidence-repository.js";
 import { FundedDecisionOutcomeProjector } from "./funded-decision-outcome-projector.js";
 import { zonedSessionBoundary } from "./session-time.js";
 
@@ -353,6 +356,41 @@ export function buildFundedQuoteEnvelope(
   };
 }
 
+/** Operational snapshot gap counters are recomputed at most once per minute. */
+const GAP_COUNT_TTL_MS = 60_000;
+
+/**
+ * A bounded interval after which the decision repair and projection passes run
+ * even when the durable work watermark did not move, so projection work driven
+ * only by order or ledger transitions is never deferred indefinitely.
+ */
+const WORK_WATERMARK_FULL_PASS_MS = 60_000;
+
+function sameRepairWorkWatermark(
+  left: FundedDecisionWorkWatermark | null,
+  right: FundedDecisionWorkWatermark | null,
+): boolean {
+  return (
+    left !== null &&
+    right !== null &&
+    left.evidenceSequence === right.evidenceSequence &&
+    left.intentCount === right.intentCount &&
+    left.refusalCount === right.refusalCount &&
+    left.signalAppliedSequence === right.signalAppliedSequence &&
+    left.eligibleObservationCount === right.eligibleObservationCount
+  );
+}
+
+function sameProjectionWorkWatermark(
+  left: FundedDecisionWorkWatermark | null,
+  right: FundedDecisionWorkWatermark | null,
+): boolean {
+  return (
+    sameRepairWorkWatermark(left, right) &&
+    left?.outcomeTransitionRevision === right?.outcomeTransitionRevision
+  );
+}
+
 /**
  * Live observation/quote adapter for the funded path. It is deliberately
  * independent of the legacy PaperBotLiveProcessor so existing independent and
@@ -365,6 +403,31 @@ export class FundedLiveAdapter {
   private projectionFailures = 0;
   private evidenceProjectionFailures = 0;
   private lastProjectionError: string | null = null;
+  /**
+   * Durable evidence gap counters are expensive scans; the operational
+   * snapshot reuses them for a bounded interval and refreshes immediately
+   * after a failed or capped repair/projection pass.
+   */
+  private gapCountsCache: {
+    at: number;
+    decision: number;
+    outcome: number;
+  } | null = null;
+  private lifetimeCountsCache: {
+    at: number;
+    risk: number;
+    late: number;
+  } | null = null;
+  /**
+   * Last observed decision-work watermark plus the cleanliness of the passes
+   * that ran against it. A cycle skips the repair and projection candidate
+   * reads only while the watermark is unchanged, the last pass was clean and
+   * the bounded full-pass interval has not elapsed.
+   */
+  private workWatermark: FundedDecisionWorkWatermark | null = null;
+  private repairClean = false;
+  private projectionClean = false;
+  private lastFullWorkPassAt = 0;
 
   /** Visible count of FP01 outcome-projection faults; repair is idempotent. */
   projectionFailureCount(): number {
@@ -374,6 +437,55 @@ export class FundedLiveAdapter {
   lastProjectionFailure(): string | null {
     return this.lastProjectionError;
   }
+
+  /** Force the next operational snapshot to recompute durable gap counters. */
+  private invalidateGapCounts(): void {
+    this.gapCountsCache = null;
+  }
+
+  private async readGapCounts(
+    observedAt: number,
+  ): Promise<{ decision: number; outcome: number }> {
+    const cached = this.gapCountsCache;
+    if (cached && observedAt - cached.at < GAP_COUNT_TTL_MS) return cached;
+    const [decision, outcome] = await Promise.all([
+      this.evidence.decisionGapCount(this.options.runId),
+      this.evidence.projectionGapCount(this.options.runId),
+    ]);
+    const next = { at: observedAt, decision, outcome };
+    this.gapCountsCache = next;
+    return next;
+  }
+
+  private async readLifetimeCounts(
+    observedAt: number,
+  ): Promise<{ risk: number; late: number }> {
+    const cached = this.lifetimeCountsCache;
+    if (cached && observedAt - cached.at < GAP_COUNT_TTL_MS) return cached;
+    const result = await this.options.pool.query<{
+      risk: string | number;
+      late: string | number;
+    }>(
+      `WITH runs AS MATERIALIZED (
+         SELECT fb.run_id FROM paper_funded_run fb
+         JOIN paper_bot_run r ON r.id=fb.run_id
+         WHERE fb.account_id=$1 AND fb.currency=$2 AND r.market_id=$3
+       )
+       SELECT count(*) FILTER (WHERE f.outcome->>'status'='RISK_VETO') AS risk,
+              count(*) FILTER (WHERE f.outcome->>'status'='LATE_FACT') AS late
+       FROM paper_funded_fact f JOIN runs ON runs.run_id=f.run_id
+       WHERE f.outcome->>'status' IN ('RISK_VETO','LATE_FACT')`,
+      [this.options.accountId, this.options.currency, this.options.marketId],
+    );
+    const next = {
+      at: observedAt,
+      risk: Number(result.rows[0]?.risk ?? 0),
+      late: Number(result.rows[0]?.late ?? 0),
+    };
+    this.lifetimeCountsCache = next;
+    return next;
+  }
+
   private readonly service: FundedOrderService;
   private readonly ledger: PostgresFundedLedgerStore;
   private readonly policy: FundedPolicy;
@@ -493,73 +605,94 @@ export class FundedLiveAdapter {
     return this.recoveryFailuresTotal;
   }
 
-  private async existingSignalFact(observationId: string): Promise<
-    | (FundedFactEnvelope & {
-        outcome: { status?: string } | null;
-        committedOrder: boolean;
-        pendingOrder: boolean;
-      })
-    | { suppressed: true }
-    | undefined
+  private async existingObservationFacts(observationIds: string[]): Promise<
+    Map<
+      string,
+      {
+        existing?:
+          | (FundedFactEnvelope & {
+              outcome: { status?: string } | null;
+              committedOrder: boolean;
+              pendingOrder: boolean;
+            })
+          | { suppressed: true };
+        staleCancellation?: FundedFactEnvelope;
+      }
+    >
   > {
+    if (observationIds.length === 0) return new Map();
     const result = await this.options.pool.query<{
-      fact: FundedFactEnvelope["fact"];
+      observationId: string;
+      fact: FundedFactEnvelope["fact"] | null;
       outcome: { status?: string } | null;
       committedOrder: boolean;
       pendingOrder: boolean;
+      staleFact: FundedFactEnvelope["fact"] | null;
     }>(
-      `SELECT fact,outcome,
-              EXISTS (
-                SELECT 1 FROM paper_entry_order o
-                WHERE o.run_id=$1 AND o.order_id=$3
-              ) AS "committedOrder",
-              EXISTS (
-                SELECT 1 FROM paper_entry_order o
-                WHERE o.run_id=$1 AND o.order_id=$3
-                  AND o.state->>'status'='PENDING'
-              ) AS "pendingOrder"
-       FROM paper_funded_fact
-       WHERE run_id=$1 AND (
-         fact_id=$2
-         OR (fact->>'type'='CANCEL' AND fact->>'orderId'=$3
+      `WITH ids AS (SELECT unnest($2::text[]) AS observation_id)
+       SELECT ids.observation_id AS "observationId", existing.fact,
+              existing.outcome,
+              EXISTS (SELECT 1 FROM paper_entry_order o
+                      WHERE o.run_id=$1 AND o.order_id=ids.observation_id) AS "committedOrder",
+              EXISTS (SELECT 1 FROM paper_entry_order o
+                      WHERE o.run_id=$1 AND o.order_id=ids.observation_id
+                        AND o.state->>'status'='PENDING') AS "pendingOrder",
+              stale.fact AS "staleFact"
+       FROM ids
+       LEFT JOIN LATERAL (
+         SELECT fact,outcome FROM paper_funded_fact
+         WHERE run_id=$1 AND (
+           fact_id='funded-signal:' || ids.observation_id OR
+           (fact->>'type'='CANCEL' AND fact->>'orderId'=ids.observation_id
              AND fact->'preSubmissionEventId' IS NOT NULL)
-       )
-       ORDER BY CASE WHEN fact_id=$2 THEN 0 ELSE 1 END
-       LIMIT 1`,
-      [this.options.runId, `funded-signal:${observationId}`, observationId],
+         )
+         ORDER BY CASE WHEN fact_id='funded-signal:' || ids.observation_id THEN 0 ELSE 1 END
+         LIMIT 1
+       ) existing ON true
+       LEFT JOIN paper_funded_fact stale
+         ON stale.run_id=$1
+        AND stale.fact_id='funded-invalidation:stale-signal:' || ids.observation_id
+        AND stale.fact->>'type'='CANCEL'`,
+      [this.options.runId, observationIds],
     );
-    const row = result.rows[0];
-    if (!row) return undefined;
-    if (row.outcome?.status === "PRE_SUBMISSION_SUPPRESSED")
-      return { suppressed: true };
-    if (row.fact.type === "SIGNAL")
-      return {
-        id: `funded-signal:${observationId}`,
-        fact: row.fact,
-        outcome: row.outcome,
-        committedOrder: row.committedOrder,
-        pendingOrder: row.pendingOrder,
-      };
-    return { suppressed: true };
-  }
-
-  private async existingStaleCancellation(
-    observationId: string,
-  ): Promise<FundedFactEnvelope | undefined> {
-    const result = await this.options.pool.query<{
-      fact: FundedFactEnvelope["fact"];
-    }>(
-      `SELECT fact FROM paper_funded_fact
-       WHERE run_id=$1 AND fact_id=$2 AND fact->>'type'='CANCEL'`,
-      [this.options.runId, `funded-invalidation:stale-signal:${observationId}`],
-    );
-    const fact = result.rows[0]?.fact;
-    return fact?.type === "CANCEL"
-      ? {
-          id: `funded-invalidation:stale-signal:${observationId}`,
-          fact,
-        }
-      : undefined;
+    const facts = new Map<
+      string,
+      {
+        existing?:
+          | (FundedFactEnvelope & {
+              outcome: { status?: string } | null;
+              committedOrder: boolean;
+              pendingOrder: boolean;
+            })
+          | { suppressed: true };
+        staleCancellation?: FundedFactEnvelope;
+      }
+    >();
+    for (const row of result.rows) {
+      const existing = !row.fact
+        ? undefined
+        : row.outcome?.status === "PRE_SUBMISSION_SUPPRESSED" ||
+            row.fact.type !== "SIGNAL"
+          ? ({ suppressed: true } as const)
+          : {
+              id: `funded-signal:${row.observationId}`,
+              fact: row.fact,
+              outcome: row.outcome,
+              committedOrder: row.committedOrder,
+              pendingOrder: row.pendingOrder,
+            };
+      facts.set(row.observationId, {
+        existing,
+        staleCancellation:
+          row.staleFact?.type === "CANCEL"
+            ? {
+                id: `funded-invalidation:stale-signal:${row.observationId}`,
+                fact: row.staleFact,
+              }
+            : undefined,
+      });
+    }
+    return facts;
   }
 
   async operationalSnapshot(at: string): Promise<FundedOperationalSnapshot> {
@@ -569,58 +702,34 @@ export class FundedLiveAdapter {
     const result = await this.options.pool.query<{
       closePendingOrders: string | number;
       oldestClosePendingAt: Date | string | null;
-      riskVetoesTotal: string | number;
-      lateFactsTotal: string | number;
       pendingFacts: string | number;
       oldestPendingAt: Date | string | null;
       factsArrived5m: string | number;
       factsDrained5m: string | number;
     }>(
-      `SELECT
-         (SELECT count(*) FROM paper_funded_fact f
-          WHERE f.run_id IN (
-            SELECT fb.run_id FROM paper_funded_run fb
-             JOIN paper_bot_run fr ON fr.id=fb.run_id
-             WHERE fb.account_id=$1 AND fb.currency=$2 AND fr.market_id=$3)
-            AND f.outcome IS NULL) AS "pendingFacts",
-         (SELECT min(f.fact_at) FROM paper_funded_fact f
-          WHERE f.run_id IN (
-            SELECT fb.run_id FROM paper_funded_run fb
-             JOIN paper_bot_run fr ON fr.id=fb.run_id
-             WHERE fb.account_id=$1 AND fb.currency=$2 AND fr.market_id=$3)
-            AND f.outcome IS NULL) AS "oldestPendingAt",
-         count(*) FILTER (WHERE o.state->'execution'->>'status'='CLOSE_PENDING') AS "closePendingOrders",
-         min(o.close_pending_at) FILTER (WHERE o.state->'execution'->>'status'='CLOSE_PENDING') AS "oldestClosePendingAt",
-         (SELECT count(*) FROM paper_funded_fact f
-          WHERE f.run_id IN (
-            SELECT fb.run_id FROM paper_funded_run fb
-             JOIN paper_bot_run fr ON fr.id=fb.run_id
-             WHERE fb.account_id=$1 AND fb.currency=$2 AND fr.market_id=$3)
-            AND f.outcome->>'status'='RISK_VETO') AS "riskVetoesTotal",
-         (SELECT count(*) FROM paper_funded_fact f
-          WHERE f.run_id IN (
-            SELECT fb.run_id FROM paper_funded_run fb
-             JOIN paper_bot_run fr ON fr.id=fb.run_id
-             WHERE fb.account_id=$1 AND fb.currency=$2 AND fr.market_id=$3)
-            AND f.outcome->>'status'='LATE_FACT') AS "lateFactsTotal",
-         (SELECT COALESCE(sum(f.enqueued_count),0)
-          FROM paper_funded_fact_rate_minute f
-          WHERE f.run_id IN (
-            SELECT fb.run_id FROM paper_funded_run fb
-             JOIN paper_bot_run fr ON fr.id=fb.run_id
-             WHERE fb.account_id=$1 AND fb.currency=$2 AND fr.market_id=$3)
-            AND f.bucket_at >= date_trunc('minute',now()) - interval '4 minutes') AS "factsArrived5m",
-         (SELECT COALESCE(sum(f.processed_count),0)
-          FROM paper_funded_fact_rate_minute f
-          WHERE f.run_id IN (
-            SELECT fb.run_id FROM paper_funded_run fb
-             JOIN paper_bot_run fr ON fr.id=fb.run_id
-             WHERE fb.account_id=$1 AND fb.currency=$2 AND fr.market_id=$3)
-            AND f.bucket_at >= date_trunc('minute',now()) - interval '4 minutes') AS "factsDrained5m"
-       FROM paper_entry_order o
-       JOIN paper_funded_run b ON b.run_id=o.run_id
-       JOIN paper_bot_run r ON r.id=b.run_id
-       WHERE b.account_id=$1 AND b.currency=$2 AND r.market_id=$3`,
+      `WITH runs AS MATERIALIZED (
+         SELECT fb.run_id FROM paper_funded_run fb
+         JOIN paper_bot_run r ON r.id=fb.run_id
+         WHERE fb.account_id=$1 AND fb.currency=$2 AND r.market_id=$3
+       ), facts AS (
+         SELECT count(*) AS pending,
+                min(f.fact_at) AS oldest
+         FROM paper_funded_fact f JOIN runs ON runs.run_id=f.run_id
+         WHERE f.outcome IS NULL
+       ), rates AS (
+         SELECT COALESCE(sum(f.enqueued_count),0) AS arrived,
+                COALESCE(sum(f.processed_count),0) AS drained
+         FROM paper_funded_fact_rate_minute f JOIN runs ON runs.run_id=f.run_id
+         WHERE f.bucket_at >= date_trunc('minute',now()) - interval '4 minutes'
+       ), orders AS (
+         SELECT count(*) FILTER (WHERE o.state->'execution'->>'status'='CLOSE_PENDING') AS pending,
+                min(o.close_pending_at) FILTER (WHERE o.state->'execution'->>'status'='CLOSE_PENDING') AS oldest
+         FROM paper_entry_order o JOIN runs ON runs.run_id=o.run_id
+       )
+       SELECT facts.pending AS "pendingFacts", facts.oldest AS "oldestPendingAt",
+              rates.arrived AS "factsArrived5m", rates.drained AS "factsDrained5m",
+              orders.pending AS "closePendingOrders", orders.oldest AS "oldestClosePendingAt"
+       FROM facts CROSS JOIN rates CROSS JOIN orders`,
       [this.options.accountId, this.options.currency, this.options.marketId],
     );
     const row = result.rows[0];
@@ -630,12 +739,15 @@ export class FundedLiveAdapter {
         : Date.parse(row.oldestClosePendingAt)
       : Number.NaN;
     // Durable gaps are derived from the database so a restart cannot erase the
-    // visibility of missing capture or unprojected outcomes.
-    const [evidenceDecisionGapsTotal, evidenceOutcomeGapsTotal] =
-      await Promise.all([
-        this.evidence.decisionGapCount(this.options.runId),
-        this.evidence.projectionGapCount(this.options.runId),
-      ]);
+    // visibility of missing capture or unprojected outcomes. The counters are
+    // recomputed at most once per minute; a failed repair or projection pass
+    // invalidates the cache immediately.
+    const [gapCounts, lifetimeCounts] = await Promise.all([
+      this.readGapCounts(observedAt),
+      this.readLifetimeCounts(observedAt),
+    ]);
+    const evidenceDecisionGapsTotal = gapCounts.decision;
+    const evidenceOutcomeGapsTotal = gapCounts.outcome;
     // Sustained five-minute averages; the difference is the capacity deficit
     // that matters, not any single cycle's batch size.
     const rate = (value: string | number | undefined): number =>
@@ -650,9 +762,8 @@ export class FundedLiveAdapter {
       oldestClosePendingAgeMs: Number.isFinite(oldest)
         ? Math.max(0, observedAt - oldest)
         : null,
-      riskVetoesTotal: Number(row?.riskVetoesTotal ?? 0),
-      coverageGapsTotal:
-        Number(row?.lateFactsTotal ?? 0) + this.coverageGapsTotal,
+      riskVetoesTotal: lifetimeCounts.risk,
+      coverageGapsTotal: lifetimeCounts.late + this.coverageGapsTotal,
       recoveryFailuresTotal: this.recoveryFailuresTotal,
       lastCycleLatencyMs: this.lastCycleLatencyMs,
       pendingFacts: Number(row?.pendingFacts ?? 0),
@@ -703,15 +814,16 @@ export class FundedLiveAdapter {
     // the exact action, reason, decision time and chronological cursor survive
     // a restart even if the observation is suppressed on later cycles.
     const refusalRequests: DecisionRefusalRequest[] = [];
+    const existingFacts = await this.existingObservationFacts(
+      input.observations.map((observation) => observation.id),
+    );
     for (const observation of [...input.observations].sort(
       (left, right) =>
         Date.parse(left.signalTimestamp) - Date.parse(right.signalTimestamp) ||
         left.id.localeCompare(right.id),
     )) {
-      const existing = await this.existingSignalFact(observation.id);
-      const staleCancellation = await this.existingStaleCancellation(
-        observation.id,
-      );
+      const { existing, staleCancellation } =
+        existingFacts.get(observation.id) ?? {};
       const validityDeadline = fundedSignalValidityDeadline(
         observation,
         input.sessionDate,
@@ -938,50 +1050,99 @@ export class FundedLiveAdapter {
     const processed = await this.inbox.drain(budget, {
       repository: this.evidence,
     });
+    // The repair and projection passes read durable candidate sets. A cheap
+    // per-run watermark lets a quiet cycle prove those sets are unchanged
+    // instead of rebuilding them; a read failure fails open into a full pass.
+    let workWatermark: FundedDecisionWorkWatermark | null = null;
+    try {
+      workWatermark = await this.evidence.decisionWorkWatermark(
+        this.options.runId,
+      );
+    } catch {
+      workWatermark = null;
+    }
+    const repairWatermarkChanged =
+      workWatermark !== null &&
+      !sameRepairWorkWatermark(this.workWatermark, workWatermark);
+    const projectionWatermarkChanged =
+      workWatermark !== null &&
+      !sameProjectionWorkWatermark(this.workWatermark, workWatermark);
+    const forcedFullPass =
+      Date.now() - this.lastFullWorkPassAt >= WORK_WATERMARK_FULL_PASS_MS;
     // Repair decisions whose capture failed while their economics committed,
     // including non-SUBMIT refusals whose durable intent was written first.
     // The durable intent/fact remains the only input, so this is idempotent
     // and does not touch the order/ledger effects.
+    const runRepair =
+      workWatermark === null ||
+      repairWatermarkChanged ||
+      !this.repairClean ||
+      forcedFullPass;
     let captureFailures = 0;
     let decisionGaps = 0;
-    try {
-      const repaired = await this.evidence.repairMissingDecisions(
-        this.options.runId,
-      );
-      captureFailures = repaired.failed;
-      decisionGaps = repaired.remaining;
-      if (repaired.failed > 0)
-        this.lastProjectionError ??= "Funded decision repair failed";
-    } catch (repairError) {
-      captureFailures = 1;
-      decisionGaps = Number.MAX_SAFE_INTEGER;
-      this.lastProjectionError =
-        repairError instanceof Error
-          ? repairError.message
-          : String(repairError);
+    if (runRepair) {
+      try {
+        const repaired = await this.evidence.repairMissingDecisions(
+          this.options.runId,
+        );
+        captureFailures = repaired.failed;
+        decisionGaps = repaired.remaining;
+        if (repaired.failed > 0)
+          this.lastProjectionError ??= "Funded decision repair failed";
+      } catch (repairError) {
+        captureFailures = 1;
+        decisionGaps = Number.MAX_SAFE_INTEGER;
+        this.lastProjectionError =
+          repairError instanceof Error
+            ? repairError.message
+            : String(repairError);
+      }
     }
+    this.repairClean = captureFailures === 0 && decisionGaps === 0;
     // Outcome projection runs after the economic drain and never participates
     // in it: a projector fault is counted, leaves economics committed and is
     // repaired by a later bounded pass.
+    const runProjection =
+      workWatermark === null ||
+      projectionWatermarkChanged ||
+      !this.projectionClean ||
+      forcedFullPass;
     let projectionFailures = 0;
     let outcomeGaps = 0;
-    try {
-      const projection = await this.projector.projectPending(
-        this.options.runId,
-      );
-      projectionFailures = projection.failed;
-      outcomeGaps = projection.remaining;
-      this.evidenceProjectionFailures += projection.failed;
-    } catch (projectionError) {
-      projectionFailures = 1;
-      outcomeGaps = Number.MAX_SAFE_INTEGER;
-      this.projectionFailures += 1;
-      this.evidenceProjectionFailures += 1;
-      this.lastProjectionError =
-        projectionError instanceof Error
-          ? projectionError.message
-          : String(projectionError);
+    if (runProjection) {
+      try {
+        const projection = await this.projector.projectPending(
+          this.options.runId,
+        );
+        projectionFailures = projection.failed;
+        outcomeGaps = projection.remaining;
+        this.evidenceProjectionFailures += projection.failed;
+      } catch (projectionError) {
+        projectionFailures = 1;
+        outcomeGaps = Number.MAX_SAFE_INTEGER;
+        this.projectionFailures += 1;
+        this.evidenceProjectionFailures += 1;
+        this.lastProjectionError =
+          projectionError instanceof Error
+            ? projectionError.message
+            : String(projectionError);
+      }
     }
+    this.projectionClean = projectionFailures === 0 && outcomeGaps === 0;
+    if (runRepair || runProjection) {
+      if (workWatermark !== null) this.workWatermark = workWatermark;
+      // Only a pass that executed both bodies resets the forced-pass anchor,
+      // so a persistently unclean single pass cannot starve the other.
+      if (forcedFullPass || (runRepair && runProjection))
+        this.lastFullWorkPassAt = Date.now();
+    }
+    if (
+      captureFailures > 0 ||
+      projectionFailures > 0 ||
+      decisionGaps > 0 ||
+      outcomeGaps > 0
+    )
+      this.invalidateGapCounts();
     this.coverageGapsTotal += coverageGaps;
     this.lastCycleLatencyMs =
       Math.round((performance.now() - started) * 100) / 100;

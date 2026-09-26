@@ -1,5 +1,6 @@
 import {
   capturedHistoryAvailabilitySchema,
+  type BacktestDataSource,
   type CapturedHistoryAvailability,
   type CapturedHistoryLimitation,
   type MarketId,
@@ -35,10 +36,17 @@ function interiorLimitationNotice(
   return `Forward quotes are missing ${limitationBounds(first)}${sessions} although completed candles exist there. Backfilled candles do not replace the missing quotes, so replay for those sessions has a known capture limitation.${extra}`;
 }
 
+function sourceLabel(source: BacktestDataSource): string {
+  return source === "HISTORICAL_ARCHIVE"
+    ? "Archived quotes"
+    : "Captured quotes";
+}
+
 function useCapturedHistoryAvailability(
   startDate: string,
   endDate: string,
   marketId: MarketId,
+  source: BacktestDataSource,
 ) {
   const [availability, setAvailability] =
     useState<CapturedHistoryAvailability>();
@@ -48,7 +56,9 @@ function useCapturedHistoryAvailability(
     setAvailability(undefined);
     setError("");
     void getJson(
-      `/api/captured-history/availability?marketId=${encodeURIComponent(marketId)}`,
+      `/api/captured-history/availability?marketId=${encodeURIComponent(marketId)}${
+        source === "CAPTURED_QUOTES" ? "" : `&source=${source}`
+      }`,
     )
       .then((payload) => {
         if (!stopped)
@@ -61,7 +71,7 @@ function useCapturedHistoryAvailability(
     return () => {
       stopped = true;
     };
-  }, [marketId]);
+  }, [marketId, source]);
   return useMemo(() => {
     const earliestDate = availability?.replay.earliestDate ?? null;
     const latestDate = availability?.replay.latestDate ?? null;
@@ -84,7 +94,10 @@ function useCapturedHistoryAvailability(
         earliestDate,
         latestDate,
         rangeAvailable: false,
-        message: "No captured quote history is available yet.",
+        message:
+          source === "HISTORICAL_ARCHIVE"
+            ? "The historical archive is empty; run historical-import first."
+            : "No captured quote history is available yet.",
       };
     const rangeAvailable = startDate >= earliestDate && endDate <= latestDate;
     const limitation = interiorLimitationNotice(availability);
@@ -95,14 +108,14 @@ function useCapturedHistoryAvailability(
       limitations: availability.limitations,
       message: [
         rangeAvailable
-          ? `Captured quotes available ${earliestDate} through ${latestDate}.`
-          : `Choose a range within captured quotes: ${earliestDate} through ${latestDate}.`,
+          ? `${sourceLabel(source)} available ${earliestDate} through ${latestDate}.`
+          : `Choose a range within ${sourceLabel(source).toLowerCase()}: ${earliestDate} through ${latestDate}.`,
         limitation,
       ]
         .filter(Boolean)
         .join(" "),
     };
-  }, [availability, endDate, error, startDate]);
+  }, [availability, endDate, error, source, startDate]);
 }
 
 function capturedHistorySummary(
@@ -112,8 +125,8 @@ function capturedHistorySummary(
   const { earliestDate, latestDate } = availability.replay;
   const bounds =
     earliestDate && latestDate
-      ? `Captured quotes available at run start: ${earliestDate} through ${latestDate}.`
-      : "No captured quote history was available when this run started.";
+      ? `${sourceLabel(availability.source)} available at run start: ${earliestDate} through ${latestDate}.`
+      : "No quote history was available when this run started.";
   const limitation = interiorLimitationNotice(availability);
   return [bounds, limitation].filter(Boolean).join(" ");
 }
@@ -123,8 +136,14 @@ export function useCapturedHistoryFormGuard(
   endDate: string,
   marketId: MarketId = "CA_TSX",
   active = true,
+  source: BacktestDataSource = "CAPTURED_QUOTES",
 ): void {
-  const history = useCapturedHistoryAvailability(startDate, endDate, marketId);
+  const history = useCapturedHistoryAvailability(
+    startDate,
+    endDate,
+    marketId,
+    source,
+  );
   useEffect(() => {
     // A deferred form (for example inside a closed drawer) mounts after the
     // availability load; `active` re-runs this once its fields exist.

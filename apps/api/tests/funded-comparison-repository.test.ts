@@ -810,6 +810,48 @@ describe.skipIf(!databaseUrl)(
       ).toBe(4);
     });
 
+    it("covers the complete chronological session range for both sides", async () => {
+      const { specId, specification } = await saveSpec();
+      const champion = await createSideStudy();
+      const challenger = await createSideStudy();
+      for (const [index, sessionDate] of sessionDates.entries()) {
+        await repository.bindSessionSide(specId, "CHAMPION", sessionDate, {
+          runId: champion.runIds[index]!,
+          accountId: champion.accountId,
+          marketId,
+          currency: "CAD",
+          policyDigest: specification.champion.policyDigest,
+          executionModelVersion: "execution-v1",
+          accountAssumptionDigest: digestB,
+          boundAt: `${sessionDate}T13:30:00.000Z`,
+        });
+        await repository.bindSessionSide(specId, "CHALLENGER", sessionDate, {
+          runId: challenger.runIds[index]!,
+          accountId: challenger.accountId,
+          marketId,
+          currency: "CAD",
+          policyDigest: specification.challenger.policyDigest,
+          executionModelVersion: "execution-v1",
+          accountAssumptionDigest: digestB,
+          boundAt: `${sessionDate}T13:30:00.000Z`,
+        });
+      }
+      const bindings = await repository.listBindings(specId);
+      expect(bindings).toHaveLength(sessionDates.length * 2);
+      expect(
+        new Set(
+          bindings.map((binding) => `${binding.side}:${binding.sessionDate}`),
+        ),
+      ).toEqual(
+        new Set(
+          sessionDates.flatMap((sessionDate) => [
+            `CHAMPION:${sessionDate}`,
+            `CHALLENGER:${sessionDate}`,
+          ]),
+        ),
+      );
+    });
+
     it("persists one immutable exact provisioning intent before run binding", async () => {
       const { specId, specification } = await saveSpec();
       const intent = {

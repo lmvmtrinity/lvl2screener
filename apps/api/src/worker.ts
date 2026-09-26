@@ -41,6 +41,7 @@ import { RankingResearchService } from "./ranking-research/ranking-research-serv
 import { PostgresStatisticalModelStore } from "./statistical-models/statistical-model-repository.js";
 import { StatisticalModelService } from "./statistical-models/statistical-model-service.js";
 import { PostgresPaperEvidenceTrainingStore } from "./statistical-models/paper-evidence-training-repository.js";
+import { PostgresDatasetPreparationStore } from "./statistical-models/dataset-preparation-repository.js";
 import { PaperEvidenceTrainingService } from "./statistical-models/paper-evidence-training-service.js";
 import { PaperEvidenceTrainingScheduler } from "./statistical-models/paper-evidence-training-scheduler.js";
 import { PostgresFundedExecutionTrainingStore } from "./statistical-models/funded-execution-training-repository.js";
@@ -55,6 +56,8 @@ import { BacktestJobHandler } from "./worker/handlers/backtest-job-handler.js";
 import { SynchronousJobHandler } from "./worker/handlers/synchronous-job-handler.js";
 import { CoverageVerificationJobHandler } from "./worker/handlers/coverage-verification-job-handler.js";
 import { StrategyStudyJobHandler } from "./worker/handlers/strategy-study-job-handler.js";
+import { SignalModelResearchJobHandler } from "./worker/handlers/signal-model-research-job-handler.js";
+import { PostgresSignalModelResearchControlStore } from "./backtests/signal-model-research-control.js";
 import { ExecutionDiagnosticsJobHandler } from "./worker/handlers/execution-diagnostics-job-handler.js";
 import { ResearchCoverageService } from "./backtests/research-coverage-service.js";
 import { PostgresCoverageRequestRepository } from "./backtests/coverage-request-repository.js";
@@ -66,6 +69,13 @@ import {
   ChallengerObservationWorker,
   ScannerChallengerObservationEngine,
 } from "./statistical-models/challenger-observation-worker.js";
+import { PostgresFundedShadowStore } from "./statistical-models/funded-shadow-repository.js";
+import { FundedShadowObserver } from "./statistical-models/funded-shadow-observer.js";
+import { FundedShadowObservationWorker } from "./statistical-models/funded-shadow-worker.js";
+import {
+  FundedExecutionPredictionService,
+  PostgresFundedExecutionPredictionStore,
+} from "./statistical-models/funded-execution-prediction.js";
 import { StudyDispatchService } from "./backtests/study-dispatch-service.js";
 import { EvidenceAutomationService } from "./statistical-models/evidence-automation-service.js";
 import { PostgresEvidenceAutomationRepository } from "./statistical-models/evidence-automation-repository.js";
@@ -76,6 +86,10 @@ import {
   ResearchWorker,
   type ResearchWorkerLogger,
 } from "./worker/research-worker.js";
+import { BackgroundWorkTracker } from "./worker/background-work.js";
+import { IdleBackoffGate } from "./worker/idle-backoff-gate.js";
+import { regularSessionOpen } from "./worker/market-session-pause.js";
+import { drainBacktestCompletionMarkets } from "./worker/backtest-completion-drain.js";
 
 /** W8 worker process entrypoint. Runs independently of the API HTTP process (its own container in
  * docker-compose) so an API restart never interrupts a research job that is mid-lease here, and a
@@ -101,6 +115,12 @@ function jsonLogger(level: string): ResearchWorkerLogger {
 
 const config = loadConfig();
 const logger = jsonLogger(config.LOG_LEVEL);
+// Background passes started by the timers below are tracked so shutdown can
+// stop accepting work and drain them before the pool closes. Without this,
+// an in-flight pass queries the pool after `pool.end()` and logs
+// "Cannot use a pool after calling end on the pool".
+const backgroundWork = new BackgroundWorkTracker(logger);
+let shuttingDown = false;
 const pool = new Pool({ connectionString: config.DATABASE_URL, max: 5 });
 await migrate(pool);
 
@@ -109,6 +129,7 @@ const scannerClient = new ScannerFeatureClient(
   new URL(config.SCANNER_URL),
   10_000,
   config.SCANNER_SERVICE_TOKEN,
+  new URL(config.RESEARCH_SCANNER_URL ?? config.SCANNER_URL),
 );
 const researchRuntimeIdentityProvider =
   createResearchRuntimeIdentityProvider(scannerClient);
@@ -118,6 +139,25 @@ const challengerObservationWorker = new ChallengerObservationWorker(
   undefined,
   new PostgresPaperExecutionStore(pool),
 );
+// FP04: authority-disabled prospective funded champion/challenger observation.
+// The observer runs only behind the explicit default-false process gate, and
+// even then no work occurs without a valid, non-revoked, market-scoped
+// enrollment. It writes no order, reservation, ledger, policy or authority row.
+const fundedShadowStore = new PostgresFundedShadowStore(pool);
+const fundedShadowWorker = config.FUNDED_SHADOW_OBSERVATION_ENABLED
+  ? new FundedShadowObservationWorker(
+      pool,
+      fundedShadowStore,
+      new FundedShadowObserver({
+        store: fundedShadowStore,
+        pool,
+        engine: scannerClient,
+        predictions: new FundedExecutionPredictionService(
+          new PostgresFundedExecutionPredictionStore(pool),
+        ),
+      }),
+    )
+  : null;
 const profileStore = new PostgresProfileStore(pool);
 const replayPolicy = {
   marketId: "CA_TSX" as const,
@@ -206,6 +246,12 @@ const backtestAutomationService = new BacktestAutomationService({
   jobs: repository,
   clock: () => new Date(),
   logger,
+  economics: {
+    minNetRewardRisk: config.PAPER_BOT_MIN_NET_REWARD_RISK,
+    minStopFrictionMultiple: config.PAPER_BOT_MIN_STOP_FRICTION_MULTIPLE,
+    minTargetFrictionMultiple: config.PAPER_BOT_MIN_TARGET_FRICTION_MULTIPLE,
+    maxSpreadPct: config.PAPER_BOT_MAX_SPREAD_PCT,
+  },
   stageDefinitions: standardBacktestAutomationStages({
     backtests: backtestStore,
     profiles: profileStore,
@@ -222,6 +268,25 @@ for (const marketId of config.ENABLED_MARKETS)
     cadence: "DAILY_POST_SESSION",
     maxOutstanding: config.BACKTEST_AUTOMATION_MAX_OUTSTANDING,
   });
+let backtestCompletionDrainTimer: NodeJS.Timeout | undefined;
+const scheduleBacktestCompletionDrain = () => {
+  if (shuttingDown || backtestCompletionDrainTimer) return;
+  backtestCompletionDrainTimer = setTimeout(() => {
+    backtestCompletionDrainTimer = undefined;
+    if (shuttingDown) return;
+    void backgroundWork.run(
+      "BACKTEST_AUTOMATION_COMPLETION_DRAIN_FAILED",
+      "ALL",
+      () =>
+        drainBacktestCompletionMarkets(
+          config.ENABLED_MARKETS,
+          (marketId) =>
+            backtestAutomationService.runCycle(marketId, "JOB_COMPLETION"),
+          (fields) => logger.error(fields),
+        ),
+    );
+  }, 30_000);
+};
 const evidenceAutomationService = new EvidenceAutomationService(
   new PostgresEvidenceAutomationRepository(pool),
   repository,
@@ -291,6 +356,10 @@ const worker = new ResearchWorker(
       researchEvidenceStore,
       researchRuntimeIdentityProvider,
     ),
+    SIGNAL_MODEL_RESEARCH: new SignalModelResearchJobHandler(
+      pool,
+      scannerClient,
+    ),
     EXECUTION_DIAGNOSTICS: new ExecutionDiagnosticsJobHandler(
       fundedReportingService,
     ),
@@ -314,22 +383,23 @@ const worker = new ResearchWorker(
     leaseMs: config.RESEARCH_JOB_LEASE_MS,
     pollIntervalMs: config.RESEARCH_JOB_POLL_MS,
     logger,
+    ...(config.RESEARCH_PAUSE_DURING_SESSION
+      ? {
+          claimsPaused: () =>
+            regularSessionOpen(config.ENABLED_MARKETS, new Date()),
+        }
+      : {}),
     // Completion-triggered drain: a settled job re-evaluates the market so
     // waiting capacity work starts immediately and completed parents
     // materialize their follow-on stages without waiting for the daily cycle.
-    onJobSettled: async (job) => {
-      for (const marketId of config.ENABLED_MARKETS) {
-        try {
-          await backtestAutomationService.runCycle(marketId, "JOB_COMPLETION");
-        } catch (error) {
-          logger.error({
-            event: "BACKTEST_AUTOMATION_COMPLETION_DRAIN_FAILED",
-            marketId,
-            jobId: job.id,
-            error: error instanceof Error ? error.message : String(error),
-          });
-        }
-      }
+    onJobSettled: (job) => {
+      if (
+        job.jobType !== "BACKTEST" &&
+        job.jobType !== "COVERAGE_VERIFICATION" &&
+        job.jobType !== "FUNDED_HISTORICAL_REPLAY"
+      )
+        return;
+      scheduleBacktestCompletionDrain();
     },
   },
 );
@@ -337,25 +407,72 @@ const worker = new ResearchWorker(
 worker.start();
 logger.info({ event: "RESEARCH_WORKER_STARTED" });
 
+// Only independently persisted EXECUTE_WHEN_READY grants are considered. This
+// bounded source-readiness scan never promotes PREPARE_ONLY records and creates
+// no authority; dispatch revalidates the exact frozen source before queueing.
+const signalModelResearchControl = new PostgresSignalModelResearchControlStore(
+  pool,
+);
+const checkSignalModelResearchReadiness = () =>
+  backgroundWork.run(
+    "SIGNAL_MODEL_RESEARCH_READINESS_CHECK_FAILED",
+    "ALL",
+    async () => {
+      const dispatched =
+        await signalModelResearchControl.dispatchAuthorizedReady(2);
+      if (dispatched > 0)
+        logger.info({
+          event: "SIGNAL_MODEL_RESEARCH_AUTHORIZED_JOBS_DISPATCHED",
+          count: dispatched,
+        });
+    },
+  );
+void checkSignalModelResearchReadiness();
+const signalModelReadinessTimer = setInterval(
+  () => void checkSignalModelResearchReadiness(),
+  5 * 60_000,
+);
+signalModelReadinessTimer.unref?.();
+
+// Challenger and funded shadow attempts carry prediction deadlines, so these
+// observers poll every tick; an idle backoff could turn a new attempt into
+// MISSED_DEADLINE. The workers' own market guards prevent overlapping passes.
+const runChallengerObservation = (marketId: "CA_TSX" | "US_EQUITIES") =>
+  challengerObservationWorker.runOnce(marketId);
 const challengerObservationTimer = setInterval(() => {
-  for (const marketId of config.ENABLED_MARKETS) {
-    void challengerObservationWorker.runOnce(marketId).catch((error) =>
-      logger.error({
-        event: "CHALLENGER_OBSERVATION_WORKER_FAILED",
-        marketId,
-        error: error instanceof Error ? error.message : String(error),
-      }),
+  for (const marketId of config.ENABLED_MARKETS)
+    void backgroundWork.run(
+      "CHALLENGER_OBSERVATION_WORKER_FAILED",
+      marketId,
+      () => runChallengerObservation(marketId),
     );
-  }
 }, config.RESEARCH_JOB_POLL_MS);
 for (const marketId of config.ENABLED_MARKETS)
-  void challengerObservationWorker.runOnce(marketId).catch((error) =>
-    logger.error({
-      event: "CHALLENGER_OBSERVATION_STARTUP_FAILED",
-      marketId,
-      error: error instanceof Error ? error.message : String(error),
-    }),
+  void backgroundWork.run(
+    "CHALLENGER_OBSERVATION_STARTUP_FAILED",
+    marketId,
+    () => runChallengerObservation(marketId),
   );
+
+const runFundedShadowObservation = (marketId: "CA_TSX" | "US_EQUITIES") =>
+  fundedShadowWorker!.runOnce(marketId);
+const fundedShadowTimer = fundedShadowWorker
+  ? setInterval(() => {
+      for (const marketId of config.ENABLED_MARKETS)
+        void backgroundWork.run(
+          "FUNDED_SHADOW_OBSERVATION_FAILED",
+          marketId,
+          () => runFundedShadowObservation(marketId),
+        );
+    }, config.RESEARCH_JOB_POLL_MS)
+  : null;
+if (fundedShadowWorker)
+  for (const marketId of config.ENABLED_MARKETS)
+    void backgroundWork.run(
+      "FUNDED_SHADOW_OBSERVATION_STARTUP_FAILED",
+      marketId,
+      () => runFundedShadowObservation(marketId),
+    );
 
 const datasetLineageReconciler = new ResearchDatasetLineageReconciler(pool);
 const challengerCoverageAutomation = new ChallengerCoverageAutomation(
@@ -364,74 +481,111 @@ const challengerCoverageAutomation = new ChallengerCoverageAutomation(
   replayPolicies,
 );
 let evidenceCatchUpRunning = false;
+const evidenceCatchUpGate = new IdleBackoffGate();
 const evidenceCatchUp = async () => {
   if (evidenceCatchUpRunning) return;
   evidenceCatchUpRunning = true;
   try {
     for (const marketId of config.ENABLED_MARKETS) {
-      try {
-        const processed = await evidenceAutomationService.catchUp(marketId);
-        if (processed > 0)
-          logger.info({
-            event: "EVIDENCE_AUTOMATION_CATCH_UP",
-            marketId,
-            processed,
-          });
-        try {
-          const diagnostics =
-            await executionDiagnosticAutomation.catchUp(marketId);
-          if (diagnostics > 0)
-            logger.info({
-              event: "EXECUTION_DIAGNOSTICS_AUTOMATION_DISPATCHED",
-              marketId,
-              dispatched: diagnostics,
+      await evidenceCatchUpGate
+        .run(marketId, async () => {
+          let worked = false;
+          let failed = false;
+          try {
+            const processed = await evidenceAutomationService.catchUp(marketId);
+            worked ||= processed > 0;
+            if (processed > 0)
+              logger.info({
+                event: "EVIDENCE_AUTOMATION_CATCH_UP",
+                marketId,
+                processed,
+              });
+            try {
+              const diagnostics =
+                await executionDiagnosticAutomation.catchUp(marketId);
+              worked ||= diagnostics > 0;
+              if (diagnostics > 0)
+                logger.info({
+                  event: "EXECUTION_DIAGNOSTICS_AUTOMATION_DISPATCHED",
+                  marketId,
+                  dispatched: diagnostics,
+                });
+            } catch (error) {
+              failed = true;
+              logger.error({
+                event: "EXECUTION_DIAGNOSTICS_AUTOMATION_FAILED",
+                marketId,
+                error: error instanceof Error ? error.message : String(error),
+              });
+            }
+            try {
+              const reconciled =
+                await datasetLineageReconciler.catchUp(marketId);
+              worked ||= reconciled > 0;
+            } catch (error) {
+              failed = true;
+              logger.error({
+                event: "DATASET_LINEAGE_RECONCILIATION_FAILED",
+                marketId,
+                error: error instanceof Error ? error.message : String(error),
+              });
+            }
+            try {
+              const prepared =
+                await challengerCoverageAutomation.runOnce(marketId);
+              worked ||= prepared > 0;
+            } catch (error) {
+              failed = true;
+              logger.error({
+                event: "CHALLENGER_COVERAGE_PREPARATION_FAILED",
+                marketId,
+                error: error instanceof Error ? error.message : String(error),
+              });
+            }
+            const dispatched =
+              await studyDispatchService.dispatchReady(marketId);
+            worked ||= dispatched > 0;
+            if (dispatched > 0)
+              logger.info({
+                event: "STRATEGY_STUDY_AUTOMATION_DISPATCHED",
+                marketId,
+                dispatched,
+              });
+          } catch (error) {
+            failed = true;
+            logger.error({
+              event: "EVIDENCE_AUTOMATION_CATCH_UP_FAILED",
+              error: error instanceof Error ? error.message : String(error),
             });
-        } catch (error) {
+          }
+          if (failed)
+            throw new Error(`Evidence catch-up failed for ${marketId}`);
+          return worked;
+        })
+        .catch((error) => {
           logger.error({
-            event: "EXECUTION_DIAGNOSTICS_AUTOMATION_FAILED",
+            event: "EVIDENCE_AUTOMATION_MARKET_BACKOFF",
             marketId,
             error: error instanceof Error ? error.message : String(error),
           });
-        }
-        try {
-          await datasetLineageReconciler.catchUp(marketId);
-        } catch (error) {
-          logger.error({
-            event: "DATASET_LINEAGE_RECONCILIATION_FAILED",
-            marketId,
-            error: error instanceof Error ? error.message : String(error),
-          });
-        }
-        try {
-          await challengerCoverageAutomation.runOnce(marketId);
-        } catch (error) {
-          logger.error({
-            event: "CHALLENGER_COVERAGE_PREPARATION_FAILED",
-            marketId,
-            error: error instanceof Error ? error.message : String(error),
-          });
-        }
-        const dispatched = await studyDispatchService.dispatchReady(marketId);
-        if (dispatched > 0)
-          logger.info({
-            event: "STRATEGY_STUDY_AUTOMATION_DISPATCHED",
-            marketId,
-            dispatched,
-          });
-      } catch (error) {
-        logger.error({
-          event: "EVIDENCE_AUTOMATION_CATCH_UP_FAILED",
-          error: error instanceof Error ? error.message : String(error),
         });
-      }
     }
   } finally {
     evidenceCatchUpRunning = false;
   }
 };
-void evidenceCatchUp();
+void backgroundWork.run(
+  "EVIDENCE_AUTOMATION_CATCH_UP_FAILED",
+  undefined,
+  evidenceCatchUp,
+);
 const evidenceCatchUpTimer = setInterval(
-  () => void evidenceCatchUp(),
+  () =>
+    void backgroundWork.run(
+      "EVIDENCE_AUTOMATION_CATCH_UP_FAILED",
+      undefined,
+      evidenceCatchUp,
+    ),
   config.RESEARCH_JOB_POLL_MS,
 );
 
@@ -465,22 +619,29 @@ const backtestAutomationCatchUp = async () => {
     }
   }
 };
+const runBacktestAutomationCatchUp = () =>
+  backgroundWork.run(
+    "BACKTEST_AUTOMATION_CATCH_UP_FAILED",
+    undefined,
+    backtestAutomationCatchUp,
+  );
 const scheduleBacktestAutomation = () => {
   if (backtestAutomationStopped || !config.BACKTEST_AUTOMATION_ENABLED) return;
   const now = new Date();
   const next = nextEasternBoundary(now, "17:00");
   backtestAutomationTimer = setTimeout(() => {
-    void backtestAutomationCatchUp().finally(scheduleBacktestAutomation);
+    void runBacktestAutomationCatchUp().finally(scheduleBacktestAutomation);
   }, next.getTime() - now.getTime());
 };
 if (config.BACKTEST_AUTOMATION_ENABLED) {
-  void backtestAutomationCatchUp().finally(scheduleBacktestAutomation);
+  void runBacktestAutomationCatchUp().finally(scheduleBacktestAutomation);
 }
 
 const paperEvidenceScheduler = new PaperEvidenceTrainingScheduler(
   new PaperEvidenceTrainingService(
     new PostgresPaperEvidenceTrainingStore(pool),
     researchLineageService,
+    new PostgresDatasetPreparationStore(pool),
   ),
   repository,
   undefined,
@@ -534,23 +695,34 @@ if (config.PAPER_MODEL_TRAINING_ENABLED) {
   };
   // Startup catches evidence completed while the worker was unavailable.
   // Chain checks so a slow training qualification cannot overlap another check.
-  void check().finally(scheduleNext);
+  void backgroundWork
+    .run("PAPER_EVIDENCE_TRAINING_CHECK_FAILED", undefined, check)
+    .finally(scheduleNext);
 }
 
-let shuttingDown = false;
 const shutdown = async (signal: string) => {
-  if (shuttingDown) return;
+  if (shuttingDown) {
+    logger.info({ event: "RESEARCH_WORKER_SHUTDOWN_IGNORED", signal });
+    return;
+  }
   shuttingDown = true;
   logger.info({ event: "RESEARCH_WORKER_SHUTDOWN_STARTED", signal });
-  await worker.stop();
+  // Stop every producer first so no new pass can start while the pool closes,
+  // then let the current job finish, then drain in-flight background passes.
+  backgroundWork.close();
+  if (backtestCompletionDrainTimer) clearTimeout(backtestCompletionDrainTimer);
   clearInterval(challengerObservationTimer);
+  clearInterval(signalModelReadinessTimer);
+  if (fundedShadowTimer) clearInterval(fundedShadowTimer);
   clearInterval(evidenceCatchUpTimer);
   backtestAutomationStopped = true;
   if (backtestAutomationTimer) clearTimeout(backtestAutomationTimer);
   learningStopped = true;
   if (paperEvidenceTimer) clearTimeout(paperEvidenceTimer);
+  await worker.stop();
+  await backgroundWork.drain();
   await pool.end();
   process.exit(0);
 };
-process.once("SIGINT", () => void shutdown("SIGINT"));
-process.once("SIGTERM", () => void shutdown("SIGTERM"));
+process.on("SIGINT", () => void shutdown("SIGINT"));
+process.on("SIGTERM", () => void shutdown("SIGTERM"));

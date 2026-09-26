@@ -251,9 +251,28 @@ export class PostgresPaperEvidenceTrainingStore implements PaperEvidenceTraining
   ): Promise<StatisticalTrainingDataset | undefined> {
     const result = await this.pool.query<DatasetRow>(
       `SELECT id,market_id,source_kind,policy_version,cohort,requested_cutoff,effective_cutoff,source_digest,source_row_count,excluded_counts,research_qualification,research_evidence,research_derivation,created_at
-         FROM statistical_training_dataset WHERE market_id=$1 AND cohort=$2::jsonb
+         FROM statistical_training_dataset
+        WHERE market_id=$1
+          AND cohort->>'strategy'=$2
+          AND cohort->>'strategyVersion'=$3
+          AND cohort->>'profileConfigId'=$4
+          AND cohort->>'configVersion'=$5
+          AND cohort->>'executionModelVersion'=$6
+          AND cohort->'assumptions'=$7::jsonb
+          AND COALESCE(cohort->>'signalSemanticsVersion','UNKNOWN')=$8
+          AND COALESCE(cohort->>'replayScope','UNKNOWN')=$9
          ORDER BY created_at DESC LIMIT 1`,
-      [cohort.marketId, JSON.stringify(cohort)],
+      [
+        cohort.marketId,
+        cohort.strategy,
+        cohort.strategyVersion,
+        cohort.profileConfigId,
+        cohort.configVersion,
+        cohort.executionModelVersion,
+        JSON.stringify(cohort.assumptions),
+        cohort.signalSemanticsVersion ?? "UNKNOWN",
+        cohort.replayScope ?? "UNKNOWN",
+      ],
     );
     return result.rows[0] ? mapDataset(result.rows[0]) : undefined;
   }

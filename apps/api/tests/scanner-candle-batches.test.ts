@@ -108,3 +108,29 @@ it("returns scanner-verified incremental warm-up readiness", async () => {
     }),
   );
 });
+
+it("retires candidates by instrument id within their market", async () => {
+  const fetchMock = vi.fn(
+    async () =>
+      new Response(JSON.stringify({ retired: [instrument.id] }), {
+        headers: { "content-type": "application/json" },
+      }),
+  );
+  vi.stubGlobal("fetch", fetchMock);
+  const client = new ScannerFeatureClient(new URL("http://scanner:8000"));
+
+  await expect(client.retireInstruments([instrument])).resolves.toEqual([
+    instrument.id,
+  ]);
+  expect(fetchMock).toHaveBeenCalledWith(
+    expect.objectContaining({ pathname: "/internal/v1/instruments/retire" }),
+    expect.objectContaining({
+      body: JSON.stringify({
+        marketId: "US_EQUITIES",
+        instrumentIds: [instrument.id],
+      }),
+    }),
+  );
+  await expect(client.retireInstruments([])).resolves.toEqual([]);
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+});

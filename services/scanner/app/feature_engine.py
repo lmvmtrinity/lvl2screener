@@ -144,6 +144,33 @@ class FeatureEngine:
         self.ingest_candles(candles)
         return self.warmup_readiness(instrument.instrument_id, as_of)
 
+    def retire_instruments(self, instrument_ids: list[UUID]) -> list[UUID]:
+        """Remove candidates from the live session without resetting the others.
+
+        Unknown ids are ignored so a retried request is harmless; benchmarks are
+        session context and can only change with a new session.
+        """
+        self._require_session()
+        retired = {value for value in instrument_ids if value in self._instruments}
+        if any(self._instruments[value].role == "BENCHMARK" for value in retired):
+            raise ValueError("Benchmark instruments cannot be retired from a live session")
+        if not retired:
+            return []
+        for value in retired:
+            del self._instruments[value]
+            self._candidate_ids.discard(value)
+            self._candle_series.pop(value, None)
+            self._historical_one_minute.pop(value, None)
+            self._quotes.pop(value, None)
+            self._snapshots.pop(value, None)
+            self._benchmark_unavailable_reasons.pop(value, None)
+            self._feature_cache.pop(value, None)
+            self._context_cache.pop(value, None)
+        for key in [key for key in self._candles if key[0] in retired]:
+            del self._candles[key]
+        self.strategies.forget(retired)
+        return sorted(retired, key=str)
+
     def warmup_readiness(self, instrument_id: UUID, as_of: datetime | None = None) -> InstrumentWarmupReadiness:
         """Report the independent data gates required before strategy readiness."""
         session = self._require_session()

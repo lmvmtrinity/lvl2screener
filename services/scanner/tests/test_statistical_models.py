@@ -1,8 +1,10 @@
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
-from app.models import BacktestTrade, StatisticalPredictionInput, StatisticalTrainingRequest
-from app.statistical_models import MARKET_TIMEZONES, predict, train
+import pytest
+
+from app.models import BacktestTrade, StatisticalPredictionInput, StatisticalTrainingRequest, SignalModelResearchTrainingRequest
+from app.statistical_models import MARKET_TIMEZONES, predict, train, train_signal_model_research
 
 
 RUN_ID = UUID("10000000-0000-4000-8000-000000000001")
@@ -54,6 +56,34 @@ def test_model_refuses_to_train_below_the_clean_sample_floor() -> None:
     assert result.artifact is None
     assert not result.eligible_for_activation
     assert result.warnings
+
+
+def test_capture_minimal_training_rows_are_research_only_and_not_activation_eligible() -> None:
+    rows = [
+        {
+            "sourceKey": f"capture-{index}",
+            "strategy": "ORB_RETEST",
+            "entryTime": datetime(2026, 1, 2, 15, tzinfo=UTC) + timedelta(days=index),
+            "score": 88 if index % 4 else 58,
+            "atrPct": 3 if index % 4 else 1.6,
+            "rvolAtTime": 2.8 if index % 4 else 1.2,
+            "rMultiple": 2 if index % 4 else -1,
+        }
+        for index in range(30)
+    ]
+    request = SignalModelResearchTrainingRequest(
+        sourceKind="CAPTURED_BACKTEST_RESEARCH", marketId="CA_TSX",
+        strategy="ORB_RETEST", trainingRows=rows, minimumSamples=20, l2Penalty=0.1,
+    )
+    result = train_signal_model_research(request)
+    assert result.status == "COMPLETED"
+    assert result.artifact is not None
+    assert result.test is None
+    assert result.eligible_for_activation is False
+    assert "INACTIVE_RESEARCH_ONLY" in result.warnings
+
+    with pytest.raises(Exception):
+        StatisticalTrainingRequest(strategy="ORB_RETEST", trades=rows, minimumSamples=20)
 
 
 def test_explicit_frozen_partition_wins_over_row_percentage() -> None:

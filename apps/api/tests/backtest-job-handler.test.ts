@@ -236,6 +236,7 @@ describe("BacktestJobHandler (W8 chunked session-cursor execution)", () => {
       run.id,
       expect.objectContaining({ trades: [], timeline: [] }),
       expect.anything(),
+      [],
     );
     expect(store.markRunning).toHaveBeenCalledWith(run.id);
   });
@@ -382,6 +383,7 @@ describe("BacktestJobHandler (W8 chunked session-cursor execution)", () => {
         }),
       }),
       expect.anything(),
+      [],
     );
   });
 
@@ -547,9 +549,11 @@ describe("BacktestJobHandler (W8 chunked session-cursor execution)", () => {
       BacktestReplayResult,
       unknown,
     ];
+    // Unverified coverage yields a diagnostic excursion that is never AVAILABLE.
     expect(output.trades[0]?.sampledExcursion).toMatchObject({
-      status: "UNAVAILABLE",
+      status: "INDICATIVE",
     });
+    expect(output.trades[0]?.sampledExcursion?.favorablePct).not.toBeNull();
     expect(output.trades[0]?.sampledExcursion?.reasonCodes).toContain(
       "COVERAGE_UNVERIFIED",
     );
